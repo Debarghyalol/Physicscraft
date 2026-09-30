@@ -2,7 +2,50 @@ export type BlockShape = 'cube' | 'plank' | 'domino' | 'cylinder' | 'sphere' | '
 
 export type BlockMaterial = 'wood' | 'stone' | 'rubber' | 'ice' | 'metal' | 'tnt';
 
-export type ActiveTool = 'interact' | 'cannon' | 'spawn' | 'explode' | 'vortex' | 'mine' | 'build';
+export type ActiveTool =
+  | 'interact'
+  | 'cannon'
+  | 'spawn'
+  | 'explode'
+  | 'vortex'
+  | 'mine'
+  | 'build'
+  | 'physics_maker';
+
+export type JointType = 'revolute' | 'distance' | 'fixed' | 'spring' | 'prismatic';
+
+export interface ContraptionBlockInfo {
+  relX: number;
+  relY: number;
+  relZ: number;
+  type: VoxelType;
+}
+
+export interface PhysicsContraption {
+  id: string;
+  body: any; // RAPIER.RigidBody
+  colliders: any[]; // RAPIER.Collider[]
+  group: any; // THREE.Group
+  blocks: ContraptionBlockInfo[];
+  centerOfMass: { x: number; y: number; z: number };
+  mass: number;
+}
+
+export interface PhysicsJointInfo {
+  id: string;
+  type: JointType;
+  joint: any; // RAPIER.ImpulseJoint
+  bodyAId: string;
+  bodyBId: string;
+  anchorA: { x: number; y: number; z: number };
+  anchorB: { x: number; y: number; z: number };
+  visualMesh?: any;
+}
+
+export interface PhysicsMakerSelection {
+  cornerA: { x: number; y: number; z: number } | null;
+  cornerB: { x: number; y: number; z: number } | null;
+}
 
 export type CameraViewMode = 'first_person' | 'third_person' | 'orbit';
 
@@ -21,7 +64,17 @@ export enum VoxelType {
   GOLD = 11,
 }
 
-export type StructurePreset = 'jenga' | 'dominoes' | 'castle' | 'pyramid' | 'cradle' | 'softbody' | 'empty';
+export type StructurePreset =
+  | 'jenga'
+  | 'dominoes'
+  | 'castle'
+  | 'pyramid'
+  | 'cradle'
+  | 'softbody'
+  | 'contraption'
+  | 'articulated_arm'
+  | 'bridge'
+  | 'empty';
 
 export type VisualTheme = 'realistic' | 'candy' | 'ceramic' | 'neon';
 

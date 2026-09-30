@@ -1,1 +1,133 @@
 @import "tailwindcss";
+
+/* Authentic Minecraft Java & MCPE UI Styling */
+@layer utilities {
+  /* Repeating dirt background for Minecraft Java menus */
+  .mc-dirt-bg {
+    background-image: url('/textures/gui/options_background.png');
+    background-repeat: repeat;
+    background-size: 64px 64px;
+    image-rendering: pixelated;
+  }
+
+  /* Minecraft Java Edition Button */
+  .mc-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Minecraft', 'Courier New', ui-monospace, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #e0e0e0;
+    text-shadow: 2px 2px 0px #2a2a2a;
+    background-color: #6c6c6c;
+    border-top: 2px solid #a8a8a8;
+    border-left: 2px solid #a8a8a8;
+    border-bottom: 2px solid #202020;
+    border-right: 2px solid #202020;
+    box-shadow: inset -2px -2px #484848, inset 2px 2px #888888;
+    cursor: pointer;
+    user-select: none;
+    image-rendering: pixelated;
+    transition: none;
+  }
+
+  .mc-button:hover:not(:disabled) {
+    background-color: #7b8ab8;
+    border-top: 2px solid #b8c6ea;
+    border-left: 2px solid #b8c6ea;
+    border-bottom: 2px solid #364264;
+    border-right: 2px solid #364264;
+    box-shadow: inset -2px -2px #505c84, inset 2px 2px #98a8d4;
+    color: #ffffa0;
+    text-shadow: 2px 2px 0px #303010;
+  }
+
+  .mc-button:active:not(:disabled) {
+    background-color: #484848;
+    border-top: 2px solid #202020;
+    border-left: 2px solid #202020;
+    border-bottom: 2px solid #a8a8a8;
+    border-right: 2px solid #a8a8a8;
+    box-shadow: inset 2px 2px #282828;
+    transform: translateY(1px);
+  }
+
+  .mc-button:disabled {
+    background-color: #4a4a4a;
+    border-top: 2px solid #6c6c6c;
+    border-left: 2px solid #6c6c6c;
+    border-bottom: 2px solid #222222;
+    border-right: 2px solid #222222;
+    box-shadow: inset -2px -2px #323232, inset 2px 2px #5a5a5a;
+    color: #888888;
+    text-shadow: 2px 2px 0px #181818;
+    cursor: not-allowed;
+  }
+
+  /* Minecraft Panel & Submenu Box */
+  .mc-panel {
+    background-color: rgba(0, 0, 0, 0.75);
+    border: 2px solid #282828;
+    box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.85);
+  }
+
+  /* MCPE Mobile D-Pad Button */
+  .mcpe-dpad-btn {
+    background-color: rgba(30, 30, 30, 0.65);
+    border-top: 2px solid rgba(255, 255, 255, 0.4);
+    border-left: 2px solid rgba(255, 255, 255, 0.4);
+    border-bottom: 2px solid rgba(0, 0, 0, 0.7);
+    border-right: 2px solid rgba(0, 0, 0, 0.7);
+    box-shadow: inset 1px 1px rgba(255, 255, 255, 0.2);
+    user-select: none;
+    touch-action: none;
+  }
+
+  .mcpe-dpad-btn:active, .mcpe-dpad-btn.active {
+    background-color: rgba(15, 15, 15, 0.85);
+    border-top: 2px solid rgba(0, 0, 0, 0.8);
+    border-left: 2px solid rgba(0, 0, 0, 0.8);
+    border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+    border-right: 2px solid rgba(255, 255, 255, 0.3);
+    transform: translateY(1px);
+  }
+
+  /* MCPE Mobile Jump Button */
+  .mcpe-action-btn {
+    background-color: rgba(30, 30, 30, 0.65);
+    border-top: 2px solid rgba(255, 255, 255, 0.4);
+    border-left: 2px solid rgba(255, 255, 255, 0.4);
+    border-bottom: 2px solid rgba(0, 0, 0, 0.75);
+    border-right: 2px solid rgba(0, 0, 0, 0.75);
+    box-shadow: inset 1px 1px rgba(255, 255, 255, 0.2), 0 4px 12px rgba(0, 0, 0, 0.4);
+    user-select: none;
+    touch-action: none;
+  }
+
+  .mcpe-action-btn:active, .mcpe-action-btn.active {
+    background-color: rgba(10, 10, 10, 0.85);
+    border-top: 2px solid rgba(0, 0, 0, 0.8);
+    border-left: 2px solid rgba(0, 0, 0, 0.8);
+    border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+    border-right: 2px solid rgba(255, 255, 255, 0.3);
+    transform: translateY(1px);
+  }
+
+  /* Minecraft Yellow Splash Text Pulse */
+  @keyframes mc-splash-bounce {
+    0%, 100% {
+      transform: rotate(-18deg) scale(1.0);
+    }
+    50% {
+      transform: rotate(-18deg) scale(1.06);
+    }
+  }
+
+  .mc-splash {
+    animation: mc-splash-bounce 1.6s ease-in-out infinite;
+    text-shadow: 2px 2px 0px #3f3f00;
+  }
+}

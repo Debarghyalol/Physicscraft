@@ -1,292 +1,264 @@
 import * as THREE from 'three';
 
 /**
- * Authentic Minecraft Steve Humanoid Player Model
- * Head with face texture, blue t-shirt torso, jeans legs, and swinging arms with held tool.
+ * Helper to compute authentic Minecraft 64x64 skin UV coordinates
+ * Exact formula from Minecraft Java Edition / skinview3d
+ */
+function setSkinUVs(
+  box: THREE.BoxGeometry,
+  u: number,
+  v: number,
+  width: number,
+  height: number,
+  depth: number
+) {
+  const textureWidth = 64;
+  const textureHeight = 64;
+  const toFaceVertices = (x1: number, y1: number, x2: number, y2: number) => [
+    new THREE.Vector2(x1 / textureWidth, 1.0 - y2 / textureHeight),
+    new THREE.Vector2(x2 / textureWidth, 1.0 - y2 / textureHeight),
+    new THREE.Vector2(x2 / textureWidth, 1.0 - y1 / textureHeight),
+    new THREE.Vector2(x1 / textureWidth, 1.0 - y1 / textureHeight),
+  ];
+
+  const top = toFaceVertices(u + depth, v, u + width + depth, v + depth);
+  const bottom = toFaceVertices(u + width + depth, v, u + width * 2 + depth, v + depth);
+  const left = toFaceVertices(u, v + depth, u + depth, v + depth + height);
+  const front = toFaceVertices(u + depth, v + depth, u + width + depth, v + depth + height);
+  const right = toFaceVertices(u + width + depth, v + depth, u + width + depth * 2, v + height + depth);
+  const back = toFaceVertices(u + width + depth * 2, v + depth, u + width * 2 + depth * 2, v + height + depth);
+
+  const uvAttr = box.attributes.uv;
+  const uvRight = [right[3], right[2], right[0], right[1]];
+  const uvLeft = [left[3], left[2], left[0], left[1]];
+  const uvTop = [top[3], top[2], top[0], top[1]];
+  const uvBottom = [bottom[0], bottom[1], bottom[3], bottom[2]];
+  const uvFront = [front[3], front[2], front[0], front[1]];
+  const uvBack = [back[3], back[2], back[0], back[1]];
+
+  const newUVData: number[] = [];
+  for (const uvArray of [uvRight, uvLeft, uvTop, uvBottom, uvFront, uvBack]) {
+    for (const uv of uvArray) {
+      newUVData.push(uv.x, uv.y);
+    }
+  }
+  (uvAttr as THREE.BufferAttribute).set(new Float32Array(newUVData));
+  uvAttr.needsUpdate = true;
+}
+
+/**
+ * Authentic Native Minecraft Steve Player Model (Built directly with Three.js 0.186)
+ * - Dual layer (Layer 1 Skin + Layer 2 3D Outer Jacket/Hat/Sleeves/Pants)
+ * - Exact connected joints: shoulders at y=1.5, hips at y=0.75, neck at y=1.5
+ * - Zero gaps between torso, head, arms, and legs
+ * - 100% native Three.js 0.186 classes (eliminates foreign prototype / culling errors)
  */
 export class PlayerModel {
   public root: THREE.Group;
-  public head: THREE.Group;
-  public torso: THREE.Mesh;
-  public leftArm: THREE.Group;
-  public rightArm: THREE.Group;
-  public leftLeg: THREE.Group;
-  public rightLeg: THREE.Group;
+  public headGroup: THREE.Group;
+  public torsoGroup: THREE.Group;
+  public leftArmGroup: THREE.Group;
+  public rightArmGroup: THREE.Group;
+  public leftLegGroup: THREE.Group;
+  public rightLegGroup: THREE.Group;
   public heldItem: THREE.Group;
 
-  private materials: THREE.Material[] = [];
-  private textures: THREE.Texture[] = [];
+  private skinTexture: THREE.Texture;
+  private layer1Material: THREE.MeshBasicMaterial;
+  private layer2Material: THREE.MeshBasicMaterial;
+
   public walkCycle: number = 0;
   public swingAnimation: number = 0;
+  public isFirstPerson: boolean = false;
 
   constructor(scene: THREE.Scene) {
     this.root = new THREE.Group();
 
-    // 1. Create Procedural Pixel-Art Textures for Steve
-    const faceTex = this.createFaceTexture();
-    const shirtTex = this.createShirtTexture();
-    const skinTex = this.createSkinTexture();
-    const pantsTex = this.createPantsTexture();
+    // 1. Load authentic Minecraft Steve skin texture
+    const textureLoader = new THREE.TextureLoader();
+    this.skinTexture = textureLoader.load('/textures/entity/steve.png');
+    this.skinTexture.magFilter = THREE.NearestFilter;
+    this.skinTexture.minFilter = THREE.NearestFilter;
+    this.skinTexture.generateMipmaps = false;
 
-    const skinMat = new THREE.MeshStandardMaterial({ map: skinTex, roughness: 0.8 });
-    const shirtMat = new THREE.MeshStandardMaterial({ map: shirtTex, roughness: 0.85 });
-    const pantsMat = new THREE.MeshStandardMaterial({ map: pantsTex, roughness: 0.9 });
-    this.materials.push(skinMat, shirtMat, pantsMat);
+    // Layer 1: Solid base skin
+    this.layer1Material = new THREE.MeshBasicMaterial({
+      map: this.skinTexture,
+      side: THREE.FrontSide,
+    });
 
-    // 2. Torso (0.5m wide, 0.75m high, 0.25m deep)
-    const torsoGeo = new THREE.BoxGeometry(0.5, 0.75, 0.25);
-    this.torso = new THREE.Mesh(torsoGeo, shirtMat);
-    this.torso.position.y = 1.05;
-    this.torso.castShadow = true;
-    this.torso.receiveShadow = true;
-    this.root.add(this.torso);
+    // Layer 2: 3D Outer layer (jacket, sleeves, hat, pants) with transparency
+    this.layer2Material = new THREE.MeshBasicMaterial({
+      map: this.skinTexture,
+      side: THREE.DoubleSide,
+      transparent: true,
+      alphaTest: 0.1,
+    });
 
-    // 3. Head (0.45m cube) with Steve face
-    this.head = new THREE.Group();
-    this.head.position.y = 1.55;
+    const px = 0.0625; // 1 pixel = 1/16 meter = 0.0625m
 
-    const headGeo = new THREE.BoxGeometry(0.44, 0.44, 0.44);
-    // Box face materials: [Right, Left, Top, Bottom, Front, Back]
-    const headMats = [
-      skinMat, // Right
-      skinMat, // Left
-      new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.8 }), // Top hair
-      skinMat, // Bottom
-      new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.8 }), // Front face
-      new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.8 }), // Back hair
-    ];
-    this.materials.push(...headMats);
+    // 2. Torso / Body (8 x 12 x 4 px = 0.5 x 0.75 x 0.25 m)
+    // Sits directly from y = 0.75 to y = 1.50
+    this.torsoGroup = new THREE.Group();
+    this.torsoGroup.position.set(0, 1.125, 0);
 
-    const headMesh = new THREE.Mesh(headGeo, headMats);
-    headMesh.position.y = 0.22;
-    headMesh.castShadow = true;
-    this.head.add(headMesh);
-    this.root.add(this.head);
+    const torsoGeo1 = new THREE.BoxGeometry(8 * px, 12 * px, 4 * px);
+    setSkinUVs(torsoGeo1, 16, 16, 8, 12, 4);
+    const torsoMesh1 = new THREE.Mesh(torsoGeo1, this.layer1Material);
+    this.torsoGroup.add(torsoMesh1);
 
-    // 4. Arms (Pivoting at shoulders at y=1.35)
-    // Left Arm
-    this.leftArm = new THREE.Group();
-    this.leftArm.position.set(-0.38, 1.35, 0);
-    const armGeo = new THREE.BoxGeometry(0.22, 0.72, 0.22);
-    armGeo.translate(0, -0.32, 0); // pivot at shoulder top
+    const torsoGeo2 = new THREE.BoxGeometry(8.5 * px, 12.5 * px, 4.5 * px);
+    setSkinUVs(torsoGeo2, 16, 32, 8, 12, 4);
+    const torsoMesh2 = new THREE.Mesh(torsoGeo2, this.layer2Material);
+    this.torsoGroup.add(torsoMesh2);
 
-    const leftArmMesh = new THREE.Mesh(armGeo, skinMat);
-    leftArmMesh.castShadow = true;
-    this.leftArm.add(leftArmMesh);
-    this.root.add(this.leftArm);
+    this.root.add(this.torsoGroup);
 
-    // Right Arm (holds tool/block)
-    this.rightArm = new THREE.Group();
-    this.rightArm.position.set(0.38, 1.35, 0);
+    // 3. Head (8 x 8 x 8 px = 0.5 x 0.5 x 0.5 m)
+    // Neck pivot at y = 1.50; head extends upwards from y = 1.50 to y = 2.00
+    this.headGroup = new THREE.Group();
+    this.headGroup.position.set(0, 1.5, 0);
 
-    const rightArmMesh = new THREE.Mesh(armGeo, skinMat);
-    rightArmMesh.castShadow = true;
-    this.rightArm.add(rightArmMesh);
+    const headGeo1 = new THREE.BoxGeometry(8 * px, 8 * px, 8 * px);
+    headGeo1.translate(0, 4 * px, 0); // shift center so bottom touches neck at y = 0
+    setSkinUVs(headGeo1, 0, 0, 8, 8, 8);
+    const headMesh1 = new THREE.Mesh(headGeo1, this.layer1Material);
+    this.headGroup.add(headMesh1);
 
-    // Held Pickaxe / Item in Right Hand
-    this.heldItem = this.createPickaxeModel();
-    this.heldItem.position.set(0, -0.65, 0.15);
+    const headGeo2 = new THREE.BoxGeometry(9 * px, 9 * px, 9 * px);
+    headGeo2.translate(0, 4 * px, 0);
+    setSkinUVs(headGeo2, 32, 0, 8, 8, 8);
+    const headMesh2 = new THREE.Mesh(headGeo2, this.layer2Material);
+    this.headGroup.add(headMesh2);
+
+    this.root.add(this.headGroup);
+
+    // 4. Right Arm (4 x 12 x 4 px = 0.25 x 0.75 x 0.25 m)
+    // Shoulder pivot at (0.375, 1.5, 0), perfectly flush against torso right side
+    this.rightArmGroup = new THREE.Group();
+    this.rightArmGroup.position.set(0.375, 1.5, 0);
+
+    const rightArmGeo1 = new THREE.BoxGeometry(4 * px, 12 * px, 4 * px);
+    rightArmGeo1.translate(0, -6 * px, 0); // pivot at shoulder top
+    setSkinUVs(rightArmGeo1, 40, 16, 4, 12, 4);
+    const rightArmMesh1 = new THREE.Mesh(rightArmGeo1, this.layer1Material);
+    this.rightArmGroup.add(rightArmMesh1);
+
+    const rightArmGeo2 = new THREE.BoxGeometry(4.5 * px, 12.5 * px, 4.5 * px);
+    rightArmGeo2.translate(0, -6 * px, 0);
+    setSkinUVs(rightArmGeo2, 40, 32, 4, 12, 4);
+    const rightArmMesh2 = new THREE.Mesh(rightArmGeo2, this.layer2Material);
+    this.rightArmGroup.add(rightArmMesh2);
+
+    // Held iron pickaxe
+    this.heldItem = this.createHeldPickaxe();
+    this.heldItem.position.set(0, -10 * px, 3 * px);
     this.heldItem.rotation.set(Math.PI / 4, 0, 0);
-    this.rightArm.add(this.heldItem);
-    this.root.add(this.rightArm);
+    this.rightArmGroup.add(this.heldItem);
 
-    // 5. Legs (Pivoting at hips at y=0.7)
-    const legGeo = new THREE.BoxGeometry(0.24, 0.72, 0.24);
-    legGeo.translate(0, -0.36, 0); // pivot at hip top
+    this.root.add(this.rightArmGroup);
 
-    // Left Leg
-    this.leftLeg = new THREE.Group();
-    this.leftLeg.position.set(-0.13, 0.7, 0);
-    const leftLegMesh = new THREE.Mesh(legGeo, pantsMat);
-    leftLegMesh.castShadow = true;
-    this.leftLeg.add(leftLegMesh);
-    this.root.add(this.leftLeg);
+    // 5. Left Arm (4 x 12 x 4 px = 0.25 x 0.75 x 0.25 m)
+    // Shoulder pivot at (-0.375, 1.5, 0), perfectly flush against torso left side
+    this.leftArmGroup = new THREE.Group();
+    this.leftArmGroup.position.set(-0.375, 1.5, 0);
 
-    // Right Leg
-    this.rightLeg = new THREE.Group();
-    this.rightLeg.position.set(0.13, 0.7, 0);
-    const rightLegMesh = new THREE.Mesh(legGeo, pantsMat);
-    rightLegMesh.castShadow = true;
-    this.rightLeg.add(rightLegMesh);
-    this.root.add(this.rightLeg);
+    const leftArmGeo1 = new THREE.BoxGeometry(4 * px, 12 * px, 4 * px);
+    leftArmGeo1.translate(0, -6 * px, 0);
+    setSkinUVs(leftArmGeo1, 32, 48, 4, 12, 4);
+    const leftArmMesh1 = new THREE.Mesh(leftArmGeo1, this.layer1Material);
+    this.leftArmGroup.add(leftArmMesh1);
+
+    const leftArmGeo2 = new THREE.BoxGeometry(4.5 * px, 12.5 * px, 4.5 * px);
+    leftArmGeo2.translate(0, -6 * px, 0);
+    setSkinUVs(leftArmGeo2, 48, 48, 4, 12, 4);
+    const leftArmMesh2 = new THREE.Mesh(leftArmGeo2, this.layer2Material);
+    this.leftArmGroup.add(leftArmMesh2);
+
+    this.root.add(this.leftArmGroup);
+
+    // 6. Right Leg (4 x 12 x 4 px = 0.25 x 0.75 x 0.25 m)
+    // Hip pivot at (0.125, 0.75, 0), flush under right half of torso
+    this.rightLegGroup = new THREE.Group();
+    this.rightLegGroup.position.set(0.125, 0.75, 0);
+
+    const rightLegGeo1 = new THREE.BoxGeometry(4 * px, 12 * px, 4 * px);
+    rightLegGeo1.translate(0, -6 * px, 0);
+    setSkinUVs(rightLegGeo1, 0, 16, 4, 12, 4);
+    const rightLegMesh1 = new THREE.Mesh(rightLegGeo1, this.layer1Material);
+    this.rightLegGroup.add(rightLegMesh1);
+
+    const rightLegGeo2 = new THREE.BoxGeometry(4.5 * px, 12.5 * px, 4.5 * px);
+    rightLegGeo2.translate(0, -6 * px, 0);
+    setSkinUVs(rightLegGeo2, 0, 32, 4, 12, 4);
+    const rightLegMesh2 = new THREE.Mesh(rightLegGeo2, this.layer2Material);
+    this.rightLegGroup.add(rightLegMesh2);
+
+    this.root.add(this.rightLegGroup);
+
+    // 7. Left Leg (4 x 12 x 4 px = 0.25 x 0.75 x 0.25 m)
+    // Hip pivot at (-0.125, 0.75, 0), flush under left half of torso
+    this.leftLegGroup = new THREE.Group();
+    this.leftLegGroup.position.set(-0.125, 0.75, 0);
+
+    const leftLegGeo1 = new THREE.BoxGeometry(4 * px, 12 * px, 4 * px);
+    leftLegGeo1.translate(0, -6 * px, 0);
+    setSkinUVs(leftLegGeo1, 16, 48, 4, 12, 4);
+    const leftLegMesh1 = new THREE.Mesh(leftLegGeo1, this.layer1Material);
+    this.leftLegGroup.add(leftLegMesh1);
+
+    const leftLegGeo2 = new THREE.BoxGeometry(4.5 * px, 12.5 * px, 4.5 * px);
+    leftLegGeo2.translate(0, -6 * px, 0);
+    setSkinUVs(leftLegGeo2, 0, 48, 4, 12, 4);
+    const leftLegMesh2 = new THREE.Mesh(leftLegGeo2, this.layer2Material);
+    this.leftLegGroup.add(leftLegMesh2);
+
+    this.root.add(this.leftLegGroup);
 
     scene.add(this.root);
   }
 
-  private createFaceTexture(): THREE.CanvasTexture {
-    const c = document.createElement('canvas');
-    c.width = 16;
-    c.height = 16;
-    const ctx = c.getContext('2d')!;
-
-    // Skin tone base
-    ctx.fillStyle = '#c48f6c';
-    ctx.fillRect(0, 0, 16, 16);
-
-    // Brown hair top fringe
-    ctx.fillStyle = '#4a321e';
-    ctx.fillRect(0, 0, 16, 4);
-    ctx.fillRect(0, 4, 3, 3);
-    ctx.fillRect(13, 4, 3, 3);
-
-    // Eyes
-    // Left eye (white + indigo blue)
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(3, 7, 3, 2);
-    ctx.fillStyle = '#3a4b9c';
-    ctx.fillRect(4, 7, 2, 2);
-
-    // Right eye
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(10, 7, 3, 2);
-    ctx.fillStyle = '#3a4b9c';
-    ctx.fillRect(10, 7, 2, 2);
-
-    // Nose
-    ctx.fillStyle = '#a66d48';
-    ctx.fillRect(7, 9, 2, 2);
-
-    // Beard / Mouth
-    ctx.fillStyle = '#5c381c';
-    ctx.fillRect(5, 12, 6, 2);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
-    this.textures.push(tex);
-    return tex;
-  }
-
-  private createShirtTexture(): THREE.CanvasTexture {
-    const c = document.createElement('canvas');
-    c.width = 16;
-    c.height = 16;
-    const ctx = c.getContext('2d')!;
-
-    // Steve Cyan/Teal shirt
-    ctx.fillStyle = '#00a8a8';
-    ctx.fillRect(0, 0, 16, 16);
-
-    // Pixel shading
-    for (let x = 0; x < 16; x++) {
-      for (let y = 0; y < 16; y++) {
-        if ((x + y * 3) % 4 === 0) {
-          ctx.fillStyle = '#008b8b';
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-
-    // Collar V-neck
-    ctx.fillStyle = '#c48f6c';
-    ctx.fillRect(6, 0, 4, 3);
-    ctx.fillRect(7, 3, 2, 2);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
-    this.textures.push(tex);
-    return tex;
-  }
-
-  private createSkinTexture(): THREE.CanvasTexture {
-    const c = document.createElement('canvas');
-    c.width = 16;
-    c.height = 16;
-    const ctx = c.getContext('2d')!;
-
-    ctx.fillStyle = '#c48f6c';
-    ctx.fillRect(0, 0, 16, 16);
-
-    // Pixel variance
-    for (let x = 0; x < 16; x++) {
-      for (let y = 0; y < 16; y++) {
-        if ((x * 5 + y) % 3 === 0) {
-          ctx.fillStyle = '#b77f5c';
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
-    this.textures.push(tex);
-    return tex;
-  }
-
-  private createPantsTexture(): THREE.CanvasTexture {
-    const c = document.createElement('canvas');
-    c.width = 16;
-    c.height = 16;
-    const ctx = c.getContext('2d')!;
-
-    // Blue denim jeans
-    ctx.fillStyle = '#2b3f8e';
-    ctx.fillRect(0, 0, 16, 16);
-
-    for (let x = 0; x < 16; x++) {
-      for (let y = 0; y < 16; y++) {
-        if ((x + y) % 4 === 0) {
-          ctx.fillStyle = '#213175';
-          ctx.fillRect(x, y, 1, 1);
-        }
-      }
-    }
-
-    // Gray boots bottom
-    ctx.fillStyle = '#6b6b6b';
-    ctx.fillRect(0, 13, 16, 3);
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
-    this.textures.push(tex);
-    return tex;
-  }
-
-  private createPickaxeModel(): THREE.Group {
+  private createHeldPickaxe(): THREE.Group {
     const group = new THREE.Group();
 
     // Wooden handle
     const handleGeo = new THREE.BoxGeometry(0.06, 0.65, 0.06);
-    const handleMat = new THREE.MeshStandardMaterial({ color: 0x6e4a28, roughness: 0.9 });
+    const handleMat = new THREE.MeshBasicMaterial({ color: 0x8b5a2b });
     const handle = new THREE.Mesh(handleGeo, handleMat);
     handle.position.y = 0.25;
     group.add(handle);
 
     // Iron pickaxe head
-    const headGeo = new THREE.BoxGeometry(0.48, 0.1, 0.08);
-    const headMat = new THREE.MeshStandardMaterial({
-      color: 0xcccccc,
-      metalness: 0.7,
-      roughness: 0.3,
-    });
+    const headGeo = new THREE.BoxGeometry(0.44, 0.09, 0.08);
+    const headMat = new THREE.MeshBasicMaterial({ color: 0xd8d8d8 });
     const head = new THREE.Mesh(headGeo, headMat);
-    head.position.y = 0.55;
+    head.position.y = 0.54;
     group.add(head);
 
-    this.materials.push(handleMat, headMat);
     return group;
   }
 
   /**
-   * Set visibility mode (in 1st person, full body is hidden or only hand is visible)
+   * Set first-person vs third-person mode
    */
   public setFirstPersonMode(isFirstPerson: boolean) {
-    this.head.visible = !isFirstPerson;
-    this.torso.visible = !isFirstPerson;
-    this.leftArm.visible = !isFirstPerson;
-    this.leftLeg.visible = !isFirstPerson;
-    this.rightLeg.visible = !isFirstPerson;
+    this.isFirstPerson = isFirstPerson;
+
+    // In first person: hide head, body, left arm, legs to prevent camera clipping
+    this.headGroup.visible = !isFirstPerson;
+    this.torsoGroup.visible = !isFirstPerson;
+    this.leftArmGroup.visible = !isFirstPerson;
+    this.leftLegGroup.visible = !isFirstPerson;
+    this.rightLegGroup.visible = !isFirstPerson;
 
     if (isFirstPerson) {
-      // In 1st person, adjust right arm position to look like classic Minecraft hand
-      this.rightArm.position.set(0.35, 1.45, -0.4);
-      this.rightArm.rotation.set(-Math.PI / 6, Math.PI / 8, 0);
+      // Classic Minecraft 1st person hand view
+      this.rightArmGroup.position.set(0.32, 1.42, -0.42);
+      this.rightArmGroup.rotation.set(-Math.PI / 6, Math.PI / 8, 0);
     } else {
-      this.rightArm.position.set(0.38, 1.35, 0);
-      this.rightArm.rotation.set(0, 0, 0);
+      // Third person: connect shoulder joint
+      this.rightArmGroup.position.set(0.375, 1.5, 0);
+      this.rightArmGroup.rotation.set(0, 0, 0);
     }
   }
 
@@ -301,30 +273,58 @@ export class PlayerModel {
     // Body orientation
     this.root.rotation.y = yaw;
 
-    // Head pitch look up/down
-    this.head.rotation.x = Math.max(-1.2, Math.min(1.2, pitch));
+    if (this.isFirstPerson) {
+      // First person mining swing
+      if (this.swingAnimation > 0) {
+        this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.5);
+        const swingT = Math.sin(this.swingAnimation * Math.PI);
+        this.rightArmGroup.rotation.x = -Math.PI / 6 - 0.7 * swingT;
+        this.rightArmGroup.rotation.y = Math.PI / 8 + 0.4 * swingT;
+      }
+      return;
+    }
 
+    // Third-person head pitch look up/down
+    this.headGroup.rotation.x = Math.max(-1.1, Math.min(1.1, pitch));
+
+    // Walk limb swing animation
     if (speed > 0.1 && isGrounded) {
-      this.walkCycle += delta * speed * 4.5;
-      const legAngle = Math.sin(this.walkCycle) * 0.65;
-      const armAngle = Math.sin(this.walkCycle) * 0.65;
+      this.walkCycle += delta * speed * 4.2;
+      const legAngle = Math.sin(this.walkCycle) * 0.7;
+      const armAngle = Math.sin(this.walkCycle) * 0.7;
 
-      this.leftLeg.rotation.x = legAngle;
-      this.rightLeg.rotation.x = -legAngle;
-      this.leftArm.rotation.x = -armAngle;
+      this.leftLegGroup.rotation.x = legAngle;
+      this.rightLegGroup.rotation.x = -legAngle;
+      this.leftArmGroup.rotation.x = -armAngle;
 
       if (this.swingAnimation <= 0) {
-        this.rightArm.rotation.x = armAngle;
+        this.rightArmGroup.rotation.x = armAngle;
       }
     } else {
-      // Smooth return to rest stance
+      // Return to rest stance
       this.walkCycle = 0;
-      this.leftLeg.rotation.x = THREE.MathUtils.lerp(this.leftLeg.rotation.x, 0, delta * 8);
-      this.rightLeg.rotation.x = THREE.MathUtils.lerp(this.rightLeg.rotation.x, 0, delta * 8);
-      this.leftArm.rotation.x = THREE.MathUtils.lerp(this.leftArm.rotation.x, 0, delta * 8);
+      this.leftLegGroup.rotation.x = THREE.MathUtils.lerp(
+        this.leftLegGroup.rotation.x,
+        0,
+        delta * 8
+      );
+      this.rightLegGroup.rotation.x = THREE.MathUtils.lerp(
+        this.rightLegGroup.rotation.x,
+        0,
+        delta * 8
+      );
+      this.leftArmGroup.rotation.x = THREE.MathUtils.lerp(
+        this.leftArmGroup.rotation.x,
+        0,
+        delta * 8
+      );
 
       if (this.swingAnimation <= 0) {
-        this.rightArm.rotation.x = THREE.MathUtils.lerp(this.rightArm.rotation.x, 0, delta * 8);
+        this.rightArmGroup.rotation.x = THREE.MathUtils.lerp(
+          this.rightArmGroup.rotation.x,
+          0,
+          delta * 8
+        );
       }
     }
 
@@ -332,14 +332,15 @@ export class PlayerModel {
     if (this.swingAnimation > 0) {
       this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.0);
       const swingT = Math.sin(this.swingAnimation * Math.PI);
-      this.rightArm.rotation.x = -0.9 * swingT;
-      this.rightArm.rotation.y = 0.4 * swingT;
-      this.rightArm.rotation.z = -0.3 * swingT;
+      this.rightArmGroup.rotation.x = -0.9 * swingT;
+      this.rightArmGroup.rotation.y = 0.4 * swingT;
+      this.rightArmGroup.rotation.z = -0.3 * swingT;
     }
   }
 
   public dispose() {
-    this.materials.forEach((m) => m.dispose());
-    this.textures.forEach((t) => t.dispose());
+    this.skinTexture.dispose();
+    this.layer1Material.dispose();
+    this.layer2Material.dispose();
   }
 }

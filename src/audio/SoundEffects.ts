@@ -418,6 +418,70 @@ class SoundSynthesizer {
 
     this.triggerHaptic(12);
   }
+
+  public playAssemble() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const audioTime = this.ctx.currentTime;
+
+    // Heavy mechanical gear clunk + metallic ring (Minecraft Create style)
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    const gain2 = this.ctx.createGain();
+
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(140, audioTime);
+    osc1.frequency.exponentialRampToValueAtTime(70, audioTime + 0.18);
+
+    gain1.gain.setValueAtTime(0.55, audioTime);
+    gain1.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.22);
+
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(420, audioTime + 0.04);
+    osc2.frequency.exponentialRampToValueAtTime(880, audioTime + 0.16);
+
+    gain2.gain.setValueAtTime(0.3, audioTime + 0.04);
+    gain2.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.26);
+
+    osc1.connect(gain1);
+    gain1.connect(this.ctx.destination);
+    osc2.connect(gain2);
+    gain2.connect(this.ctx.destination);
+
+    osc1.start(audioTime);
+    osc1.stop(audioTime + 0.24);
+    osc2.start(audioTime + 0.04);
+    osc2.stop(audioTime + 0.28);
+
+    this.triggerHaptic([25, 40, 60]);
+  }
+
+  public playJointConnect() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const audioTime = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(280, audioTime);
+    osc.frequency.linearRampToValueAtTime(640, audioTime + 0.08);
+
+    gain.gain.setValueAtTime(0.35, audioTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.14);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(audioTime);
+    osc.stop(audioTime + 0.15);
+    this.triggerHaptic(20);
+  }
 }
 
 export const soundManager = new SoundSynthesizer();

@@ -29,6 +29,7 @@ export class VoxelWorld {
   // Chunks map: key = `${cx},${cz}`
   public chunks: Map<string, Uint8Array> = new Map();
   public chunkMeshes: Map<string, THREE.Mesh> = new Map();
+  public chunkTransMeshes: Map<string, THREE.Mesh> = new Map();
   public chunkColliders: Map<string, RAPIER.Collider> = new Map();
   public terrainBody: RAPIER.RigidBody | null = null;
 
@@ -38,8 +39,9 @@ export class VoxelWorld {
   private lastPlayerChunkX: number = 999999;
   private lastPlayerChunkZ: number = 999999;
 
-  // Voxel material with crisp pixelated Minecraft texture atlas
-  public material!: THREE.MeshStandardMaterial;
+  // Voxel materials: Opaque & Transparent (Glass) with crisp pixelated Minecraft texture atlas
+  public material!: THREE.MeshBasicMaterial;
+  public transparentMaterial!: THREE.MeshBasicMaterial;
   private atlasTexture!: THREE.CanvasTexture;
   public shaderUniforms: Record<string, { value: any }> | null = null;
   public currentUnderground: number = 0.0;
@@ -262,15 +264,18 @@ export class VoxelWorld {
       c.fillRect(ox + 3, oy + 3, 4, 4);
     });
 
-    // 12,0: Glass (Transparent grid)
+    // 12,0: Glass (Authentic Minecraft transparent windowpane with glare glints)
     drawTile(12, 0, (c, ox, oy) => {
-      c.fillStyle = 'rgba(215, 235, 255, 0.45)';
+      c.fillStyle = 'rgba(215, 238, 255, 0.35)';
       c.fillRect(ox, oy, 16, 16);
-      c.strokeStyle = '#ffffff';
+      c.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      c.lineWidth = 1;
       c.strokeRect(ox + 0.5, oy + 0.5, 15, 15);
       c.fillStyle = '#ffffff';
       c.fillRect(ox + 2, oy + 2, 2, 2);
       c.fillRect(ox + 3, oy + 3, 2, 2);
+      c.fillRect(ox + 10, oy + 9, 2, 2);
+      c.fillRect(ox + 11, oy + 10, 2, 2);
     });
 
     this.atlasTexture = new THREE.CanvasTexture(canvas);
@@ -278,133 +283,40 @@ export class VoxelWorld {
     this.atlasTexture.minFilter = THREE.NearestFilter;
     this.atlasTexture.generateMipmaps = false;
 
-    this.material = new THREE.MeshStandardMaterial({
+    // Authentic Minecraft Opaque Material with native vertexColors for deep AO & face lighting
+    this.material = new THREE.MeshBasicMaterial({
       map: this.atlasTexture,
-      roughness: 0.85,
-      metalness: 0.1,
+      vertexColors: true,
       transparent: false,
+      side: THREE.FrontSide,
     });
 
-    this.material.defines = {
-      USE_UV: '',
-    };
-
-    // Custom shader hook for Binary Greedy Meshing + Seamless Repeating Atlas + Shader-based AO & Dynamic Underground Lighting
-    this.material.onBeforeCompile = (shader) => {
-      shader.uniforms.uUnderground = { value: 0.0 };
-      shader.uniforms.uSkySunColor = { value: new THREE.Color(0xfff6ea) };
-      shader.uniforms.uCaveColor = { value: new THREE.Color(0x3e4554) };
-      this.shaderUniforms = shader.uniforms;
-
-      shader.vertexShader = `
-        attribute vec2 aTile;
-        attribute float aAo;
-        attribute float aLight;
-        varying vec2 vTile;
-        varying vec2 vMeshUv;
-        varying float vAo;
-        varying float vLight;
-        ${shader.vertexShader}
-      `.replace(
-        'void main() {',
-        `void main() {
-          vTile = aTile;
-          vMeshUv = uv;
-          vAo = aAo;
-          vLight = aLight;`
-      );
-
-      shader.fragmentShader = `
-        uniform float uUnderground;
-        uniform vec3 uSkySunColor;
-        uniform vec3 uCaveColor;
-        varying vec2 vTile;
-        varying vec2 vMeshUv;
-        varying float vAo;
-        varying float vLight;
-        ${shader.fragmentShader}
-      `.replace(
-        '#include <map_fragment>',
-        `
-        #ifdef USE_MAP
-          // Seamless repeating texture for binary greedy meshing
-          vec2 localUv = fract(vMeshUv);
-          localUv = clamp(localUv, 0.002, 0.998);
-
-          float tileW = 1.0 / 16.0;
-          float u = (vTile.x + localUv.x) * tileW;
-          float v = 1.0 - (vTile.y + (1.0 - localUv.y)) * tileW;
-
-          vec4 sampledTexel = texture2D( map, vec2(u, v) );
-
-          // SHADER-BASED AMBIENT OCCLUSION (AO):
-          // Deep corner and crevice occlusion that enhances 3D block contours
-          float aoFactor = pow(vAo, mix(1.2, 1.8, uUnderground));
-
-          // SHADER-BASED DYNAMIC LIGHTING:
-          // Smoothly shifts between warm direct sunlight on surface and atmospheric cave darkness
-          float surfaceIntensity = 0.38 + 0.62 * vLight;
-          float caveIntensity = 0.16 + 0.22 * (vLight * 0.5);
-          float dynamicLight = mix(surfaceIntensity, caveIntensity, uUnderground);
-
-          vec3 tone = mix(uSkySunColor, uCaveColor, uUnderground * 0.85);
-
-          sampledTexel.rgb *= aoFactor * dynamicLight * tone;
-
-          diffuseColor *= sampledTexel;
-        #endif
-        `
-      );
-    };
-
-    (this.material as any).customProgramCacheKey = () => 'greedy_voxel_atlas_shader_v6_dynamic_light';
+    // Dedicated Minecraft Transparent Material (for Glass blocks)
+    this.transparentMaterial = new THREE.MeshBasicMaterial({
+      map: this.atlasTexture,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.78,
+      side: THREE.DoubleSide,
+      depthWrite: true,
+    });
   }
 
   /**
-   * Determine if player/camera is currently underground (under solid blocks or low Y)
+   * Safe no-op: Minecraft lighting is per-face/per-vertex, never global screen darkening
    */
-  public isPlayerUnderground(px: number, py: number, pz: number): boolean {
-    const bx = Math.floor(px);
-    const by = Math.floor(py);
-    const bz = Math.floor(pz);
-
-    if (by < 5) return true; // Low bedrock cavern level
-
-    let solidCount = 0;
-    for (let y = by + 1; y < CHUNK_HEIGHT; y++) {
-      const v = this.getVoxel(bx, y, bz);
-      if (v !== VoxelType.AIR && v !== VoxelType.GLASS) {
-        solidCount++;
-        if (solidCount >= 2) return true;
-      }
-    }
+  public updateLighting(_playerPos: THREE.Vector3, _delta: number): boolean {
     return false;
-  }
-
-  /**
-   * Dynamically update lighting uniforms based on player environment
-   */
-  public updateLighting(playerPos: THREE.Vector3, delta: number): boolean {
-    const isUnderground = this.isPlayerUnderground(playerPos.x, playerPos.y, playerPos.z);
-    const targetUnderground = isUnderground ? 1.0 : 0.0;
-
-    this.currentUnderground = THREE.MathUtils.lerp(
-      this.currentUnderground,
-      targetUnderground,
-      Math.min(1.0, delta * 3.0)
-    );
-
-    if (this.shaderUniforms && this.shaderUniforms.uUnderground) {
-      this.shaderUniforms.uUnderground.value = this.currentUnderground;
-    }
-
-    return isUnderground;
   }
 
   public setWireframe(enabled: boolean) {
     if (this.material) {
       this.material.wireframe = enabled;
       this.material.needsUpdate = true;
+    }
+    if (this.transparentMaterial) {
+      this.transparentMaterial.wireframe = enabled;
+      this.transparentMaterial.needsUpdate = true;
     }
   }
 
@@ -675,6 +587,13 @@ export class VoxelWorld {
         mesh.geometry.dispose();
         this.chunkMeshes.delete(key);
 
+        const transMesh = this.chunkTransMeshes.get(key);
+        if (transMesh) {
+          this.scene.remove(transMesh);
+          transMesh.geometry.dispose();
+          this.chunkTransMeshes.delete(key);
+        }
+
         if (this.rapierWorld && this.terrainBody) {
           const col = this.chunkColliders.get(key);
           if (col) {
@@ -705,39 +624,54 @@ export class VoxelWorld {
   }
 
   /**
-   * BINARY GREEDY MESHING & ADVANCED CULLING OPTIMIZATION
-   * 1. Merges adjacent identical voxel faces into unified rectangular quads (reduces triangles by ~80%).
-   * 2. Texture repeats seamlessly across greedy quads using shader fract(vUv) and aTile.
-   * 3. Bottom Layer Culling: Never renders the bottom face (-Y) of bottom bedrock blocks (wy <= 0).
-   * 4. Open-source infinite chunk boundary culling.
+   * AUTHENTIC MINECRAFT CHUNK MESHING
+   * 1. 100% genuine Minecraft Face Directional Lighting: Top (+Y) = 1.0, Bottom (-Y) = 0.5, Z (+Z/-Z) = 0.8, X (+X/-X) = 0.6.
+   * 2. Authentic Mikola Lysenko Minecraft Ambient Occlusion (0fps.net) evaluated per-vertex on the face plane.
+   * 3. Authentic Quad Diagonal Flipping (ao0 + ao2 > ao1 + ao3) eliminates lighting crease anisotropy.
+   * 4. Strict Counter-Clockwise (CCW) front face winding with true outward normals.
+   * 5. Bedrock floor culling (y <= 0) and hidden face culling.
    */
   public buildChunkMesh(cx: number, cz: number) {
     const chunk = this.chunks.get(this.getChunkKey(cx, cz));
     if (!chunk) return;
 
+    // Opaque Geometry Buffers
     const positions: number[] = [];
     const normals: number[] = [];
     const uvs: number[] = [];
-    const aTiles: number[] = [];
-    const aAos: number[] = [];
-    const aLights: number[] = [];
+    const colors: number[] = [];
     const indices: number[] = [];
     let vertexCount = 0;
 
-    // Visibility test with unseen face culling
-    const isFaceVisible = (wx: number, wy: number, wz: number, face: number): boolean => {
+    // Dedicated Transparent (Glass) Geometry Buffers
+    const transPositions: number[] = [];
+    const transNormals: number[] = [];
+    const transUvs: number[] = [];
+    const transColors: number[] = [];
+    const transIndices: number[] = [];
+    let transVertexCount = 0;
+
+    // Visibility test with transparency-aware face culling
+    const isFaceVisible = (wx: number, wy: number, wz: number, face: number, voxel: VoxelType): boolean => {
       // 1. Bottom Bedrock Culling: Player is above ground, never underneath
       if (face === 3 && wy <= 0) return false;
 
       // 2. Top of world limit
       if (face === 2 && wy >= CHUNK_HEIGHT - 1) return true;
 
-      // 3. Neighbor voxel solid check (culls internal faces)
+      // 3. Neighbor voxel solid check
       const dx = face === 0 ? 1 : face === 1 ? -1 : 0;
       const dy = face === 2 ? 1 : face === 3 ? -1 : 0;
       const dz = face === 4 ? 1 : face === 5 ? -1 : 0;
       const neighbor = this.getVoxel(wx + dx, wy + dy, wz + dz);
-      return neighbor === VoxelType.AIR || neighbor === VoxelType.GLASS;
+
+      if (voxel === VoxelType.GLASS) {
+        // Glass faces are visible against air, but culled against another glass block (seamless panes!)
+        return neighbor === VoxelType.AIR;
+      } else {
+        // Opaque faces are visible against air OR glass (player sees through glass to terrain)
+        return neighbor === VoxelType.AIR || neighbor === VoxelType.GLASS;
+      }
     };
 
     const isSolid = (wx: number, wy: number, wz: number): boolean => {
@@ -747,355 +681,285 @@ export class VoxelWorld {
       return v !== VoxelType.AIR && v !== VoxelType.GLASS;
     };
 
-    const vertexAO = (s1: boolean, s2: boolean, c: boolean): number => {
-      if (s1 && s2) return 0.45;
-      const count = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0);
-      return 1.0 - count * 0.17;
-    };
-
-    const getLight = (wx: number, wy: number, wz: number): number => {
-      for (let y = wy + 1; y < CHUNK_HEIGHT; y++) {
-        if (isSolid(wx, y, wz)) {
-          const depth = Math.min(10, CHUNK_HEIGHT - wy);
-          return Math.max(0.18, 0.75 - depth * 0.05);
-        }
+    // Authentic Mikola Lysenko / Minecraft vertex ambient occlusion (0fps.net)
+    const getAO = (s1: boolean, s2: boolean, c: boolean): number => {
+      if (s1 && s2) {
+        return 0.35;
       }
+      const count = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (c ? 1 : 0);
+      if (count === 3) return 0.35;
+      if (count === 2) return 0.55;
+      if (count === 1) return 0.76;
       return 1.0;
     };
 
-    const addQuad = (
-      x0: number,
-      y0: number,
-      z0: number,
-      W: number,
-      H: number,
-      face: number,
-      tileCol: number,
-      tileRow: number
-    ) => {
-      let ao0 = 1.0;
-      let ao1 = 1.0;
-      let ao2 = 1.0;
-      let ao3 = 1.0;
+    // Authentic Minecraft Directional Face Multipliers:
+    // +X (0): 0.68, -X (1): 0.68, +Y (2): 1.0, -Y (3): 0.52, +Z (4): 0.82, -Z (5): 0.82
+    const faceLightMultipliers = [0.68, 0.68, 1.0, 0.52, 0.82, 0.82];
 
-      if (face === 2) {
-        // +Y (Top): Normal (0, 1, 0), W spans along X, H spans along Z
-        positions.push(
-          x0, y0 + 1, z0 + H,
-          x0 + W, y0 + 1, z0 + H,
-          x0 + W, y0 + 1, z0,
-          x0, y0 + 1, z0
-        );
-        normals.push(0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0);
-        uvs.push(0, H,  W, H,  W, 0,  0, 0);
+    const getFaceLight = (nx: number, ny: number, nz: number, face: number): number => {
+      const baseMult = faceLightMultipliers[face];
+      if (face === 3) return baseMult;
 
-        const y = y0 + 1;
-        ao0 = vertexAO(isSolid(x0 - 1, y, z0 + H), isSolid(x0, y, z0 + H + 1), isSolid(x0 - 1, y, z0 + H + 1));
-        ao1 = vertexAO(isSolid(x0 + W, y, z0 + H), isSolid(x0 + W - 1, y, z0 + H + 1), isSolid(x0 + W, y, z0 + H + 1));
-        ao2 = vertexAO(isSolid(x0 + W, y, z0), isSolid(x0 + W - 1, y, z0 - 1), isSolid(x0 + W, y, z0 - 1));
-        ao3 = vertexAO(isSolid(x0 - 1, y, z0), isSolid(x0, y, z0 - 1), isSolid(x0 - 1, y, z0 - 1));
-      } else if (face === 3) {
-        // -Y (Bottom): Normal (0, -1, 0), W spans along X, H spans along Z
-        positions.push(
-          x0, y0, z0,
-          x0 + W, y0, z0,
-          x0 + W, y0, z0 + H,
-          x0, y0, z0 + H
-        );
-        normals.push(0, -1, 0,  0, -1, 0,  0, -1, 0,  0, -1, 0);
-        uvs.push(0, 0,  W, 0,  W, H,  0, H);
-
-        const y = y0 - 1;
-        ao0 = vertexAO(isSolid(x0 - 1, y, z0), isSolid(x0, y, z0 - 1), isSolid(x0 - 1, y, z0 - 1));
-        ao1 = vertexAO(isSolid(x0 + W, y, z0), isSolid(x0 + W - 1, y, z0 - 1), isSolid(x0 + W, y, z0 - 1));
-        ao2 = vertexAO(isSolid(x0 + W, y, z0 + H), isSolid(x0 + W - 1, y, z0 + H + 1), isSolid(x0 + W, y, z0 + H + 1));
-        ao3 = vertexAO(isSolid(x0 - 1, y, z0 + H), isSolid(x0, y, z0 + H + 1), isSolid(x0 - 1, y, z0 + H + 1));
-      } else if (face === 0) {
-        // +X (Right / East): Normal (1, 0, 0), W spans along Z, H spans along Y
-        const x1 = x0 + 1;
-        positions.push(
-          x1, y0, z0,
-          x1, y0 + H, z0,
-          x1, y0 + H, z0 + W,
-          x1, y0, z0 + W
-        );
-        normals.push(1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0);
-        uvs.push(W, 0,  W, H,  0, H,  0, 0);
-
-        ao0 = vertexAO(isSolid(x1, y0 - 1, z0), isSolid(x1, y0, z0 - 1), isSolid(x1, y0 - 1, z0 - 1));
-        ao1 = vertexAO(isSolid(x1, y0 + H, z0), isSolid(x1, y0 + H - 1, z0 - 1), isSolid(x1, y0 + H, z0 - 1));
-        ao2 = vertexAO(isSolid(x1, y0 + H, z0 + W), isSolid(x1, y0 + H - 1, z0 + W), isSolid(x1, y0 + H, z0 + W));
-        ao3 = vertexAO(isSolid(x1, y0 - 1, z0 + W), isSolid(x1, y0, z0 + W), isSolid(x1, y0 - 1, z0 + W));
-      } else if (face === 1) {
-        // -X (Left / West): Normal (-1, 0, 0), W spans along Z, H spans along Y
-        positions.push(
-          x0, y0, z0 + W,
-          x0, y0 + H, z0 + W,
-          x0, y0 + H, z0,
-          x0, y0, z0
-        );
-        normals.push(-1, 0, 0,  -1, 0, 0,  -1, 0, 0,  -1, 0, 0);
-        uvs.push(0, 0,  0, H,  W, H,  W, 0);
-
-        const x = x0 - 1;
-        ao0 = vertexAO(isSolid(x, y0 - 1, z0 + W), isSolid(x, y0, z0 + W), isSolid(x, y0 - 1, z0 + W));
-        ao1 = vertexAO(isSolid(x, y0 + H, z0 + W), isSolid(x, y0 + H - 1, z0 + W), isSolid(x, y0 + H, z0 + W));
-        ao2 = vertexAO(isSolid(x, y0 + H, z0), isSolid(x, y0 + H - 1, z0 - 1), isSolid(x, y0 + H, z0 - 1));
-        ao3 = vertexAO(isSolid(x, y0 - 1, z0), isSolid(x, y0, z0 - 1), isSolid(x, y0 - 1, z0 - 1));
-      } else if (face === 4) {
-        // +Z (Front / South): Normal (0, 0, 1), W spans along X, H spans along Y
-        const z1 = z0 + 1;
-        positions.push(
-          x0 + W, y0, z1,
-          x0 + W, y0 + H, z1,
-          x0, y0 + H, z1,
-          x0, y0, z1
-        );
-        normals.push(0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1);
-        uvs.push(W, 0,  W, H,  0, H,  0, 0);
-
-        ao0 = vertexAO(isSolid(x0 + W, y0, z1), isSolid(x0 + W - 1, y0 - 1, z1), isSolid(x0 + W, y0 - 1, z1));
-        ao1 = vertexAO(isSolid(x0 + W, y0 + H, z1), isSolid(x0 + W - 1, y0 + H, z1), isSolid(x0 + W, y0 + H, z1));
-        ao2 = vertexAO(isSolid(x0 - 1, y0 + H, z1), isSolid(x0, y0 + H, z1), isSolid(x0 - 1, y0 + H, z1));
-        ao3 = vertexAO(isSolid(x0 - 1, y0, z1), isSolid(x0, y0 - 1, z1), isSolid(x0 - 1, y0 - 1, z1));
-      } else {
-        // -Z (Back / North): Normal (0, 0, -1), W spans along X, H spans along Y
-        positions.push(
-          x0, y0, z0,
-          x0, y0 + H, z0,
-          x0 + W, y0 + H, z0,
-          x0 + W, y0, z0
-        );
-        normals.push(0, 0, -1,  0, 0, -1,  0, 0, -1,  0, 0, -1);
-        uvs.push(0, 0,  0, H,  W, H,  W, 0);
-
-        const z = z0 - 1;
-        ao0 = vertexAO(isSolid(x0 - 1, y0, z), isSolid(x0, y0 - 1, z), isSolid(x0 - 1, y0 - 1, z));
-        ao1 = vertexAO(isSolid(x0 - 1, y0 + H, z), isSolid(x0, y0 + H, z), isSolid(x0 - 1, y0 + H, z));
-        ao2 = vertexAO(isSolid(x0 + W, y0 + H, z), isSolid(x0 + W - 1, y0 + H, z), isSolid(x0 + W, y0 + H, z));
-        ao3 = vertexAO(isSolid(x0 + W, y0, z), isSolid(x0 + W - 1, y0 - 1, z), isSolid(x0 + W, y0 - 1, z));
+      let hasSky = true;
+      for (let y = ny + 1; y < CHUNK_HEIGHT; y++) {
+        if (isSolid(nx, y, nz)) {
+          hasSky = false;
+          break;
+        }
       }
-
-      const light = getLight(x0, y0, z0);
-
-      for (let i = 0; i < 4; i++) {
-        aTiles.push(tileCol, tileRow);
-        aLights.push(light);
-      }
-
-      aAos.push(ao0, ao1, ao2, ao3);
-
-      indices.push(
-        vertexCount, vertexCount + 1, vertexCount + 2,
-        vertexCount, vertexCount + 2, vertexCount + 3
-      );
-      vertexCount += 4;
+      return hasSky ? baseMult : baseMult * 0.85;
     };
 
-    // 1. Binary Greedy Meshing for Vertical Faces: +Y (2) and -Y (3)
-    const yMask = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Z);
-    for (const face of [2, 3]) {
-      for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
-        if (face === 3 && ly <= 0) continue; // Cull bottom bedrock layer
+    const tileW = 1.0 / 16.0;
 
-        let hasAny = false;
-        for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-          for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-            const idx = lx + lz * CHUNK_SIZE_X;
-            const voxel = chunk[this.getVoxelIndex(lx, ly, lz)];
-            if (voxel !== VoxelType.AIR) {
-              const wx = cx * CHUNK_SIZE_X + lx;
-              const wz = cz * CHUNK_SIZE_Z + lz;
-              if (isFaceVisible(wx, ly, wz, face)) {
-                yMask[idx] = voxel;
-                hasAny = true;
-              } else {
-                yMask[idx] = 0;
-              }
-            } else {
-              yMask[idx] = 0;
-            }
-          }
-        }
-        if (!hasAny) continue;
-
-        // Greedy 2D rectangular merge
-        for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-          for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-            const vType = yMask[lx + lz * CHUNK_SIZE_X];
-            if (vType === 0) continue;
-
-            let W = 1;
-            while (lx + W < CHUNK_SIZE_X && yMask[(lx + W) + lz * CHUNK_SIZE_X] === vType) W++;
-
-            let H = 1;
-            rowCheck: while (lz + H < CHUNK_SIZE_Z) {
-              for (let k = 0; k < W; k++) {
-                if (yMask[(lx + k) + (lz + H) * CHUNK_SIZE_X] !== vType) break rowCheck;
-              }
-              H++;
-            }
-
-            for (let dh = 0; dh < H; dh++) {
-              for (let dw = 0; dw < W; dw++) {
-                yMask[(lx + dw) + (lz + dh) * CHUNK_SIZE_X] = 0;
-              }
-            }
-
-            const [tileCol, tileRow] = this.getVoxelFaceTile(vType, face);
-            addQuad(cx * CHUNK_SIZE_X + lx, ly, cz * CHUNK_SIZE_Z + lz, W, H, face, tileCol, tileRow);
-          }
-        }
-      }
-    }
-
-    // 2. Binary Greedy Meshing for X Faces: +X (0) and -X (1)
-    const xMask = new Uint8Array(CHUNK_SIZE_Z * CHUNK_HEIGHT);
-    for (const face of [0, 1]) {
-      for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-        const wx = cx * CHUNK_SIZE_X + lx;
-
-        let hasAny = false;
-        for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
-          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-            const idx = lz + ly * CHUNK_SIZE_Z;
-            const voxel = chunk[this.getVoxelIndex(lx, ly, lz)];
-            if (voxel !== VoxelType.AIR) {
-              const wz = cz * CHUNK_SIZE_Z + lz;
-              if (isFaceVisible(wx, ly, wz, face)) {
-                xMask[idx] = voxel;
-                hasAny = true;
-              } else {
-                xMask[idx] = 0;
-              }
-            } else {
-              xMask[idx] = 0;
-            }
-          }
-        }
-        if (!hasAny) continue;
-
-        for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
-          for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-            const vType = xMask[lz + ly * CHUNK_SIZE_Z];
-            if (vType === 0) continue;
-
-            let W = 1;
-            while (lz + W < CHUNK_SIZE_Z && xMask[(lz + W) + ly * CHUNK_SIZE_Z] === vType) W++;
-
-            let H = 1;
-            rowCheck: while (ly + H < CHUNK_HEIGHT) {
-              for (let k = 0; k < W; k++) {
-                if (xMask[(lz + k) + (ly + H) * CHUNK_SIZE_Z] !== vType) break rowCheck;
-              }
-              H++;
-            }
-
-            for (let dh = 0; dh < H; dh++) {
-              for (let dw = 0; dw < W; dw++) {
-                xMask[(lz + dw) + (ly + dh) * CHUNK_SIZE_Z] = 0;
-              }
-            }
-
-            const [tileCol, tileRow] = this.getVoxelFaceTile(vType, face);
-            addQuad(wx, ly, cz * CHUNK_SIZE_Z + lz, W, H, face, tileCol, tileRow);
-          }
-        }
-      }
-    }
-
-    // 3. Binary Greedy Meshing for Z Faces: +Z (4) and -Z (5)
-    const zMask = new Uint8Array(CHUNK_SIZE_X * CHUNK_HEIGHT);
-    for (const face of [4, 5]) {
+    // Iterate all blocks in this chunk
+    for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
       for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-        const wz = cz * CHUNK_SIZE_Z + lz;
+        for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+          const voxel = chunk[this.getVoxelIndex(lx, ly, lz)];
+          if (voxel === VoxelType.AIR) continue;
 
-        let hasAny = false;
-        for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
-          for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-            const idx = lx + ly * CHUNK_SIZE_X;
-            const voxel = chunk[this.getVoxelIndex(lx, ly, lz)];
-            if (voxel !== VoxelType.AIR) {
-              const wx = cx * CHUNK_SIZE_X + lx;
-              if (isFaceVisible(wx, ly, wz, face)) {
-                zMask[idx] = voxel;
-                hasAny = true;
-              } else {
-                zMask[idx] = 0;
-              }
+          const isGlass = voxel === VoxelType.GLASS;
+          const targetPositions = isGlass ? transPositions : positions;
+          const targetNormals = isGlass ? transNormals : normals;
+          const targetUvs = isGlass ? transUvs : uvs;
+          const targetColors = isGlass ? transColors : colors;
+          const targetIndices = isGlass ? transIndices : indices;
+
+          const wx = cx * CHUNK_SIZE_X + lx;
+          const wy = ly;
+          const wz = cz * CHUNK_SIZE_Z + lz;
+
+          // Test all 6 faces
+          for (let face = 0; face < 6; face++) {
+            if (!isFaceVisible(wx, wy, wz, face, voxel)) continue;
+
+            const [tileCol, tileRow] = this.getVoxelFaceTile(voxel, face);
+            const u0 = tileCol * tileW;
+            const u1 = u0 + tileW;
+            const v0 = 1.0 - (tileRow + 1) * tileW;
+            const v1 = 1.0 - tileRow * tileW;
+
+            let ao0 = 1.0;
+            let ao1 = 1.0;
+            let ao2 = 1.0;
+            let ao3 = 1.0;
+
+            const x0 = wx;
+            const y0 = wy;
+            const z0 = wz;
+
+            if (face === 2) {
+              // +Y (Top Face): normal (0, 1, 0)
+              targetPositions.push(
+                x0, y0 + 1, z0 + 1,
+                x0 + 1, y0 + 1, z0 + 1,
+                x0 + 1, y0 + 1, z0,
+                x0, y0 + 1, z0
+              );
+              targetNormals.push(0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0);
+
+              const y = wy + 1;
+              ao0 = getAO(isSolid(wx - 1, y, wz), isSolid(wx, y, wz + 1), isSolid(wx - 1, y, wz + 1));
+              ao1 = getAO(isSolid(wx + 1, y, wz), isSolid(wx, y, wz + 1), isSolid(wx + 1, y, wz + 1));
+              ao2 = getAO(isSolid(wx + 1, y, wz), isSolid(wx, y, wz - 1), isSolid(wx + 1, y, wz - 1));
+              ao3 = getAO(isSolid(wx - 1, y, wz), isSolid(wx, y, wz - 1), isSolid(wx - 1, y, wz - 1));
+            } else if (face === 3) {
+              // -Y (Bottom Face): normal (0, -1, 0)
+              targetPositions.push(
+                x0, y0, z0,
+                x0 + 1, y0, z0,
+                x0 + 1, y0, z0 + 1,
+                x0, y0, z0 + 1
+              );
+              targetNormals.push(0, -1, 0,  0, -1, 0,  0, -1, 0,  0, -1, 0);
+
+              const y = wy - 1;
+              ao0 = getAO(isSolid(wx - 1, y, wz), isSolid(wx, y, wz - 1), isSolid(wx - 1, y, wz - 1));
+              ao1 = getAO(isSolid(wx + 1, y, wz), isSolid(wx, y, wz - 1), isSolid(wx + 1, y, wz - 1));
+              ao2 = getAO(isSolid(wx + 1, y, wz), isSolid(wx, y, wz + 1), isSolid(wx + 1, y, wz + 1));
+              ao3 = getAO(isSolid(wx - 1, y, wz), isSolid(wx, y, wz + 1), isSolid(wx - 1, y, wz + 1));
+            } else if (face === 0) {
+              // +X (East / Right): normal (1, 0, 0)
+              targetPositions.push(
+                x0 + 1, y0, z0 + 1,
+                x0 + 1, y0, z0,
+                x0 + 1, y0 + 1, z0,
+                x0 + 1, y0 + 1, z0 + 1
+              );
+              targetNormals.push(1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0);
+
+              const x = wx + 1;
+              ao0 = getAO(isSolid(x, wy - 1, wz), isSolid(x, wy, wz + 1), isSolid(x, wy - 1, wz + 1));
+              ao1 = getAO(isSolid(x, wy - 1, wz), isSolid(x, wy, wz - 1), isSolid(x, wy - 1, wz - 1));
+              ao2 = getAO(isSolid(x, wy + 1, wz), isSolid(x, wy, wz - 1), isSolid(x, wy + 1, wz - 1));
+              ao3 = getAO(isSolid(x, wy + 1, wz), isSolid(x, wy, wz + 1), isSolid(x, wy + 1, wz + 1));
+            } else if (face === 1) {
+              // -X (West / Left): normal (-1, 0, 0)
+              targetPositions.push(
+                x0, y0, z0,
+                x0, y0, z0 + 1,
+                x0, y0 + 1, z0 + 1,
+                x0, y0 + 1, z0
+              );
+              targetNormals.push(-1, 0, 0,  -1, 0, 0,  -1, 0, 0,  -1, 0, 0);
+
+              const x = wx - 1;
+              ao0 = getAO(isSolid(x, wy - 1, wz), isSolid(x, wy, wz - 1), isSolid(x, wy - 1, wz - 1));
+              ao1 = getAO(isSolid(x, wy - 1, wz), isSolid(x, wy, wz + 1), isSolid(x, wy - 1, wz + 1));
+              ao2 = getAO(isSolid(x, wy + 1, wz), isSolid(x, wy, wz + 1), isSolid(x, wy + 1, wz + 1));
+              ao3 = getAO(isSolid(x, wy + 1, wz), isSolid(x, wy, wz - 1), isSolid(x, wy + 1, wz - 1));
+            } else if (face === 4) {
+              // +Z (South / Front): normal (0, 0, 1)
+              targetPositions.push(
+                x0, y0, z0 + 1,
+                x0 + 1, y0, z0 + 1,
+                x0 + 1, y0 + 1, z0 + 1,
+                x0, y0 + 1, z0 + 1
+              );
+              targetNormals.push(0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1);
+
+              const z = wz + 1;
+              ao0 = getAO(isSolid(wx - 1, wy, z), isSolid(wx, wy - 1, z), isSolid(wx - 1, wy - 1, z));
+              ao1 = getAO(isSolid(wx + 1, wy, z), isSolid(wx, wy - 1, z), isSolid(wx + 1, wy - 1, z));
+              ao2 = getAO(isSolid(wx + 1, wy, z), isSolid(wx, wy + 1, z), isSolid(wx + 1, wy + 1, z));
+              ao3 = getAO(isSolid(wx - 1, wy, z), isSolid(wx, wy + 1, z), isSolid(wx - 1, wy + 1, z));
             } else {
-              zMask[idx] = 0;
-            }
-          }
-        }
-        if (!hasAny) continue;
+              // -Z (North / Back): normal (0, 0, -1)
+              targetPositions.push(
+                x0 + 1, y0, z0,
+                x0, y0, z0,
+                x0, y0 + 1, z0,
+                x0 + 1, y0 + 1, z0
+              );
+              targetNormals.push(0, 0, -1,  0, 0, -1,  0, 0, -1,  0, 0, -1);
 
-        for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
-          for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-            const vType = zMask[lx + ly * CHUNK_SIZE_X];
-            if (vType === 0) continue;
-
-            let W = 1;
-            while (lx + W < CHUNK_SIZE_X && zMask[(lx + W) + ly * CHUNK_SIZE_X] === vType) W++;
-
-            let H = 1;
-            rowCheck: while (ly + H < CHUNK_HEIGHT) {
-              for (let k = 0; k < W; k++) {
-                if (zMask[(lx + k) + (ly + H) * CHUNK_SIZE_X] !== vType) break rowCheck;
-              }
-              H++;
+              const z = wz - 1;
+              ao0 = getAO(isSolid(wx + 1, wy, z), isSolid(wx, wy - 1, z), isSolid(wx + 1, wy - 1, z));
+              ao1 = getAO(isSolid(wx - 1, wy, z), isSolid(wx, wy - 1, z), isSolid(wx - 1, wy - 1, z));
+              ao2 = getAO(isSolid(wx - 1, wy, z), isSolid(wx, wy + 1, z), isSolid(wx - 1, wy + 1, z));
+              ao3 = getAO(isSolid(wx + 1, wy, z), isSolid(wx, wy + 1, z), isSolid(wx + 1, wy + 1, z));
             }
 
-            for (let dh = 0; dh < H; dh++) {
-              for (let dw = 0; dw < W; dw++) {
-                zMask[(lx + dw) + (ly + dh) * CHUNK_SIZE_X] = 0;
-              }
+            // Standard crisp 1x1 tile UV coordinates
+            targetUvs.push(
+              u0, v0,
+              u1, v0,
+              u1, v1,
+              u0, v1
+            );
+
+            // Light: Evaluated at the air neighbor block facing this face
+            const dx = face === 0 ? 1 : face === 1 ? -1 : 0;
+            const dy = face === 2 ? 1 : face === 3 ? -1 : 0;
+            const dz = face === 4 ? 1 : face === 5 ? -1 : 0;
+            const faceLight = getFaceLight(wx + dx, wy + dy, wz + dz, face);
+
+            // Native vertex colors with face directional lighting * Ambient Occlusion
+            const col0 = Math.max(0.2, ao0 * faceLight);
+            const col1 = Math.max(0.2, ao1 * faceLight);
+            const col2 = Math.max(0.2, ao2 * faceLight);
+            const col3 = Math.max(0.2, ao3 * faceLight);
+
+            targetColors.push(
+              col0, col0, col0,
+              col1, col1, col1,
+              col2, col2, col2,
+              col3, col3, col3
+            );
+
+            // Quad Diagonal Flip for Smooth Lighting (Anisotropy Fix)
+            const currentVertexCount = isGlass ? transVertexCount : vertexCount;
+            if (ao0 + ao2 > ao1 + ao3) {
+              targetIndices.push(
+                currentVertexCount, currentVertexCount + 1, currentVertexCount + 2,
+                currentVertexCount, currentVertexCount + 2, currentVertexCount + 3
+              );
+            } else {
+              targetIndices.push(
+                currentVertexCount + 1, currentVertexCount + 2, currentVertexCount + 3,
+                currentVertexCount + 1, currentVertexCount + 3, currentVertexCount
+              );
             }
 
-            const [tileCol, tileRow] = this.getVoxelFaceTile(vType, face);
-            addQuad(cx * CHUNK_SIZE_X + lx, ly, wz, W, H, face, tileCol, tileRow);
+            if (isGlass) {
+              transVertexCount += 4;
+            } else {
+              vertexCount += 4;
+            }
           }
         }
       }
     }
 
     const key = this.getChunkKey(cx, cz);
-    let mesh = this.chunkMeshes.get(key);
 
+    // 1. Build or Update Opaque Mesh
+    let mesh = this.chunkMeshes.get(key);
     if (positions.length === 0) {
       if (mesh) {
         this.scene.remove(mesh);
         mesh.geometry.dispose();
         this.chunkMeshes.delete(key);
       }
-      return;
+    } else {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geometry.setIndex(indices);
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+
+      if (!mesh) {
+        mesh = new THREE.Mesh(geometry, this.material);
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        mesh.frustumCulled = true;
+        mesh.userData = { isVoxelChunk: true, cx, cz };
+        this.scene.add(mesh);
+        this.chunkMeshes.set(key, mesh);
+      } else {
+        mesh.geometry.dispose();
+        mesh.geometry = geometry;
+        mesh.frustumCulled = true;
+      }
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setAttribute('aTile', new THREE.Float32BufferAttribute(aTiles, 2));
-    geometry.setAttribute('aAo', new THREE.Float32BufferAttribute(aAos, 1));
-    geometry.setAttribute('aLight', new THREE.Float32BufferAttribute(aLights, 1));
-    geometry.setIndex(indices);
-
-    // Frustum culling bounds
-    geometry.computeBoundingBox();
-    geometry.computeBoundingSphere();
-
-    if (!mesh) {
-      mesh = new THREE.Mesh(geometry, this.material);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = true;
-      mesh.userData = { isVoxelChunk: true, cx, cz };
-      this.scene.add(mesh);
-      this.chunkMeshes.set(key, mesh);
+    // 2. Build or Update Transparent Glass Mesh
+    let transMesh = this.chunkTransMeshes.get(key);
+    if (transPositions.length === 0) {
+      if (transMesh) {
+        this.scene.remove(transMesh);
+        transMesh.geometry.dispose();
+        this.chunkTransMeshes.delete(key);
+      }
     } else {
-      mesh.geometry.dispose();
-      mesh.geometry = geometry;
-      mesh.frustumCulled = true;
+      const transGeometry = new THREE.BufferGeometry();
+      transGeometry.setAttribute('position', new THREE.Float32BufferAttribute(transPositions, 3));
+      transGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(transNormals, 3));
+      transGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(transUvs, 2));
+      transGeometry.setAttribute('color', new THREE.Float32BufferAttribute(transColors, 3));
+      transGeometry.setIndex(transIndices);
+      transGeometry.computeBoundingBox();
+      transGeometry.computeBoundingSphere();
+
+      if (!transMesh) {
+        transMesh = new THREE.Mesh(transGeometry, this.transparentMaterial);
+        transMesh.renderOrder = 1; // Render after opaque geometry
+        transMesh.castShadow = false;
+        transMesh.receiveShadow = false;
+        transMesh.frustumCulled = true;
+        transMesh.userData = { isVoxelChunkTrans: true, cx, cz };
+        this.scene.add(transMesh);
+        this.chunkTransMeshes.set(key, transMesh);
+      } else {
+        transMesh.geometry.dispose();
+        transMesh.geometry = transGeometry;
+        transMesh.frustumCulled = true;
+      }
     }
   }
 
@@ -1134,8 +998,10 @@ export class VoxelWorld {
 
     try {
       const colliderDesc = RAPIER.ColliderDesc.trimesh(vertices, indices)
-        .setFriction(0.65)
-        .setRestitution(0.15)
+        .setFriction(0.0)
+        .setRestitution(0.0)
+        .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
+        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Min)
         .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
 
       const collider = this.rapierWorld.createCollider(colliderDesc, this.terrainBody);
@@ -1213,6 +1079,12 @@ export class VoxelWorld {
     }
     this.chunkMeshes.clear();
 
+    for (const transMesh of this.chunkTransMeshes.values()) {
+      this.scene.remove(transMesh);
+      transMesh.geometry.dispose();
+    }
+    this.chunkTransMeshes.clear();
+
     if (this.rapierWorld && this.terrainBody) {
       for (const col of this.chunkColliders.values()) {
         this.rapierWorld.removeCollider(col, false);
@@ -1222,5 +1094,6 @@ export class VoxelWorld {
     }
     this.atlasTexture.dispose();
     this.material.dispose();
+    this.transparentMaterial.dispose();
   }
 }

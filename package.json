@@ -24,6 +24,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "simplex-noise": "^4.0.3",
+    "skinview3d": "^3.4.2",
     "three": "^0.186.1",
     "vite": "^8.3.0"
   },

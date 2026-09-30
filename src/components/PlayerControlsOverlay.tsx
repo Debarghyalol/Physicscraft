@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PlayerInput } from '../player/PlayerController';
 import { CameraViewMode, VoxelType } from '../types/physics';
-import { ArrowUp } from 'lucide-react';
+import { Camera, Wrench } from 'lucide-react';
 
 export interface PlayerControlsOverlayProps {
   onInputUpdate: (input: PlayerInput) => void;
@@ -13,19 +13,121 @@ export interface PlayerControlsOverlayProps {
   viewMode: CameraViewMode;
   selectedVoxel: VoxelType;
   onSelectVoxel: (v: VoxelType) => void;
+  onTogglePhysicsMaker?: () => void;
+  isPhysicsMakerActive?: boolean;
 }
 
-const HOTBAR_ITEMS: { type: VoxelType; name: string; color: string; border: string }[] = [
-  { type: VoxelType.GRASS, name: 'Grass Block', color: '#55a832', border: '#438e24' },
-  { type: VoxelType.DIRT, name: 'Dirt', color: '#866043', border: '#67472e' },
-  { type: VoxelType.STONE, name: 'Stone', color: '#7a7a7a', border: '#5f5f5f' },
-  { type: VoxelType.WOOD, name: 'Oak Wood', color: '#6b5130', border: '#4e381f' },
-  { type: VoxelType.LEAVES, name: 'Oak Leaves', color: '#347b26', border: '#245919' },
-  { type: VoxelType.SAND, name: 'Sand', color: '#d9cc8c', border: '#c2b370' },
-  { type: VoxelType.COBBLESTONE, name: 'Cobblestone', color: '#686868', border: '#434343' },
-  { type: VoxelType.GLASS, name: 'Glass', color: 'rgba(215, 235, 255, 0.7)', border: '#ffffff' },
-  { type: VoxelType.TNT, name: 'TNT', color: '#cc2a20', border: '#ff4444' },
+export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
+  { type: VoxelType.GRASS, name: 'Grass Block' },
+  { type: VoxelType.DIRT, name: 'Dirt' },
+  { type: VoxelType.STONE, name: 'Stone' },
+  { type: VoxelType.WOOD, name: 'Oak Wood' },
+  { type: VoxelType.LEAVES, name: 'Oak Leaves' },
+  { type: VoxelType.SAND, name: 'Sand' },
+  { type: VoxelType.COBBLESTONE, name: 'Cobblestone' },
+  { type: VoxelType.GLASS, name: 'Glass' },
+  { type: VoxelType.TNT, name: 'TNT' },
 ];
+
+/**
+ * Pixelated 3D Isometric Voxel Block Icon for authentic Minecraft UI
+ */
+const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
+  // SVG drawing of 3D isometric cube with 3 visible faces
+  // Top face: path "M12 2 L22 8 L12 14 L2 8 Z"
+  // Left face: path "M2 8 L12 14 L12 22 L2 16 Z"
+  // Right face: path "M12 14 L22 8 L22 16 L12 22 Z"
+
+  switch (type) {
+    case VoxelType.GRASS:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          {/* Top Face (Green grass) */}
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#58a032" />
+          {/* Left Face (Dirt with grass fringe) */}
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#866043" />
+          <polygon points="2,7.8 12,13.6 12,16 2,10.2" fill="#4d8c2c" />
+          {/* Right Face (Dirt with grass fringe, slightly shaded) */}
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#6d4c33" />
+          <polygon points="12,13.6 22,7.8 22,10.2 12,16" fill="#3f7523" />
+        </svg>
+      );
+    case VoxelType.DIRT:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#9c7353" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#866043" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#67472e" />
+        </svg>
+      );
+    case VoxelType.STONE:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#8e8e8e" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#7a7a7a" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#5f5f5f" />
+        </svg>
+      );
+    case VoxelType.WOOD:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          {/* Tree Rings on top */}
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#aa8555" />
+          <circle cx="12" cy="7.8" r="2.5" fill="#7d5930" />
+          {/* Bark sides */}
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#674d2b" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#4d391d" />
+        </svg>
+      );
+    case VoxelType.LEAVES:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#429e2e" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#328221" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#246416" />
+        </svg>
+      );
+    case VoxelType.SAND:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#e8dc9e" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#d8cb8c" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#b9ab6d" />
+        </svg>
+      );
+    case VoxelType.COBBLESTONE:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#787878" stroke="#484848" strokeWidth="0.5" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#626262" stroke="#484848" strokeWidth="0.5" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#4c4c4c" stroke="#363636" strokeWidth="0.5" />
+        </svg>
+      );
+    case VoxelType.GLASS:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="rgba(220, 240, 255, 0.55)" stroke="#ffffff" strokeWidth="0.8" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="rgba(180, 215, 245, 0.45)" stroke="#ffffff" strokeWidth="0.8" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="rgba(150, 195, 235, 0.45)" stroke="#ffffff" strokeWidth="0.8" />
+          <line x1="8" y1="12" x2="16" y2="18" stroke="#ffffff" strokeWidth="1" strokeLinecap="round" />
+        </svg>
+      );
+    case VoxelType.TNT:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#cc2a20" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#b0241b" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#8f1c15" />
+          {/* White TNT band */}
+          <polygon points="2,11.5 12,17.3 12,19 2,13.2" fill="#ffffff" />
+          <polygon points="12,17.3 22,11.5 22,13.2 12,19" fill="#e0e0e0" />
+          <text x="7" y="16.5" fill="#000000" fontSize="3" fontWeight="bold" fontFamily="monospace">TNT</text>
+        </svg>
+      );
+    default:
+      return <div className="w-5 h-5 bg-neutral-500 rounded-xs" />;
+  }
+};
 
 export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onInputUpdate,
@@ -36,20 +138,24 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onToggleViewMode,
   selectedVoxel,
   onSelectVoxel,
+  onTogglePhysicsMaker,
+  isPhysicsMakerActive,
 }) => {
   const isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
   // PC Keyboard & Pointer Lock
   const keysDown = useRef<Set<string>>(new Set());
   const [isSprinting, setIsSprinting] = useState(false);
+  const [isSneaking, setIsSneaking] = useState(false);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
 
-  // Mobile virtual joystick state (Left side)
-  const [joystickActive, setJoystickActive] = useState(false);
-  const [joystickKnob, setJoystickKnob] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const joystickTouchId = useRef<number | null>(null);
-  const joystickCenter = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const joystickVector = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Official MCPE D-Pad Touch State (Left side)
+  const [dpadDir, setDpadDir] = useState<{ forward: number; right: number }>({ forward: 0, right: 0 });
+  const dpadTouchId = useRef<number | null>(null);
+  const dpadContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Jump button active
+  const [jumpPressed, setJumpPressed] = useState(false);
 
   // Mobile touch aim & MCPE state separation
   const lookTouchId = useRef<number | null>(null);
@@ -66,9 +172,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   const [breakProgress, setBreakProgress] = useState<number | null>(null);
   const [breakIndicatorPos, setBreakIndicatorPos] = useState<{ x: number; y: number } | null>(null);
 
-  // Jump button active
-  const [jumpPressed, setJumpPressed] = useState(false);
-
   // Send input changes
   const emitInput = useCallback(() => {
     let forward = 0;
@@ -80,11 +183,9 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     if (keysDown.current.has('KeyA') || keysDown.current.has('ArrowLeft')) right -= 1;
     if (keysDown.current.has('KeyD') || keysDown.current.has('ArrowRight')) right += 1;
 
-    // Joystick input
-    if (joystickActive) {
-      forward += joystickVector.current.y;
-      right += joystickVector.current.x;
-    }
+    // MCPE D-Pad
+    forward += dpadDir.forward;
+    right += dpadDir.right;
 
     forward = Math.max(-1, Math.min(1, forward));
     right = Math.max(-1, Math.min(1, right));
@@ -98,7 +199,11 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
       jump,
       sprint,
     });
-  }, [isSprinting, joystickActive, jumpPressed, onInputUpdate]);
+  }, [dpadDir, isSprinting, jumpPressed, onInputUpdate]);
+
+  useEffect(() => {
+    emitInput();
+  }, [dpadDir, jumpPressed, isSprinting, emitInput]);
 
   // Keyboard Event Listeners for PC
   useEffect(() => {
@@ -173,63 +278,75 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     setBreakIndicatorPos(null);
   };
 
-  // Dedicated Virtual Joystick Touch Handlers (Strictly self-contained)
-  const handleJoystickTouchStart = (e: React.TouchEvent) => {
-    e.stopPropagation();
-    if (joystickTouchId.current !== null) return;
-    const touch = e.changedTouches[0];
-    const rect = e.currentTarget.getBoundingClientRect();
+  // Official MCPE D-Pad Touch Handlers
+  const handleDpadUpdate = (touchX: number, touchY: number) => {
+    if (!dpadContainerRef.current) return;
+    const rect = dpadContainerRef.current.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
 
-    joystickTouchId.current = touch.identifier;
-    joystickCenter.current = { x: centerX, y: centerY };
-    setJoystickKnob({ x: 0, y: 0 });
-    setJoystickActive(true);
+    const dx = touchX - centerX;
+    const dy = touchY - centerY;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < 18) {
+      // Center zone (Crouch / Sneak toggle)
+      setDpadDir({ forward: 0, right: 0 });
+      return;
+    }
+
+    // Determine 8-direction vector
+    const angle = Math.atan2(dy, dx); // -PI to PI
+    // -PI/2 is UP, PI/2 is DOWN, 0 is RIGHT, PI is LEFT
+    let f = 0;
+    let r = 0;
+
+    if (angle > -Math.PI * 0.75 && angle < -Math.PI * 0.25) {
+      f = 1; // UP
+    } else if (angle > Math.PI * 0.25 && angle < Math.PI * 0.75) {
+      f = -1; // DOWN
+    }
+
+    if (Math.abs(angle) < Math.PI * 0.35) {
+      r = 1; // RIGHT
+    } else if (Math.abs(angle) > Math.PI * 0.65) {
+      r = -1; // LEFT
+    }
+
+    setDpadDir({ forward: f, right: r });
   };
 
-  const handleJoystickTouchMove = (e: React.TouchEvent) => {
+  const handleDpadTouchStart = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    const touch = e.changedTouches[0];
+    dpadTouchId.current = touch.identifier;
+    handleDpadUpdate(touch.clientX, touch.clientY);
+  };
+
+  const handleDpadTouchMove = (e: React.TouchEvent) => {
     e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
-      if (touch.identifier === joystickTouchId.current) {
-        const dx = touch.clientX - joystickCenter.current.x;
-        const dy = touch.clientY - joystickCenter.current.y;
-        const maxDist = 40;
-        const dist = Math.hypot(dx, dy);
-        const clampedDist = Math.min(dist, maxDist);
-        const angle = Math.atan2(dy, dx);
-
-        const kx = Math.cos(angle) * clampedDist;
-        const ky = Math.sin(angle) * clampedDist;
-
-        setJoystickKnob({ x: kx, y: ky });
-        joystickVector.current = {
-          x: kx / maxDist,
-          y: -ky / maxDist,
-        };
-        emitInput();
+      if (touch.identifier === dpadTouchId.current) {
+        handleDpadUpdate(touch.clientX, touch.clientY);
         break;
       }
     }
   };
 
-  const handleJoystickTouchEnd = (e: React.TouchEvent) => {
+  const handleDpadTouchEnd = (e: React.TouchEvent) => {
     e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
-      if (touch.identifier === joystickTouchId.current) {
-        joystickTouchId.current = null;
-        setJoystickActive(false);
-        setJoystickKnob({ x: 0, y: 0 });
-        joystickVector.current = { x: 0, y: 0 };
-        emitInput();
+      if (touch.identifier === dpadTouchId.current) {
+        dpadTouchId.current = null;
+        setDpadDir({ forward: 0, right: 0 });
         break;
       }
     }
   };
 
-  // Touch handlers for World Interaction & Camera Look (Excludes UI & Joystick Zones)
+  // Touch handlers for World Interaction & Camera Look (Excludes UI Zones)
   const handleTouchStart = (e: React.TouchEvent) => {
     const screenW = window.innerWidth;
     const screenH = window.innerHeight;
@@ -242,13 +359,13 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         continue;
       }
 
-      // 2. Deadzone: Ignore touches in bottom-left Joystick quadrant (prevents accidental mining/placing)
-      if (touch.clientX < 160 && touch.clientY > screenH - 180) {
+      // 2. Deadzone: Ignore touches in bottom-left D-Pad quadrant
+      if (touch.clientX < 190 && touch.clientY > screenH - 220) {
         continue;
       }
 
       // 3. Deadzone: Ignore touches in bottom-right Jump button area
-      if (touch.clientX > screenW - 120 && touch.clientY > screenH - 160) {
+      if (touch.clientX > screenW - 130 && touch.clientY > screenH - 180) {
         continue;
       }
 
@@ -274,7 +391,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         setBreakProgress(0);
 
         const startTime = performance.now();
-        const duration = 300; // 300ms hold threshold
+        const duration = 280; // 280ms hold threshold for mining
 
         const tickProgress = () => {
           const elapsed = performance.now() - startTime;
@@ -292,7 +409,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
             if (!holdBreakInterval.current) {
               holdBreakInterval.current = window.setInterval(() => {
                 onActionMine(targetPos);
-              }, 240);
+              }, 220);
             }
           } else {
             holdBreakTimer.current = window.setTimeout(tickProgress, 25);
@@ -320,10 +437,9 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           touch.clientY - lookStartPos.current.y
         );
 
-        // If finger swiped > 8px, it is a camera rotation swipe!
+        // If finger swiped > 8px, it is camera rotation!
         if (totalMoved > 8) {
           hasMovedRef.current = true;
-          // Cancel hold break because player is actively panning camera!
           cancelHoldBreak();
         }
 
@@ -344,11 +460,9 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         onAimTouchCoords?.(null);
         const duration = performance.now() - touchStartTimeRef.current;
 
-        // MCPE Rule:
         // Place ONLY if:
         // - Finger didn't drag camera (!hasMovedRef.current)
         // - Finger didn't break a block (!didBreakRef.current)
-        // - Finger didn't enter hold-breaking mode (!isBreakingRef.current)
         // - It was a quick tap (< 240ms)
         if (!hasMovedRef.current && !didBreakRef.current && !isBreakingRef.current && duration < 240) {
           onActionPlace({ x: touch.clientX, y: touch.clientY });
@@ -367,7 +481,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
     >
-      {/* PC ONLY: Center Crosshair (HIDDEN ON MOBILE as requested!) */}
+      {/* PC ONLY: Center Crosshair (Hidden on mobile) */}
       {!isMobile && isPointerLocked && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center">
           <div className="w-5 h-5 relative">
@@ -378,7 +492,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* MCPE Break Progress Radial Indicator (No icons or emojis!) */}
+      {/* MCPE Break Progress Radial Indicator */}
       {breakProgress !== null && breakIndicatorPos && (
         <div
           className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center z-40"
@@ -408,62 +522,130 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* Minimal Virtual Joystick (Bottom Left - Clean B&W styling, strictly isolated) */}
+      {/* OFFICIAL MCPE CROSS D-PAD (Bottom Left) */}
       <div
-        className="ui-touch-interactive absolute bottom-20 sm:bottom-24 left-5 sm:left-8 pointer-events-auto select-none touch-none"
-        onTouchStart={handleJoystickTouchStart}
-        onTouchMove={handleJoystickTouchMove}
-        onTouchEnd={handleJoystickTouchEnd}
-        onTouchCancel={handleJoystickTouchEnd}
+        ref={dpadContainerRef}
+        className="ui-touch-interactive absolute bottom-18 sm:bottom-22 left-4 sm:left-6 pointer-events-auto select-none touch-none z-30"
+        onTouchStart={handleDpadTouchStart}
+        onTouchMove={handleDpadTouchMove}
+        onTouchEnd={handleDpadTouchEnd}
+        onTouchCancel={handleDpadTouchEnd}
       >
-        <div
-          className={`w-24 h-24 rounded-full border transition-colors flex items-center justify-center relative shadow-lg ${
-            joystickActive ? 'bg-black/60 border-white/70' : 'bg-black/30 border-white/20'
-          }`}
-        >
-          <div className="w-10 h-10 rounded-full border border-white/10" />
-          {/* Thumb knob */}
-          <div
-            className="w-10 h-10 rounded-full bg-white/95 border border-white shadow-md absolute flex items-center justify-center pointer-events-none"
-            style={{
-              transform: `translate(${joystickKnob.x}px, ${joystickKnob.y}px)`,
-              transition: joystickActive ? 'none' : 'transform 0.15s ease-out',
-            }}
+        <div className="relative w-36 h-36 flex items-center justify-center">
+          {/* Forward (UP) */}
+          <button
+            type="button"
+            className={`mcpe-dpad-btn absolute top-0 left-12 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
+              dpadDir.forward === 1 ? 'active' : ''
+            }`}
+            title="Move Forward"
           >
-            <div className="w-3 h-3 rounded-full bg-black/70" />
-          </div>
+            ▲
+          </button>
+
+          {/* Left */}
+          <button
+            type="button"
+            className={`mcpe-dpad-btn absolute top-12 left-0 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
+              dpadDir.right === -1 ? 'active' : ''
+            }`}
+            title="Strafe Left"
+          >
+            ◀
+          </button>
+
+          {/* Center Sneak / Crouch Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsSneaking(!isSneaking);
+            }}
+            className={`mcpe-dpad-btn absolute top-12 left-12 w-12 h-12 flex items-center justify-center text-white text-base ${
+              isSneaking ? 'active text-yellow-300' : 'text-white/80'
+            }`}
+            title="Sneak / Crouch"
+          >
+            ◆
+          </button>
+
+          {/* Right */}
+          <button
+            type="button"
+            className={`mcpe-dpad-btn absolute top-12 right-0 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
+              dpadDir.right === 1 ? 'active' : ''
+            }`}
+            title="Strafe Right"
+          >
+            ▶
+          </button>
+
+          {/* Backward (DOWN) */}
+          <button
+            type="button"
+            className={`mcpe-dpad-btn absolute bottom-0 left-12 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
+              dpadDir.forward === -1 ? 'active' : ''
+            }`}
+            title="Move Backward"
+          >
+            ▼
+          </button>
         </div>
       </div>
 
-      {/* Single Clean Jump Button on Bottom Right */}
-      <div className="ui-touch-interactive absolute bottom-20 sm:bottom-24 right-5 sm:right-8 pointer-events-auto">
+      {/* OFFICIAL MCPE JUMP & CAMERA CONTROLS (Bottom Right) */}
+      <div className="ui-touch-interactive absolute bottom-20 sm:bottom-24 right-5 sm:right-8 pointer-events-auto flex flex-col items-center gap-3 z-30">
+        {/* Physics Maker HUD Toggle (Create/Aeronautics Wand) */}
+        {onTogglePhysicsMaker && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePhysicsMaker();
+            }}
+            className={`mcpe-action-btn w-11 h-11 flex items-center justify-center transition active:scale-95 shadow-xl ${
+              isPhysicsMakerActive
+                ? 'bg-cyan-600/90 text-yellow-300 border-2 border-yellow-300'
+                : 'text-cyan-300 hover:text-white'
+            }`}
+            title="Physics Maker (Create/Aeronautics)"
+          >
+            <Wrench className="w-5 h-5" />
+          </button>
+        )}
+
+        {/* Camera Perspective Toggle */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleViewMode();
+          }}
+          className="mcpe-action-btn w-11 h-11 flex items-center justify-center text-white active:scale-95 transition"
+          title="Toggle Perspective (F5)"
+        >
+          <Camera className="w-5 h-5" />
+        </button>
+
+        {/* MCPE Jump Button */}
         <button
           onTouchStart={(e) => {
             e.stopPropagation();
             setJumpPressed(true);
-            emitInput();
           }}
           onTouchEnd={(e) => {
             e.stopPropagation();
             setJumpPressed(false);
-            emitInput();
           }}
-          onMouseDown={() => {
-            setJumpPressed(true);
-            emitInput();
-          }}
-          onMouseUp={() => {
-            setJumpPressed(false);
-            emitInput();
-          }}
-          className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-black/50 backdrop-blur-md border border-white/30 text-white flex items-center justify-center active:scale-90 active:bg-white active:text-black shadow-lg transition"
+          onMouseDown={() => setJumpPressed(true)}
+          onMouseUp={() => setJumpPressed(false)}
+          className={`mcpe-action-btn w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-white text-2xl font-bold shadow-2xl ${
+            jumpPressed ? 'active' : ''
+          }`}
           title="Jump"
         >
-          <ArrowUp className="w-6 h-6 stroke-[2.5]" />
+          ▲
         </button>
       </div>
 
-      {/* Authentic Minecraft 9-Slot Hotbar (Using user's hotbar.png and hotbar_selection.png) */}
+      {/* AUTHENTIC MINECRAFT 9-SLOT HOTBAR (Uses genuine hotbar.png and hotbar_selection.png) */}
       <div
         className="ui-touch-interactive absolute bottom-2 sm:bottom-3 left-1/2 -translate-x-1/2 pointer-events-auto z-30 select-none max-w-[98vw] overflow-x-auto pb-0.5 scrollbar-none"
         onTouchStart={(e) => e.stopPropagation()}
@@ -500,7 +682,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
             );
           })()}
 
-          {/* 9 Hotbar Slots */}
+          {/* 9 Hotbar Slots with 3D Isometric Voxel Icons */}
           {HOTBAR_ITEMS.map((item, idx) => {
             return (
               <button
@@ -521,14 +703,11 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                 }}
                 title={`${idx + 1}: ${item.name}`}
               >
-                {/* Pixel Block Icon */}
-                <div
-                  className="w-6 h-6 rounded-xs shadow-md border"
-                  style={{
-                    backgroundColor: item.color,
-                    borderColor: item.border,
-                  }}
-                />
+                {/* 3D Isometric Pixel Art Block Icon */}
+                <div className="flex items-center justify-center drop-shadow-md">
+                  <IsometricVoxelIcon type={item.type} />
+                </div>
+                {/* Slot index number in Minecraft font */}
                 <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
                   {idx + 1}
                 </span>

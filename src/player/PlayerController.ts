@@ -78,16 +78,18 @@ export class PlayerController {
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(spawnPos[0], spawnPos[1], spawnPos[2])
       .lockRotations()
-      .setLinearDamping(0.1)
+      .setLinearDamping(0.05)
       .setCanSleep(false);
 
     this.body = this.world.createRigidBody(bodyDesc);
 
     // Player capsule: radius = 0.34m, halfHeight = 0.55m (Total height ~ 1.78m)
-    // Zero friction prevents capsule from sticking/climbing against vertical block walls
+    // Zero friction + Min combine rule prevents capsule from ever sticking/climbing against walls
     const colliderDesc = RAPIER.ColliderDesc.capsule(0.55, 0.34)
       .setFriction(0.0)
       .setRestitution(0.0)
+      .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
+      .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Min)
       .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
 
     this.collider = this.world.createCollider(colliderDesc, this.body);
@@ -125,33 +127,73 @@ export class PlayerController {
 
     this.isGrounded = hit !== null && hit.timeOfImpact < 0.28;
 
-    // 2. Horizontal Movement
+    // 2. Horizontal Movement & Anti-Wall-Stick Sliding
     const speed = input.sprint ? this.sprintSpeed : this.walkSpeed;
 
     // Camera horizontal forward and strafe directions
     PlayerController.scratchForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
     PlayerController.scratchRight.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
 
-    const targetVelX =
+    let targetVelX =
       (PlayerController.scratchForward.x * input.moveForward +
         PlayerController.scratchRight.x * input.moveRight) *
       speed;
-    const targetVelZ =
+    let targetVelZ =
       (PlayerController.scratchForward.z * input.moveForward +
         PlayerController.scratchRight.z * input.moveRight) *
       speed;
 
-    const hasInput = Math.hypot(input.moveForward, input.moveRight) > 0.05;
-    const accel = this.isGrounded ? 18 : 6;
+    // Smooth Wall-Sliding: If moving toward a wall, project velocity onto wall surface
+    // This stops horizontal velocity from fighting contact constraints and sticking in air!
+    const moveMag = Math.hypot(targetVelX, targetVelZ);
+    if (moveMag > 0.05) {
+      const dirX = targetVelX / moveMag;
+      const dirZ = targetVelZ / moveMag;
+      const rayDist = 0.45; // capsule radius (0.34) + margin
+
+      for (const yOffset of [-0.4, 0.0, 0.4]) {
+        const rayStart = new RAPIER.Vector3(pos.x, pos.y + yOffset, pos.z);
+        const rayDir = new RAPIER.Vector3(dirX, 0, dirZ);
+        const wallHit = this.world.castRayAndGetNormal(
+          new RAPIER.Ray(rayStart, rayDir),
+          rayDist,
+          true,
+          undefined,
+          undefined,
+          this.collider
+        );
+
+        if (wallHit && Math.abs(wallHit.normal.y) < 0.5) {
+          const normalDot = targetVelX * wallHit.normal.x + targetVelZ * wallHit.normal.z;
+          if (normalDot < 0) {
+            targetVelX -= normalDot * wallHit.normal.x;
+            targetVelZ -= normalDot * wallHit.normal.z;
+
+            // In air: gently push capsule away from wall surface to prevent trimesh edge snags
+            if (!this.isGrounded && wallHit.timeOfImpact < 0.36) {
+              const nudgeX = wallHit.normal.x * 0.008;
+              const nudgeZ = wallHit.normal.z * 0.008;
+              this.body.setTranslation({ x: pos.x + nudgeX, y: pos.y, z: pos.z + nudgeZ }, true);
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    const accel = this.isGrounded ? 18 : 8;
 
     const newVx = THREE.MathUtils.lerp(linvel.x, targetVelX, delta * accel);
     const newVz = THREE.MathUtils.lerp(linvel.z, targetVelZ, delta * accel);
     let newVy = linvel.y;
 
-    // 3. Jump
+    // 3. Jump & In-Air Gravity (Prevents sticking to wall when jumping into corners)
     if (input.jump && this.isGrounded && linvel.y < 2.0) {
       newVy = this.jumpVelocity;
       soundManager.playJump();
+    } else if (!this.isGrounded) {
+      // Apply clean downward acceleration so player always slides down walls
+      newVy = Math.max(-28, linvel.y - 24.0 * delta);
     }
 
     this.body.setLinvel({ x: newVx, y: newVy, z: newVz }, true);
@@ -208,17 +250,22 @@ export class PlayerController {
       this.camera.rotation.x = this.pitch;
       this.camera.rotation.z = 0;
     } else {
-      // Third person: over-the-shoulder chase camera
-      const targetPos = PlayerController.scratchVec.set(pos.x, pos.y + 0.75, pos.z);
-      const camDist = 3.6;
+      // Third person: over-the-shoulder chase camera with anti-block clipping
+      const targetPos = PlayerController.scratchVec.set(pos.x, pos.y + 0.72, pos.z);
+      const maxDist = 3.5;
 
-      const camOffset = new THREE.Vector3(
-        Math.sin(this.yaw) * Math.cos(this.pitch) * camDist,
-        Math.max(0.3, -Math.sin(this.pitch) * camDist + 0.75),
-        Math.cos(this.yaw) * Math.cos(this.pitch) * camDist
-      );
+      const camDir = new THREE.Vector3(
+        Math.sin(this.yaw) * Math.cos(this.pitch),
+        Math.max(0.08, -Math.sin(this.pitch) + 0.15),
+        Math.cos(this.yaw) * Math.cos(this.pitch)
+      ).normalize();
 
-      this.camera.position.copy(targetPos).add(camOffset);
+      // Check if any block blocks the camera line of sight
+      const camRay = new THREE.Ray(targetPos, camDir);
+      const hit = this.voxelWorld.raycastVoxel(camRay, maxDist);
+      const actualDist = hit ? Math.max(0.4, hit.point.distanceTo(targetPos) - 0.25) : maxDist;
+
+      this.camera.position.copy(targetPos).addScaledVector(camDir, actualDist);
       this.camera.lookAt(targetPos);
     }
   }
@@ -295,6 +342,25 @@ export class PlayerController {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Raycast targeted voxel coordinates
+   */
+  public getTargetedVoxel(input?: THREE.Ray | { x: number; y: number }): { x: number; y: number; z: number } | null {
+    let ray: THREE.Ray;
+    if (input instanceof THREE.Ray) {
+      ray = input;
+    } else if (input && typeof input.x === 'number' && typeof input.y === 'number') {
+      ray = this.getRayFromScreen(input.x, input.y);
+    } else {
+      ray = this.getAimRay();
+    }
+    const hit = this.voxelWorld.raycastVoxel(ray, 18.0);
+    if (hit) {
+      return { x: hit.blockX, y: hit.blockY, z: hit.blockZ };
+    }
+    return null;
   }
 
   /**

@@ -110,7 +110,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     engine.initialize().then(() => {
       if (isDisposed) return;
       onEngineReady(engine);
-      engine.loadPreset('jenga');
+      // Clean Minecraft world by default: no clutter physics objects
+      engine.loadPreset('empty');
       if (engine.player) {
         engine.player.setViewMode('first_person');
       }

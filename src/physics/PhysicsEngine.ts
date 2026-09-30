@@ -7,12 +7,17 @@ import {
   StructurePreset,
   VisualTheme,
   VoxelType,
+  PhysicsContraption,
+  ContraptionBlockInfo,
+  PhysicsJointInfo,
+  JointType,
 } from '../types/physics';
 import { MATERIAL_CONFIGS, getThreeMaterial } from './materials';
 import { soundManager } from '../audio/SoundEffects';
 import { SoftBody } from './SoftBody';
 import { VoxelWorld } from '../rendering/VoxelWorld';
 import { PlayerController, PlayerInput } from '../player/PlayerController';
+import { SelectionBoxRenderer } from '../rendering/SelectionBoxRenderer';
 
 export interface PhysicsEntity {
   id: string;
@@ -39,10 +44,14 @@ export class PhysicsEngine {
   public camera: THREE.PerspectiveCamera;
   public voxelWorld!: VoxelWorld;
   public player!: PlayerController;
+  public selectionRenderer: SelectionBoxRenderer;
 
   private entities: Map<string, PhysicsEntity> = new Map();
   private colliderToEntity: Map<number, PhysicsEntity> = new Map();
   public softBodies: Map<string, SoftBody> = new Map();
+  public contraptions: Map<string, PhysicsContraption> = new Map();
+  public joints: Map<string, PhysicsJointInfo> = new Map();
+  private colliderToContraption: Map<number, PhysicsContraption> = new Map();
   private eventQueue!: RAPIER.EventQueue;
 
   // Static ground colliders
@@ -53,6 +62,7 @@ export class PhysicsEngine {
   // Grab & Drag state
   public grabbedEntity: PhysicsEntity | null = null;
   public grabbedSoftBody: { body: SoftBody; nodeIndex: number } | null = null;
+  public grabbedContraption: PhysicsContraption | null = null;
   private grabOffset: THREE.Vector3 = new THREE.Vector3();
   private dragPlane: THREE.Plane = new THREE.Plane();
   private dragTargetPos: THREE.Vector3 = new THREE.Vector3();
@@ -78,6 +88,7 @@ export class PhysicsEngine {
     this.scene = scene;
     this.camera = camera;
     this.voxelWorld = new VoxelWorld(scene);
+    this.selectionRenderer = new SelectionBoxRenderer(scene);
   }
 
   public async initialize(): Promise<void> {
@@ -112,8 +123,9 @@ export class PhysicsEngine {
     const groundSize = 180;
     const floorColliderDesc = RAPIER.ColliderDesc.cuboid(groundSize / 2, 0.5, groundSize / 2)
       .setTranslation(0, 0, 0)
-      .setFriction(0.65)
-      .setRestitution(0.2)
+      .setFriction(0.2)
+      .setRestitution(0.0)
+      .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
       .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
 
     this.floorCollider = this.world.createCollider(floorColliderDesc, this.floorBody);
@@ -308,23 +320,38 @@ export class PhysicsEngine {
     for (const id of Array.from(this.softBodies.keys())) {
       this.removeSoftBody(id);
     }
+    for (const id of Array.from(this.contraptions.keys())) {
+      this.removeContraption(id);
+    }
+    this.clearAllJoints();
     this.colliderToEntity.clear();
+    this.colliderToContraption.clear();
   }
 
   public getBlockCount(): number {
-    return this.entities.size + this.softBodies.size;
+    let contraptionBlockCount = 0;
+    for (const c of this.contraptions.values()) {
+      contraptionBlockCount += c.blocks.length;
+    }
+    return this.entities.size + this.softBodies.size + contraptionBlockCount;
   }
 
   public getAllMeshes(): THREE.Mesh[] {
     const list: THREE.Mesh[] = [];
     for (const e of this.entities.values()) list.push(e.mesh);
     for (const sb of this.softBodies.values()) list.push(sb.mesh);
+    for (const c of this.contraptions.values()) {
+      c.group.traverse((child: any) => {
+        if (child.isMesh) list.push(child);
+      });
+    }
     return list;
   }
 
   public pickBlock(normalizedRay: THREE.Ray): {
     entity?: PhysicsEntity;
     softBody?: SoftBody;
+    contraption?: PhysicsContraption;
     hitPoint: THREE.Vector3;
   } | null {
     const meshes = this.getAllMeshes();
@@ -343,6 +370,21 @@ export class PhysicsEngine {
         };
       }
 
+      // Check if child of a contraption
+      let cur: THREE.Object3D | null = mesh;
+      while (cur) {
+        if (cur.userData?.isContraption && cur.userData?.id) {
+          const contraption = this.contraptions.get(cur.userData.id);
+          if (contraption) {
+            return {
+              contraption,
+              hitPoint: topHit.point,
+            };
+          }
+        }
+        cur = cur.parent;
+      }
+
       const entityId = mesh.userData?.id;
       if (entityId && this.entities.has(entityId)) {
         return {
@@ -355,7 +397,7 @@ export class PhysicsEngine {
   }
 
   public startGrab(
-    target: { entity?: PhysicsEntity; softBody?: SoftBody },
+    target: { entity?: PhysicsEntity; softBody?: SoftBody; contraption?: PhysicsContraption },
     hitPoint: THREE.Vector3
   ) {
     this.camera.getWorldDirection(PhysicsEngine.scratchCamDir);
@@ -371,6 +413,11 @@ export class PhysicsEngine {
       };
       target.softBody.grabbedNodeIndex = this.grabbedSoftBody.nodeIndex;
       target.softBody.grabTarget.copy(hitPoint);
+    } else if (target.contraption) {
+      this.grabbedContraption = target.contraption;
+      this.grabbedContraption.body.wakeUp();
+      const p = target.contraption.body.translation();
+      this.grabOffset.copy(new THREE.Vector3(p.x, p.y, p.z)).sub(hitPoint);
     } else if (target.entity) {
       this.grabbedEntity = target.entity;
       this.grabbedEntity.body.wakeUp();
@@ -393,6 +440,14 @@ export class PhysicsEngine {
 
       if (this.grabbedSoftBody) {
         this.grabbedSoftBody.body.grabTarget.copy(intersection);
+      } else if (this.grabbedContraption) {
+        const targetPos = this.dragTargetPos.clone().add(this.grabOffset);
+        const currentPos = this.grabbedContraption.body.translation();
+        const dir = targetPos.sub(new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z));
+        this.grabbedContraption.body.setLinvel(
+          { x: dir.x * 12, y: dir.y * 12, z: dir.z * 12 },
+          true
+        );
       }
     }
   }
@@ -401,6 +456,24 @@ export class PhysicsEngine {
     if (this.grabbedSoftBody) {
       this.grabbedSoftBody.body.grabbedNodeIndex = null;
       this.grabbedSoftBody = null;
+    }
+
+    if (this.grabbedContraption) {
+      if (this.dragVelocityHistory.length >= 2) {
+        const oldest = this.dragVelocityHistory[0];
+        const newest = this.dragVelocityHistory[this.dragVelocityHistory.length - 1];
+        const dt = (newest.time - oldest.time) / 1000;
+
+        if (dt > 0.015) {
+          const vel = newest.pos.clone().sub(oldest.pos).divideScalar(dt);
+          vel.clampLength(0, 35);
+          this.grabbedContraption.body.setLinvel(
+            { x: vel.x * 0.9, y: vel.y * 0.9, z: vel.z * 0.9 },
+            true
+          );
+        }
+      }
+      this.grabbedContraption = null;
     }
 
     if (this.grabbedEntity) {
@@ -572,6 +645,15 @@ export class PhysicsEngine {
     }
 
     switch (preset) {
+      case 'contraption':
+        this.buildContraptionShowcase();
+        break;
+      case 'articulated_arm':
+        this.buildArticulatedArm();
+        break;
+      case 'bridge':
+        this.buildSuspensionBridge();
+        break;
       case 'softbody':
         this.buildSoftBodyShowcase();
         break;
@@ -598,6 +680,597 @@ export class PhysicsEngine {
         this.spawnBlock('cube', 'tnt', [0, 12.0, 0]);
         break;
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // CONTRAPTION / PHYSICS MAKER SYSTEM (Create / Aeronautics / Valkyrien Skies)
+  // --------------------------------------------------------------------------
+
+  public assembleContraptionFromSelection(): PhysicsContraption | null {
+    const bounds = this.selectionRenderer.getBounds();
+    if (!bounds) return null;
+    return this.assembleContraption(bounds.min, bounds.max);
+  }
+
+  public assembleContraption(min: THREE.Vector3, max: THREE.Vector3): PhysicsContraption | null {
+    const minX = Math.floor(Math.min(min.x, max.x));
+    const maxX = Math.floor(Math.max(min.x, max.x));
+    const minY = Math.floor(Math.min(min.y, max.y));
+    const maxY = Math.floor(Math.max(min.y, max.y));
+    const minZ = Math.floor(Math.min(min.z, max.z));
+    const maxZ = Math.floor(Math.max(min.z, max.z));
+
+    const blocks: { x: number; y: number; z: number; type: VoxelType }[] = [];
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          const v = this.voxelWorld.getVoxel(x, y, z);
+          if (v !== VoxelType.AIR && v !== VoxelType.BEDROCK) {
+            blocks.push({ x, y, z, type: v });
+            sumX += x + 0.5;
+            sumY += y + 0.5;
+            sumZ += z + 0.5;
+          }
+        }
+      }
+    }
+
+    if (blocks.length === 0) {
+      return null;
+    }
+
+    // 1. Center of Mass
+    const com = new THREE.Vector3(
+      sumX / blocks.length,
+      sumY / blocks.length,
+      sumZ / blocks.length
+    );
+
+    // 2. Remove all selected blocks from static VoxelWorld (chunk meshes & colliders update!)
+    for (const b of blocks) {
+      this.voxelWorld.setVoxel(b.x, b.y, b.z, VoxelType.AIR);
+    }
+
+    // 3. Create ONE Dynamic Rapier RigidBody at COM
+    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+      .setTranslation(com.x, com.y, com.z)
+      .setLinearDamping(0.04)
+      .setAngularDamping(0.08)
+      .setCanSleep(true);
+    const body = this.world.createRigidBody(bodyDesc);
+
+    const colliders: RAPIER.Collider[] = [];
+    const contraptionBlocks: ContraptionBlockInfo[] = [];
+
+    // 4. Create Three.js Group
+    const group = new THREE.Group();
+    group.position.copy(com);
+
+    const id = `contraption_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    group.userData = { id, isContraption: true };
+
+    let totalMass = 0;
+
+    // 5. Build compound colliders & block meshes
+    for (const b of blocks) {
+      const relX = b.x + 0.5 - com.x;
+      const relY = b.y + 0.5 - com.y;
+      const relZ = b.z + 0.5 - com.z;
+
+      contraptionBlocks.push({
+        relX,
+        relY,
+        relZ,
+        type: b.type,
+      });
+
+      // Density calculation
+      let density = 1.0;
+      if (b.type === VoxelType.STONE || b.type === VoxelType.COBBLESTONE) density = 2.4;
+      else if (b.type === VoxelType.GOLD) density = 5.0;
+      else if (b.type === VoxelType.WOOD) density = 0.8;
+      else if (b.type === VoxelType.GLASS) density = 1.2;
+
+      totalMass += density;
+
+      // Compound collider
+      const colDesc = RAPIER.ColliderDesc.cuboid(0.5, 0.5, 0.5)
+        .setTranslation(relX, relY, relZ)
+        .setDensity(density)
+        .setFriction(0.45)
+        .setRestitution(0.12)
+        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+
+      const col = this.world.createCollider(colDesc, body);
+      colliders.push(col);
+
+      // Block Mesh
+      const mesh = this.createContraptionBlockMesh(b.type);
+      mesh.position.set(relX, relY, relZ);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+
+    this.scene.add(group);
+
+    const contraption: PhysicsContraption = {
+      id,
+      body,
+      colliders,
+      group,
+      blocks: contraptionBlocks,
+      centerOfMass: { x: com.x, y: com.y, z: com.z },
+      mass: totalMass,
+    };
+
+    this.contraptions.set(id, contraption);
+    for (const col of colliders) {
+      this.colliderToContraption.set(col.handle, contraption);
+    }
+
+    // Audio & particles
+    soundManager.playAssemble();
+    this.createAssembleSparks(com, Math.max(2, Math.sqrt(blocks.length)));
+
+    // Clear selection
+    this.selectionRenderer.clear();
+
+    return contraption;
+  }
+
+  public disassembleContraption(id: string): boolean {
+    const c = this.contraptions.get(id);
+    if (!c) return false;
+
+    // Remove any connected joints
+    for (const [jid, j] of this.joints.entries()) {
+      if (j.bodyAId === id || j.bodyBId === id) {
+        this.removeJoint(jid);
+      }
+    }
+
+    // Unfuse blocks back into static voxel world at current world positions
+    const pos = c.body.translation();
+    const rot = c.body.rotation();
+    const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
+    const basePos = new THREE.Vector3(pos.x, pos.y, pos.z);
+
+    for (const b of c.blocks) {
+      const worldPos = new THREE.Vector3(b.relX, b.relY, b.relZ).applyQuaternion(q).add(basePos);
+      const bx = Math.round(worldPos.x - 0.5);
+      const by = Math.round(worldPos.y - 0.5);
+      const bz = Math.round(worldPos.z - 0.5);
+
+      if (by >= 1 && by < 28) {
+        this.voxelWorld.setVoxel(bx, by, bz, b.type);
+      }
+    }
+
+    // Remove physics body and group
+    for (const col of c.colliders) {
+      this.colliderToContraption.delete(col.handle);
+      this.world.removeCollider(col, false);
+    }
+    this.world.removeRigidBody(c.body);
+    this.scene.remove(c.group);
+
+    c.group.traverse((obj: any) => {
+      if (obj.geometry) obj.geometry.dispose();
+    });
+
+    this.contraptions.delete(id);
+    soundManager.playPop(false);
+    return true;
+  }
+
+  public removeContraption(id: string) {
+    const c = this.contraptions.get(id);
+    if (!c) return;
+
+    if (this.grabbedContraption?.id === id) {
+      this.releaseGrab();
+    }
+
+    for (const [jid, j] of this.joints.entries()) {
+      if (j.bodyAId === id || j.bodyBId === id) {
+        this.removeJoint(jid);
+      }
+    }
+
+    for (const col of c.colliders) {
+      this.colliderToContraption.delete(col.handle);
+      this.world.removeCollider(col, false);
+    }
+    this.world.removeRigidBody(c.body);
+    this.scene.remove(c.group);
+    c.group.traverse((obj: any) => {
+      if (obj.geometry) obj.geometry.dispose();
+    });
+    this.contraptions.delete(id);
+  }
+
+  public createContraptionBlockMesh(voxelType: VoxelType): THREE.Mesh {
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const tileW = 1.0 / 16.0;
+
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const faceLights = [0.68, 0.68, 1.0, 0.52, 0.82, 0.82];
+
+    for (let face = 0; face < 6; face++) {
+      const [tileCol, tileRow] = (this.voxelWorld as any).getVoxelFaceTile(voxelType, face);
+      const u0 = tileCol * tileW;
+      const u1 = u0 + tileW;
+      const v0 = 1.0 - (tileRow + 1) * tileW;
+      const v1 = 1.0 - tileRow * tileW;
+
+      uvs.push(
+        u0, v1,
+        u1, v1,
+        u0, v0,
+        u1, v0
+      );
+
+      const light = faceLights[face];
+      for (let i = 0; i < 4; i++) {
+        colors.push(light, light, light);
+      }
+    }
+
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    const mat = voxelType === VoxelType.GLASS ? this.voxelWorld.transparentMaterial : this.voxelWorld.material;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData = { isContraptionBlock: true, voxelType };
+    return mesh;
+  }
+
+  private createAssembleSparks(center: THREE.Vector3, radius: number = 3.0) {
+    const count = 32;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(count * 3);
+    const vels: THREE.Vector3[] = [];
+
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = center.x + (Math.random() - 0.5) * radius;
+      pos[i * 3 + 1] = center.y + (Math.random() - 0.5) * radius;
+      pos[i * 3 + 2] = center.z + (Math.random() - 0.5) * radius;
+
+      vels.push(
+        new THREE.Vector3(
+          (Math.random() - 0.5) * 5,
+          Math.random() * 4 + 2,
+          (Math.random() - 0.5) * 5
+        )
+      );
+    }
+
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0x38bdf8,
+      size: 0.32,
+      transparent: true,
+      opacity: 1.0,
+    });
+    const points = new THREE.Points(geo, mat);
+    this.scene.add(points);
+
+    this.activeParticles.push({
+      mesh: points,
+      life: 0,
+      maxLife: 0.6,
+      update: (dt) => {
+        const arr = (geo.attributes.position as THREE.BufferAttribute).array as Float32Array;
+        for (let i = 0; i < count; i++) {
+          vels[i].y -= 9.8 * dt;
+          arr[i * 3] += vels[i].x * dt;
+          arr[i * 3 + 1] += vels[i].y * dt;
+          arr[i * 3 + 2] += vels[i].z * dt;
+        }
+        geo.attributes.position.needsUpdate = true;
+        mat.opacity = Math.max(0, 1 - points.userData.life / 0.6);
+        return true;
+      },
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // JOINT CONSTRAINTS (Hinge, Distance / Spring, Fixed Weld)
+  // --------------------------------------------------------------------------
+
+  public getBodyById(id: string): RAPIER.RigidBody | null {
+    if (this.entities.has(id)) return this.entities.get(id)!.body;
+    if (this.contraptions.has(id)) return this.contraptions.get(id)!.body;
+    return null;
+  }
+
+  public createHingeJoint(
+    bodyAId: string,
+    bodyBId: string,
+    anchorA: THREE.Vector3,
+    anchorB: THREE.Vector3,
+    axis: THREE.Vector3 = new THREE.Vector3(0, 1, 0)
+  ): PhysicsJointInfo | null {
+    const bodyA = this.getBodyById(bodyAId);
+    const bodyB = this.getBodyById(bodyBId);
+    if (!bodyA || !bodyB) return null;
+
+    const rAnchorA = new RAPIER.Vector3(anchorA.x, anchorA.y, anchorA.z);
+    const rAnchorB = new RAPIER.Vector3(anchorB.x, anchorB.y, anchorB.z);
+    const rAxis = new RAPIER.Vector3(axis.x, axis.y, axis.z);
+
+    const jointData = RAPIER.JointData.revolute(rAnchorA, rAnchorB, rAxis);
+    const joint = this.world.createImpulseJoint(jointData, bodyA, bodyB, true);
+
+    const id = `joint_hinge_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    // Visual Hinge Axle Pin (metallic brass cylinder)
+    const pinGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.8, 16);
+    const pinMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      metalness: 0.85,
+      roughness: 0.25,
+    });
+    const visualMesh = new THREE.Mesh(pinGeo, pinMat);
+    this.scene.add(visualMesh);
+
+    const jointInfo: PhysicsJointInfo = {
+      id,
+      type: 'revolute',
+      joint,
+      bodyAId,
+      bodyBId,
+      anchorA: { x: anchorA.x, y: anchorA.y, z: anchorA.z },
+      anchorB: { x: anchorB.x, y: anchorB.y, z: anchorB.z },
+      visualMesh,
+    };
+
+    this.joints.set(id, jointInfo);
+    soundManager.playJointConnect();
+    return jointInfo;
+  }
+
+  public createDistanceJoint(
+    bodyAId: string,
+    bodyBId: string,
+    anchorA: THREE.Vector3,
+    anchorB: THREE.Vector3,
+    distance?: number,
+    stiffness: number = 600,
+    damping: number = 15
+  ): PhysicsJointInfo | null {
+    const bodyA = this.getBodyById(bodyAId);
+    const bodyB = this.getBodyById(bodyBId);
+    if (!bodyA || !bodyB) return null;
+
+    const rAnchorA = new RAPIER.Vector3(anchorA.x, anchorA.y, anchorA.z);
+    const rAnchorB = new RAPIER.Vector3(anchorB.x, anchorB.y, anchorB.z);
+
+    const restDist = distance !== undefined ? distance : anchorA.distanceTo(anchorB);
+    const jointData = RAPIER.JointData.spring(restDist, stiffness, damping, rAnchorA, rAnchorB);
+    const joint = this.world.createImpulseJoint(jointData, bodyA, bodyB, true);
+
+    const id = `joint_dist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    // Visual Rope / Cable
+    const cableGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 8);
+    const cableMat = new THREE.MeshStandardMaterial({
+      color: 0x64748b,
+      metalness: 0.6,
+      roughness: 0.4,
+    });
+    const visualMesh = new THREE.Mesh(cableGeo, cableMat);
+    this.scene.add(visualMesh);
+
+    const jointInfo: PhysicsJointInfo = {
+      id,
+      type: 'spring',
+      joint,
+      bodyAId,
+      bodyBId,
+      anchorA: { x: anchorA.x, y: anchorA.y, z: anchorA.z },
+      anchorB: { x: anchorB.x, y: anchorB.y, z: anchorB.z },
+      visualMesh,
+    };
+
+    this.joints.set(id, jointInfo);
+    soundManager.playJointConnect();
+    return jointInfo;
+  }
+
+  public createFixedJoint(
+    bodyAId: string,
+    bodyBId: string,
+    anchorA: THREE.Vector3,
+    anchorB: THREE.Vector3
+  ): PhysicsJointInfo | null {
+    const bodyA = this.getBodyById(bodyAId);
+    const bodyB = this.getBodyById(bodyBId);
+    if (!bodyA || !bodyB) return null;
+
+    const rAnchorA = new RAPIER.Vector3(anchorA.x, anchorA.y, anchorA.z);
+    const rAnchorB = new RAPIER.Vector3(anchorB.x, anchorB.y, anchorB.z);
+    const rot = new RAPIER.Quaternion(0, 0, 0, 1);
+
+    const jointData = RAPIER.JointData.fixed(rAnchorA, rot, rAnchorB, rot);
+    const joint = this.world.createImpulseJoint(jointData, bodyA, bodyB, true);
+
+    const id = `joint_fixed_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const weldGeo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+    const weldMat = new THREE.MeshStandardMaterial({ color: 0x0284c7 });
+    const visualMesh = new THREE.Mesh(weldGeo, weldMat);
+    this.scene.add(visualMesh);
+
+    const jointInfo: PhysicsJointInfo = {
+      id,
+      type: 'fixed',
+      joint,
+      bodyAId,
+      bodyBId,
+      anchorA: { x: anchorA.x, y: anchorA.y, z: anchorA.z },
+      anchorB: { x: anchorB.x, y: anchorB.y, z: anchorB.z },
+      visualMesh,
+    };
+
+    this.joints.set(id, jointInfo);
+    soundManager.playJointConnect();
+    return jointInfo;
+  }
+
+  public removeJoint(jointId: string) {
+    const j = this.joints.get(jointId);
+    if (!j) return;
+    this.world.removeImpulseJoint(j.joint, true);
+    if (j.visualMesh) {
+      this.scene.remove(j.visualMesh);
+      if (j.visualMesh.geometry) j.visualMesh.geometry.dispose();
+    }
+    this.joints.delete(jointId);
+  }
+
+  public clearAllJoints() {
+    for (const j of this.joints.values()) {
+      this.world.removeImpulseJoint(j.joint, true);
+      if (j.visualMesh) {
+        this.scene.remove(j.visualMesh);
+        if (j.visualMesh.geometry) j.visualMesh.geometry.dispose();
+      }
+    }
+    this.joints.clear();
+  }
+
+  private updateJointVisuals() {
+    for (const j of this.joints.values()) {
+      if (!j.visualMesh) continue;
+
+      const bodyA = this.getBodyById(j.bodyAId);
+      const bodyB = this.getBodyById(j.bodyBId);
+      if (!bodyA || !bodyB) continue;
+
+      const tA = bodyA.translation();
+      const rA = bodyA.rotation();
+      const qA = new THREE.Quaternion(rA.x, rA.y, rA.z, rA.w);
+      const worldA = new THREE.Vector3(j.anchorA.x, j.anchorA.y, j.anchorA.z).applyQuaternion(qA).add(new THREE.Vector3(tA.x, tA.y, tA.z));
+
+      const tB = bodyB.translation();
+      const rB = bodyB.rotation();
+      const qB = new THREE.Quaternion(rB.x, rB.y, rB.z, rB.w);
+      const worldB = new THREE.Vector3(j.anchorB.x, j.anchorB.y, j.anchorB.z).applyQuaternion(qB).add(new THREE.Vector3(tB.x, tB.y, tB.z));
+
+      if (j.type === 'spring' || j.type === 'distance') {
+        const dist = worldA.distanceTo(worldB);
+        j.visualMesh.position.copy(worldA).add(worldB).multiplyScalar(0.5);
+        j.visualMesh.scale.set(1, Math.max(0.01, dist), 1);
+        if (dist > 0.001) {
+          j.visualMesh.quaternion.setFromUnitVectors(
+            new THREE.Vector3(0, 1, 0),
+            worldB.clone().sub(worldA).normalize()
+          );
+        }
+      } else if (j.type === 'revolute') {
+        j.visualMesh.position.copy(worldA);
+        j.visualMesh.quaternion.copy(qA);
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // PRESET SCENES
+  // --------------------------------------------------------------------------
+
+  private buildContraptionShowcase() {
+    const baseY = 9;
+    // Build a block vehicle in world, then assemble it into physics
+    for (let x = -2; x <= 2; x++) {
+      for (let z = -1; z <= 1; z++) {
+        this.voxelWorld.setVoxel(x, baseY, z, VoxelType.WOOD);
+      }
+    }
+    // Cabin with glass and gold engine
+    this.voxelWorld.setVoxel(0, baseY + 1, 0, VoxelType.GOLD);
+    this.voxelWorld.setVoxel(-1, baseY + 1, 0, VoxelType.GLASS);
+    this.voxelWorld.setVoxel(1, baseY + 1, 0, VoxelType.GLASS);
+    this.voxelWorld.setVoxel(0, baseY + 1, -1, VoxelType.GLASS);
+    this.voxelWorld.setVoxel(0, baseY + 1, 1, VoxelType.GLASS);
+
+    // Bumpers
+    this.voxelWorld.setVoxel(-2, baseY + 1, 0, VoxelType.COBBLESTONE);
+    this.voxelWorld.setVoxel(2, baseY + 1, 0, VoxelType.COBBLESTONE);
+
+    // Assemble it into ONE physics contraption!
+    this.assembleContraption(new THREE.Vector3(-2, baseY, -1), new THREE.Vector3(2, baseY + 1, 1));
+  }
+
+  private buildArticulatedArm() {
+    const baseY = 9;
+    // Fixed base pillar
+    const base = this.spawnBlock('cylinder', 'metal', [0, baseY + 1, 0], [0.8, 2.0, 0.8]) as PhysicsEntity;
+    base.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+
+    // Arm 1 (plank)
+    const arm1 = this.spawnBlock('plank', 'wood', [1.8, baseY + 2.0, 0], [3.2, 0.5, 0.8]) as PhysicsEntity;
+
+    // Arm 2 (plank)
+    const arm2 = this.spawnBlock('plank', 'metal', [4.8, baseY + 2.0, 0], [3.0, 0.4, 0.6]) as PhysicsEntity;
+
+    // Weight at tip
+    const ball = this.spawnBlock('sphere', 'metal', [6.5, baseY + 2.0, 0], [0.8, 0.8, 0.8]) as PhysicsEntity;
+
+    // Hinge 1: Base to Arm1
+    this.createHingeJoint(base.id, arm1.id, new THREE.Vector3(0, 0.9, 0), new THREE.Vector3(-1.5, 0, 0), new THREE.Vector3(0, 0, 1));
+
+    // Hinge 2: Arm1 to Arm2
+    this.createHingeJoint(arm1.id, arm2.id, new THREE.Vector3(1.5, 0, 0), new THREE.Vector3(-1.4, 0, 0), new THREE.Vector3(0, 0, 1));
+
+    // Fixed: Arm2 to Weight
+    this.createFixedJoint(arm2.id, ball.id, new THREE.Vector3(1.4, 0, 0), new THREE.Vector3(0, 0, 0));
+
+    // Give it an initial swing impulse
+    ball.body.setLinvel({ x: 0, y: -4, z: 2 }, true);
+  }
+
+  private buildSuspensionBridge() {
+    const baseY = 9;
+    // Tower 1 (Fixed)
+    const tower1 = this.spawnBlock('cube', 'stone', [-6, baseY + 2, 0], [1.5, 4.0, 2.0]) as PhysicsEntity;
+    tower1.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+
+    // Tower 2 (Fixed)
+    const tower2 = this.spawnBlock('cube', 'stone', [6, baseY + 2, 0], [1.5, 4.0, 2.0]) as PhysicsEntity;
+    tower2.body.setBodyType(RAPIER.RigidBodyType.Fixed, true);
+
+    // 4 Bridge deck planks
+    const deckCount = 4;
+    const decks: PhysicsEntity[] = [];
+    for (let i = 0; i < deckCount; i++) {
+      const x = -3.75 + i * 2.5;
+      const deck = this.spawnBlock('plank', 'wood', [x, baseY + 1, 0], [2.2, 0.35, 1.8]) as PhysicsEntity;
+      decks.push(deck);
+    }
+
+    // Link Tower1 to Deck0 with spring joint
+    this.createDistanceJoint(tower1.id, decks[0].id, new THREE.Vector3(0.75, 1.8, 0), new THREE.Vector3(-1.0, 0.1, 0), 2.2, 800, 20);
+
+    // Link Decks together with spring/distance joints
+    for (let i = 0; i < deckCount - 1; i++) {
+      this.createDistanceJoint(decks[i].id, decks[i + 1].id, new THREE.Vector3(1.0, 0, 0), new THREE.Vector3(-1.0, 0, 0), 0.6, 1200, 25);
+    }
+
+    // Link Deck[last] to Tower2
+    this.createDistanceJoint(decks[deckCount - 1].id, tower2.id, new THREE.Vector3(1.0, 0.1, 0), new THREE.Vector3(-0.75, 1.8, 0), 2.2, 800, 20);
+
+    // Drop a test rubber ball onto the bridge
+    const ball = this.spawnBlock('sphere', 'rubber', [0, baseY + 7, 0], [0.9, 0.9, 0.9]) as PhysicsEntity;
+    ball.body.setLinvel({ x: 0.5, y: -2, z: 0 }, true);
   }
 
   public setWorldSeed(seed: number) {
@@ -864,6 +1537,32 @@ export class PhysicsEngine {
       this.removeBlock(id);
     }
 
+    // Sync contraptions with Rapier rigid bodies
+    const contraptionsToRemove: string[] = [];
+    for (const [id, contraption] of this.contraptions.entries()) {
+      const pos = contraption.body.translation();
+      const rot = contraption.body.rotation();
+
+      contraption.group.position.set(pos.x, pos.y, pos.z);
+      contraption.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+
+      if (pos.y < -35) {
+        contraptionsToRemove.push(id);
+      }
+    }
+
+    for (const id of contraptionsToRemove) {
+      this.removeContraption(id);
+    }
+
+    // Sync Joint Visual Connectors (lines & hinge pins)
+    this.updateJointVisuals();
+
+    // Update 3D Selection Box Hologram
+    if (this.selectionRenderer) {
+      this.selectionRenderer.update(scaledDt);
+    }
+
     this.updateParticles(scaledDt);
   }
 
@@ -1031,6 +1730,8 @@ export class PhysicsEngine {
 
   public dispose() {
     this.clearAllBlocks();
+    this.clearAllJoints();
+    this.selectionRenderer.dispose();
     this.voxelWorld.dispose();
     if (this.player) {
       this.player.dispose(this.scene);
