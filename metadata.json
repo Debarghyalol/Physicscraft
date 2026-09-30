@@ -1,0 +1,6 @@
+{
+  "name": "Rapier Block Physics Lab",
+  "description": "Interactive 3D rigid-body block physics simulation powered by Rapier3D WebAssembly, with full Android touch gestures, gyro gravity tilt, and structure building.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

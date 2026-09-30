@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="cubeTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="cubeLeft" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0369a1" />
+      <stop offset="100%" stop-color="#0c4a6e" />
+    </linearGradient>
+    <linearGradient id="cubeRight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#075985" />
+    </linearGradient>
+    <linearGradient id="amberTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fcd34d" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+    <linearGradient id="amberLeft" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+    <linearGradient id="amberRight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0284c7" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle for Android maskable safe-zone -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+
+  <!-- Center isometric blocks composition -->
+  <g filter="url(#glow)">
+    <!-- Base block (Blue) -->
+    <g transform="translate(256, 310)">
+      <!-- Top Face -->
+      <polygon points="0,-70 120,0 0,70 -120,0" fill="url(#cubeTop)" />
+      <!-- Left Face -->
+      <polygon points="-120,0 0,70 0,170 -120,100" fill="url(#cubeLeft)" />
+      <!-- Right Face -->
+      <polygon points="0,70 120,0 120,100 0,170" fill="url(#cubeRight)" />
+    </g>
+
+    <!-- Top floating tumbling block (Amber Gold) -->
+    <g transform="translate(256, 170) rotate(-12)">
+      <!-- Top Face -->
+      <polygon points="0,-55 95,0 0,55 -95,0" fill="url(#amberTop)" />
+      <!-- Left Face -->
+      <polygon points="-95,0 0,55 0,135 -95,80" fill="url(#amberLeft)" />
+      <!-- Right Face -->
+      <polygon points="0,55 95,0 95,80 0,135" fill="url(#amberRight)" />
+    </g>
+  </g>
+</svg>
