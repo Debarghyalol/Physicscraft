@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 /**
- * Authentic Minecraft Sky System:
+ * Minecraft-style sky system:
  * - Square Pixel Sun
  * - 8 Minecraft Moon Phases (Full, Waning Gibbous, Third Quarter, Waning Crescent, New Moon, Waxing Crescent, First Quarter, Waxing Gibbous)
  * - Twinkling 1500 Star Dome
@@ -11,58 +11,61 @@ import * as THREE from 'three';
 export class MinecraftSky {
   public scene: THREE.Scene;
   public celestialRig: THREE.Group;
-  public sunMesh: THREE.Mesh;
-  public moonMesh: THREE.Mesh;
+  public sunMesh: THREE.Sprite;
+  public moonMesh: THREE.Sprite;
   public starPoints: THREE.Points;
   public cloudMesh: THREE.Mesh;
 
   // Moon phases: 0 to 7
   public currentMoonPhase: number = 0;
-  private moonTextures: THREE.CanvasTexture[] = [];
+  private moonTextures: THREE.Texture[] = [];
 
   // Celestial cycle state
   public timeOfDay: number = 0.25; // 0.0 = dawn/sunrise, 0.25 = noon, 0.5 = sunset, 0.75 = midnight
-  public dayDurationSec: number = 600; // 10 minutes full Minecraft day (or paused/slider controlled)
+  public dayDurationSec: number = 1200; // Minecraft's 20-minute day
   public isTimeRunning: boolean = true;
   private cloudOffset: number = 0;
+  private readonly celestialOrbitRadius = 320;
 
   // Sky & Fog colors
   private currentSkyColor = new THREE.Color();
   private currentFogColor = new THREE.Color();
+  private readonly nightSkyColor = new THREE.Color(0x0f172a);
+  private readonly daySkyColor = new THREE.Color(0x7aa8ff);
+  private readonly twilightSkyColor = new THREE.Color(0xe38d5c);
+  private readonly nightFogColor = new THREE.Color(0x111c2d);
+  private readonly dayFogColor = new THREE.Color(0x98bdf4);
+  private readonly twilightFogColor = new THREE.Color(0xd47b50);
+  private readonly nightCloudColor = new THREE.Color(0x46556d);
+  private readonly dayCloudColor = new THREE.Color(0xdbe5f0);
+  private readonly twilightCloudColor = new THREE.Color(0xd4a58a);
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.celestialRig = new THREE.Group();
     this.scene.add(this.celestialRig);
 
-    // 1. Build Square Minecraft Sun
-    const sunTexture = this.createSunTexture();
-    const sunGeo = new THREE.PlaneGeometry(38, 38);
-    const sunMat = new THREE.MeshBasicMaterial({
+    // 1. Load the bundled Minecraft-style sun texture
+    const sunTexture = this.loadSkyTexture('/textures/environment/sun.png');
+    const sunMat = new THREE.SpriteMaterial({
       map: sunTexture,
       transparent: true,
       depthWrite: false,
-      side: THREE.DoubleSide,
+      toneMapped: false,
     });
-    this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
-    // Sun placed along +Y or +Z in celestial rig at distance 240
-    this.sunMesh.position.set(0, 240, 0);
-    this.sunMesh.rotation.x = Math.PI / 2;
+    this.sunMesh = new THREE.Sprite(sunMat);
+    this.sunMesh.scale.set(32, 32, 1);
     this.celestialRig.add(this.sunMesh);
 
     // 2. Build 8 Moon Phase Textures & Moon Mesh
     this.initMoonTextures();
-    const moonGeo = new THREE.PlaneGeometry(36, 36);
-    const moonMat = new THREE.MeshBasicMaterial({
+    const moonMat = new THREE.SpriteMaterial({
       map: this.moonTextures[0],
       transparent: true,
       depthWrite: false,
-      side: THREE.DoubleSide,
     });
-    this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
-    // Moon positioned exactly opposite the sun (distance 240 in -Y)
-    this.moonMesh.position.set(0, -240, 0);
-    this.moonMesh.rotation.x = -Math.PI / 2;
+    this.moonMesh = new THREE.Sprite(moonMat);
+    this.moonMesh.scale.set(30, 30, 1);
     this.celestialRig.add(this.moonMesh);
 
     // 3. Build Minecraft Stars Dome
@@ -77,35 +80,9 @@ export class MinecraftSky {
     this.setTimeOfDay(0.25);
   }
 
-  /**
-   * Generates authentic 64x64 pixel art Minecraft Sun:
-   * White glowing inner square, warm yellow outer border, semi-transparent aura.
-   */
-  private createSunTexture(): THREE.CanvasTexture {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-
-    ctx.clearRect(0, 0, 64, 64);
-
-    // Soft outer warm solar aura
-    ctx.fillStyle = 'rgba(255, 220, 130, 0.22)';
-    ctx.fillRect(8, 8, 48, 48);
-
-    // Mid warm golden corona
-    ctx.fillStyle = 'rgba(255, 235, 170, 0.65)';
-    ctx.fillRect(16, 16, 32, 32);
-
-    // Inner bright sun square
-    ctx.fillStyle = '#fffae8';
-    ctx.fillRect(20, 20, 24, 24);
-
-    // Core pure incandescent white
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(24, 24, 16, 16);
-
-    const texture = new THREE.CanvasTexture(canvas);
+  private loadSkyTexture(path: string): THREE.Texture {
+    const texture = new THREE.TextureLoader().load(path);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
@@ -113,7 +90,7 @@ export class MinecraftSky {
   }
 
   /**
-   * Generates the 8 official Minecraft Moon Phases:
+  * Loads the eight bundled moon phase textures:
    * Phase 0: Full Moon
    * Phase 1: Waning Gibbous
    * Phase 2: Third Quarter
@@ -125,76 +102,7 @@ export class MinecraftSky {
    */
   private initMoonTextures() {
     for (let phase = 0; phase < 8; phase++) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 64;
-      canvas.height = 64;
-      const ctx = canvas.getContext('2d')!;
-
-      ctx.clearRect(0, 0, 64, 64);
-
-      // Draw 32x32 pixel moon centered at (16, 16)
-      const ox = 16;
-      const oy = 16;
-      const size = 32;
-
-      // Base lunar crater texture for illuminated areas
-      const isPixelLit = (px: number, py: number): boolean => {
-        // px from 0 to 31 (left to right)
-        // Authentic Minecraft moon phase masking:
-        switch (phase) {
-          case 0: // Full Moon
-            return true;
-          case 1: // Waning Gibbous (~75% lit, right side darkens)
-            return px < 24;
-          case 2: // Third Quarter (50% lit, left half)
-            return px < 16;
-          case 3: // Waning Crescent (25% lit, far left)
-            return px < 8;
-          case 4: // New Moon (dark / invisible)
-            return false;
-          case 5: // Waxing Crescent (25% lit, far right)
-            return px >= 24;
-          case 6: // First Quarter (50% lit, right half)
-            return px >= 16;
-          case 7: // Waxing Gibbous (75% lit, left side darkens)
-            return px >= 8;
-          default:
-            return true;
-        }
-      };
-
-      // Draw craters and lunar surface
-      for (let x = 0; x < size; x++) {
-        for (let y = 0; y < size; y++) {
-          if (isPixelLit(x, y)) {
-            // Authentic Minecraft moon silver-white palette with dark crater pixels
-            const isCrater =
-              (x >= 6 && x <= 10 && y >= 8 && y <= 12) ||
-              (x >= 18 && x <= 22 && y >= 16 && y <= 20) ||
-              (x >= 10 && x <= 14 && y >= 22 && y <= 25) ||
-              ((x + y * 7) % 11 === 0 && x > 2 && x < 30 && y > 2 && y < 30);
-
-            if (isCrater) {
-              ctx.fillStyle = '#b0b5be'; // darker silver crater
-            } else {
-              ctx.fillStyle = (x + y) % 3 === 0 ? '#d4dbe8' : '#f0f4ff'; // bright lunar rock
-            }
-            ctx.fillRect(ox + x, oy + y, 1, 1);
-          } else if (phase === 4) {
-            // New Moon: very faint dark blue outline so player can still locate moon
-            if (x === 0 || x === size - 1 || y === 0 || y === size - 1) {
-              ctx.fillStyle = 'rgba(25, 35, 55, 0.4)';
-              ctx.fillRect(ox + x, oy + y, 1, 1);
-            }
-          }
-        }
-      }
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.magFilter = THREE.NearestFilter;
-      texture.minFilter = THREE.NearestFilter;
-      texture.generateMipmaps = false;
-      this.moonTextures.push(texture);
+      this.moonTextures.push(this.loadSkyTexture(`/textures/environment/moon_phase_${phase}.png`));
     }
   }
 
@@ -203,8 +111,8 @@ export class MinecraftSky {
    */
   public setMoonPhase(phase: number) {
     this.currentMoonPhase = (phase % 8 + 8) % 8;
-    (this.moonMesh.material as THREE.MeshBasicMaterial).map = this.moonTextures[this.currentMoonPhase];
-    (this.moonMesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
+    (this.moonMesh.material as THREE.SpriteMaterial).map = this.moonTextures[this.currentMoonPhase];
+    (this.moonMesh.material as THREE.SpriteMaterial).needsUpdate = true;
   }
 
   public nextMoonPhase() {
@@ -273,31 +181,29 @@ export class MinecraftSky {
     canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
-    ctx.fillRect(0, 0, 128, 128);
-
-    // Pixelated blocky cloud clusters
     const drawCloudCluster = (cx: number, cy: number, w: number, h: number) => {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
-      ctx.fillRect(cx, cy, w, h);
-      // Subtle cloud shading on bottom edge
-      ctx.fillStyle = 'rgba(215, 225, 240, 0.85)';
-      ctx.fillRect(cx, cy + h - 2, w, 2);
+      ctx.fillStyle = '#c3ccd6';
+      ctx.fillRect(cx, cy + 8, w, h - 8);
+      ctx.fillStyle = '#e1e7ed';
+      ctx.fillRect(cx + 8, cy + 4, w - 16, h - 8);
+      ctx.fillStyle = '#f1f4f7';
+      ctx.fillRect(cx + 16, cy, w - 32, h - 8);
     };
 
-    // Deterministic blocky clusters
-    drawCloudCluster(10, 12, 44, 20);
-    drawCloudCluster(24, 28, 38, 16);
-    drawCloudCluster(72, 18, 48, 22);
-    drawCloudCluster(85, 36, 32, 14);
-    drawCloudCluster(4, 76, 52, 24);
-    drawCloudCluster(68, 80, 56, 26);
-    drawCloudCluster(32, 100, 42, 18);
+    drawCloudCluster(0, 12, 64, 24);
+    drawCloudCluster(32, 4, 48, 24);
+    drawCloudCluster(88, 16, 40, 24);
+    drawCloudCluster(16, 68, 56, 24);
+    drawCloudCluster(48, 60, 64, 24);
+    drawCloudCluster(96, 72, 32, 24);
+    drawCloudCluster(0, 108, 48, 20);
+    drawCloudCluster(72, 108, 56, 20);
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(16, 16);
+    texture.repeat.set(6, 6);
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
     texture.generateMipmaps = false;
@@ -309,7 +215,7 @@ export class MinecraftSky {
     const mat = new THREE.MeshBasicMaterial({
       map: texture,
       transparent: true,
-      opacity: 0.82,
+      opacity: 0.72,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
@@ -326,41 +232,63 @@ export class MinecraftSky {
    * 0.50 = Sunset (Sun setting in west, Moon rising)
    * 0.75 = Midnight (Moon high overhead, stars bright)
    */
+  public setCycleSpeed(dayDurationSeconds: number) {
+    this.dayDurationSec = Math.max(30, dayDurationSeconds);
+  }
+
+  public getCelestialState() {
+    const orbitAngle = ((this.timeOfDay - 0.25) * 2.0 * Math.PI) + (Math.PI / 2.0);
+    const sunHeight = Math.sin(orbitAngle);
+    const dayFactor = THREE.MathUtils.smoothstep(sunHeight, -0.12, 0.22);
+    const twilightFactor = 1 - THREE.MathUtils.smoothstep(Math.abs(sunHeight), 0.02, 0.3);
+
+    return {
+      timeOfDay: this.timeOfDay,
+      sunHeight,
+      dayFactor,
+      twilightFactor,
+      isDay: dayFactor > 0.5,
+      isNight: dayFactor < 0.25,
+      sunDirection: this.getSunDirection(),
+      moonPhase: this.currentMoonPhase,
+    };
+  }
+
   public setTimeOfDay(time: number) {
     this.timeOfDay = ((time % 1.0) + 1.0) % 1.0;
 
-    // Rotate celestial rig around Z-axis (East to West arc)
-    // At noon (0.25): rotation = 0, Sun is at (0, 240, 0)
-    const angle = (this.timeOfDay - 0.25) * 2.0 * Math.PI;
-    this.celestialRig.rotation.z = angle;
+    // Orbit the sun and moon in a proper sky arc. Noon sits at the zenith;
+    // sunrise/sunset stay on the horizon, and midnight hides the sun behind the planet.
+    const orbitAngle = ((this.timeOfDay - 0.25) * 2.0 * Math.PI) + (Math.PI / 2.0);
+    const sunX = Math.cos(orbitAngle) * this.celestialOrbitRadius;
+    const sunY = Math.sin(orbitAngle) * this.celestialOrbitRadius * 0.45;
+
+    this.sunMesh.position.set(sunX, sunY, 0);
+    this.moonMesh.position.set(-sunX, -sunY, 0);
 
     // Sun height ratio: 1.0 at noon, 0.0 at dawn/sunset, -1.0 at midnight
-    const sunHeight = Math.cos(angle);
+    const sunHeight = Math.sin(orbitAngle);
 
-    // 1. Stars Opacity: Fades to 0 during day, reaches 1.0 at night
-    const starOpacity = THREE.MathUtils.clamp(-sunHeight * 1.5, 0, 1.0);
+    // Stars fade around dawn and dusk rather than switching abruptly.
+    const starOpacity = 1 - THREE.MathUtils.smoothstep(sunHeight, -0.12, 0.12);
     (this.starPoints.material as THREE.PointsMaterial).opacity = starOpacity;
 
-    // 2. Sky & Fog color transitions
-    if (sunHeight > 0.15) {
-      // Daytime: Classic Minecraft clear blue
-      this.currentSkyColor.setHex(0x78a7ff);
-      this.currentFogColor.setHex(0xc0d8ff);
-    } else if (sunHeight > -0.15) {
-      // Sunset / Dawn: Warm golden-orange horizon
-      const t = (sunHeight + 0.15) / 0.3; // 0 to 1
-      const sunsetSky = new THREE.Color(0xd35624);
-      const daySky = new THREE.Color(0x78a7ff);
-      this.currentSkyColor.copy(sunsetSky).lerp(daySky, t);
+    const dayFactor = THREE.MathUtils.smoothstep(sunHeight, -0.12, 0.22);
+    const twilightFactor = 1 - THREE.MathUtils.smoothstep(Math.abs(sunHeight), 0.02, 0.3);
+    this.currentSkyColor
+      .copy(this.nightSkyColor)
+      .lerp(this.daySkyColor, dayFactor)
+      .lerp(this.twilightSkyColor, twilightFactor * 0.72);
+    this.currentFogColor
+      .copy(this.nightFogColor)
+      .lerp(this.dayFogColor, dayFactor)
+      .lerp(this.twilightFogColor, twilightFactor * 0.58);
 
-      const sunsetFog = new THREE.Color(0xeb7734);
-      const dayFog = new THREE.Color(0xc0d8ff);
-      this.currentFogColor.copy(sunsetFog).lerp(dayFog, t);
-    } else {
-      // Nighttime: Deep midnight navy
-      this.currentSkyColor.setHex(0x0b0e14);
-      this.currentFogColor.setHex(0x0e131d);
-    }
+    const cloudMaterial = this.cloudMesh.material as THREE.MeshBasicMaterial;
+    cloudMaterial.color
+      .copy(this.nightCloudColor)
+      .lerp(this.dayCloudColor, dayFactor)
+      .lerp(this.twilightCloudColor, twilightFactor * 0.5);
 
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.copy(this.currentSkyColor);
@@ -374,10 +302,9 @@ export class MinecraftSky {
   }
 
   public getSunDirection(): THREE.Vector3 {
-    // Current direction vector to sun
-    const dir = new THREE.Vector3(0, 1, 0);
-    dir.applyEuler(this.celestialRig.rotation);
-    return dir;
+    // Current direction vector to sun based on the actual celestial orbit position.
+    const dir = new THREE.Vector3(this.sunMesh.position.x, this.sunMesh.position.y, this.sunMesh.position.z);
+    return dir.normalize();
   }
 
   public update(delta: number, playerPos?: THREE.Vector3) {
@@ -413,11 +340,10 @@ export class MinecraftSky {
   public dispose() {
     this.scene.remove(this.celestialRig);
     this.scene.remove(this.cloudMesh);
-    this.sunMesh.geometry.dispose();
     (this.sunMesh.material as THREE.Material).dispose();
-    this.moonMesh.geometry.dispose();
     (this.moonMesh.material as THREE.Material).dispose();
     for (const t of this.moonTextures) t.dispose();
+    ((this.sunMesh.material as THREE.SpriteMaterial).map as THREE.Texture | null)?.dispose();
     this.starPoints.geometry.dispose();
     (this.starPoints.material as THREE.Material).dispose();
     this.cloudMesh.geometry.dispose();

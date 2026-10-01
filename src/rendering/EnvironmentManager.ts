@@ -14,32 +14,32 @@ export const SKY_PRESETS: Record<SkyPreset, EnvironmentSettings> = {
   daylight: {
     preset: 'daylight',
     timeOfDay: 0.25,
-    sunIntensity: 1.15,
-    ambientIntensity: 0.38,
+    sunIntensity: 0.72,
+    ambientIntensity: 0.17,
   },
   sunset: {
     preset: 'sunset',
     timeOfDay: 0.48,
-    sunIntensity: 1.25,
-    ambientIntensity: 0.32,
+    sunIntensity: 0.62,
+    ambientIntensity: 0.15,
   },
   dawn: {
     preset: 'dawn',
     timeOfDay: 0.05,
-    sunIntensity: 1.1,
-    ambientIntensity: 0.35,
+    sunIntensity: 0.6,
+    ambientIntensity: 0.14,
   },
   midnight: {
     preset: 'midnight',
     timeOfDay: 0.75,
-    sunIntensity: 0.35, // Soft moonlight
-    ambientIntensity: 0.22,
+    sunIntensity: 0.1,
+    ambientIntensity: 0.08,
   },
   studio: {
     preset: 'studio',
     timeOfDay: 0.22,
-    sunIntensity: 1.2,
-    ambientIntensity: 0.42,
+    sunIntensity: 0.8,
+    ambientIntensity: 0.18,
   },
 };
 
@@ -53,6 +53,14 @@ export class EnvironmentManager {
   public ambientLight: THREE.HemisphereLight;
 
   public currentSettings: EnvironmentSettings;
+  private readonly daySunColor = new THREE.Color(0xfff4df);
+  private readonly twilightSunColor = new THREE.Color(0xff9861);
+  private readonly nightSunColor = new THREE.Color(0x849bc8);
+  private readonly dayAmbientColor = new THREE.Color(0xc7dcff);
+  private readonly twilightAmbientColor = new THREE.Color(0xf0b38c);
+  private readonly nightAmbientColor = new THREE.Color(0x64759a);
+  private readonly dayGroundColor = new THREE.Color(0x394653);
+  private readonly nightGroundColor = new THREE.Color(0x161d2b);
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.scene = scene;
@@ -79,21 +87,21 @@ export class EnvironmentManager {
     this.scene.add(this.sunLight);
 
     // 3. Fill Directional Light (Soft blue sky bounce, never washed out)
-    this.fillLight = new THREE.DirectionalLight(0x93c5fd, 0.22);
+    this.fillLight = new THREE.DirectionalLight(0x93c5fd, 0.1);
     this.fillLight.position.set(-15, 20, -15);
     this.scene.add(this.fillLight);
 
     // 4. Ambient / Hemisphere Light (Balanced for rich Minecraft contrast)
-    this.ambientLight = new THREE.HemisphereLight(0xe2e8f0, 0x1e293b, this.currentSettings.ambientIntensity);
+    this.ambientLight = new THREE.HemisphereLight(0xc7dcff, 0x29303a, this.currentSettings.ambientIntensity);
     this.scene.add(this.ambientLight);
 
     // Dynamic Minecraft distance fog (blends chunk boundaries seamlessly into sky horizon)
-    const fogColor = new THREE.Color(0xc0d8ff);
+    const fogColor = new THREE.Color(0x9ebce8);
     this.scene.fog = new THREE.Fog(fogColor, 28, 52);
 
-    // Color tone mapping calibrated for vivid, punchy colors with zero milky haze
+    // Color tone mapping calibrated for vivid, natural contrast without flattening all surfaces to white.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.98;
+    this.renderer.toneMappingExposure = 0.68;
 
     this.applySettings(this.currentSettings);
   }
@@ -107,6 +115,14 @@ export class EnvironmentManager {
     this.currentSettings.timeOfDay = time;
     this.minecraftSky.setTimeOfDay(time);
     this.updateLightingColors();
+  }
+
+  public setCycleSpeed(dayDurationSeconds: number) {
+    this.minecraftSky.setCycleSpeed(dayDurationSeconds);
+  }
+
+  public getSkyState() {
+    return this.minecraftSky.getCelestialState();
   }
 
   public setMoonPhase(phase: number) {
@@ -153,28 +169,22 @@ export class EnvironmentManager {
     const angle = (time - 0.25) * 2.0 * Math.PI;
     const sunHeight = Math.cos(angle);
 
-    if (sunHeight > 0.15) {
-      // Day
-      this.sunLight.color.setHex(0xfffbeb);
-      this.sunLight.intensity = this.currentSettings.sunIntensity;
-      this.ambientLight.color.setHex(0xffffff);
-      this.ambientLight.groundColor.setHex(0x334155);
-      this.ambientLight.intensity = this.currentSettings.ambientIntensity;
-    } else if (sunHeight > -0.15) {
-      // Sunset / Dawn
-      this.sunLight.color.setHex(0xf97316);
-      this.sunLight.intensity = this.currentSettings.sunIntensity * 1.1;
-      this.ambientLight.color.setHex(0xfde047);
-      this.ambientLight.groundColor.setHex(0x1e1b4b);
-      this.ambientLight.intensity = this.currentSettings.ambientIntensity * 0.9;
-    } else {
-      // Night (Moonlight)
-      this.sunLight.color.setHex(0x93c5fd);
-      this.sunLight.intensity = 0.35;
-      this.ambientLight.color.setHex(0x38bdf8);
-      this.ambientLight.groundColor.setHex(0x0f172a);
-      this.ambientLight.intensity = 0.22;
-    }
+    const dayFactor = THREE.MathUtils.smoothstep(sunHeight, -0.12, 0.22);
+    const twilightFactor = 1 - THREE.MathUtils.smoothstep(Math.abs(sunHeight), 0.02, 0.3);
+    this.sunLight.color
+      .copy(this.nightSunColor)
+      .lerp(this.daySunColor, dayFactor)
+      .lerp(this.twilightSunColor, twilightFactor * 0.8);
+    this.sunLight.intensity = THREE.MathUtils.lerp(0.04, this.currentSettings.sunIntensity, dayFactor) +
+      twilightFactor * this.currentSettings.sunIntensity * 0.08;
+
+    this.ambientLight.color
+      .copy(this.nightAmbientColor)
+      .lerp(this.dayAmbientColor, dayFactor)
+      .lerp(this.twilightAmbientColor, twilightFactor * 0.5);
+    this.ambientLight.groundColor.copy(this.nightGroundColor).lerp(this.dayGroundColor, dayFactor);
+    this.ambientLight.intensity = THREE.MathUtils.lerp(0.08, this.currentSettings.ambientIntensity, dayFactor);
+    this.fillLight.intensity = THREE.MathUtils.lerp(0.025, 0.08, dayFactor);
   }
 
   public applySettings(settings: Partial<EnvironmentSettings>) {

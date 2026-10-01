@@ -256,7 +256,7 @@ export class PlayerController {
 
       const camDir = new THREE.Vector3(
         Math.sin(this.yaw) * Math.cos(this.pitch),
-        Math.max(0.08, -Math.sin(this.pitch) + 0.15),
+        -Math.sin(this.pitch),
         Math.cos(this.yaw) * Math.cos(this.pitch)
       ).normalize();
 

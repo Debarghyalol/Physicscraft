@@ -148,6 +148,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       // Step physics with player input
       engine.step(Math.min(delta, 0.05), playerInputRef.current);
 
+      if (engine.player) {
+        envManager.update(delta, engine.player.getPosition());
+      }
+
       // Dynamic Shader-Based Lighting:
       // Updates underground vs surface light transition and cave atmosphere
       if (engine.voxelWorld && engine.player) {
@@ -208,8 +212,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   // Action: Mine target block (accepts exact screen touch coordinates!)
   const handleActionMine = useCallback((coords?: { x: number; y: number }) => {
-    if (engineRef.current?.player) {
-      engineRef.current.player.breakTargetedBlock(coords);
+    const engine = engineRef.current;
+    const player = engine?.player;
+    if (!engine || !player) return;
+
+    const ray = coords ? player.getRayFromScreen(coords.x, coords.y) : player.getAimRay();
+    if (!engine.interactWithPhysics(ray)) {
+      player.breakTargetedBlock(ray);
     }
   }, []);
 

@@ -356,6 +356,7 @@ export class PhysicsEngine {
   } | null {
     const meshes = this.getAllMeshes();
     const raycaster = new THREE.Raycaster();
+    raycaster.far = 7.5;
     raycaster.ray.copy(normalizedRay);
 
     const hits = raycaster.intersectObjects(meshes, false);
@@ -394,6 +395,31 @@ export class PhysicsEngine {
       }
     }
     return null;
+  }
+
+  public interactWithPhysics(ray: THREE.Ray): boolean {
+    const target = this.pickBlock(ray);
+    if (!target) return false;
+
+    if (target.softBody) {
+      target.softBody.applyImpulse(target.hitPoint, 240, 2.5);
+    } else {
+      const body = target.entity?.body ?? target.contraption?.body;
+      if (!body) return false;
+
+      const direction = ray.direction.clone().normalize();
+      direction.y += 0.12;
+      direction.normalize().multiplyScalar(body.mass() * 3.5);
+      body.applyImpulseAtPoint(
+        { x: direction.x, y: direction.y, z: direction.z },
+        { x: target.hitPoint.x, y: target.hitPoint.y, z: target.hitPoint.z },
+        true
+      );
+    }
+
+    this.player?.model.triggerSwing();
+    soundManager.playImpact(target.entity?.data.material ?? 'wood', 0.6);
+    return true;
   }
 
   public startGrab(

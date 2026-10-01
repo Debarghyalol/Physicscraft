@@ -61,8 +61,6 @@ export class PlayerModel {
   public rightArmGroup: THREE.Group;
   public leftLegGroup: THREE.Group;
   public rightLegGroup: THREE.Group;
-  public heldItem: THREE.Group;
-
   private skinTexture: THREE.Texture;
   private layer1Material: THREE.MeshBasicMaterial;
   private layer2Material: THREE.MeshBasicMaterial;
@@ -150,12 +148,6 @@ export class PlayerModel {
     const rightArmMesh2 = new THREE.Mesh(rightArmGeo2, this.layer2Material);
     this.rightArmGroup.add(rightArmMesh2);
 
-    // Held iron pickaxe
-    this.heldItem = this.createHeldPickaxe();
-    this.heldItem.position.set(0, -10 * px, 3 * px);
-    this.heldItem.rotation.set(Math.PI / 4, 0, 0);
-    this.rightArmGroup.add(this.heldItem);
-
     this.root.add(this.rightArmGroup);
 
     // 5. Left Arm (4 x 12 x 4 px = 0.25 x 0.75 x 0.25 m)
@@ -218,26 +210,6 @@ export class PlayerModel {
     scene.add(this.root);
   }
 
-  private createHeldPickaxe(): THREE.Group {
-    const group = new THREE.Group();
-
-    // Wooden handle
-    const handleGeo = new THREE.BoxGeometry(0.06, 0.65, 0.06);
-    const handleMat = new THREE.MeshBasicMaterial({ color: 0x8b5a2b });
-    const handle = new THREE.Mesh(handleGeo, handleMat);
-    handle.position.y = 0.25;
-    group.add(handle);
-
-    // Iron pickaxe head
-    const headGeo = new THREE.BoxGeometry(0.44, 0.09, 0.08);
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xd8d8d8 });
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.position.y = 0.54;
-    group.add(head);
-
-    return group;
-  }
-
   /**
    * Set first-person vs third-person mode
    */
@@ -271,7 +243,7 @@ export class PlayerModel {
    */
   public update(delta: number, speed: number, isGrounded: boolean, pitch: number, yaw: number) {
     // Body orientation
-    this.root.rotation.y = yaw;
+    this.root.rotation.y = yaw + (this.isFirstPerson ? 0 : Math.PI);
 
     if (this.isFirstPerson) {
       // First person mining swing
@@ -285,7 +257,7 @@ export class PlayerModel {
     }
 
     // Third-person head pitch look up/down
-    this.headGroup.rotation.x = Math.max(-1.1, Math.min(1.1, pitch));
+    this.headGroup.rotation.x = Math.max(-1.1, Math.min(1.1, -pitch));
 
     // Walk limb swing animation
     if (speed > 0.1 && isGrounded) {
