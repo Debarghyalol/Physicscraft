@@ -1439,8 +1439,12 @@ export class PhysicsEngine {
       body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
 
-    // Step Rapier rigid bodies
-    if (scaledDt > 0) {
+    // The voxel terrain and player controller no longer use Rapier.
+    // Only step Rapier when actual Rapier physics bodies exist.
+    // The player itself is only a kinematic position/velocity container and
+    // has no collider, so it does not require a Rapier simulation step.
+    const hasRapierPhysics = this.entities.size > 0 || this.contraptions.size > 0;
+    if (scaledDt > 0 && hasRapierPhysics) {
       const substeps = 2;
       this.world.timestep = scaledDt / substeps;
       for (let s = 0; s < substeps; s++) {
