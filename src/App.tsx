@@ -160,6 +160,11 @@ export default function App() {
         if (gameState === 'playing') handleReset();
       }
       if (e.key === 'm' || e.key === 'M') handleToggleMute();
+      // Minecraft-style F3 toggle for the performance/debug overlay
+      if (e.key === 'F3') {
+        e.preventDefault();
+        setGraphics((prev) => ({ ...prev, debugMode: !prev.debugMode }));
+      }
       if (e.key === 'Escape') {
         if (gameState === 'playing') {
           setIsSettingsOpen((prev) => !prev);
