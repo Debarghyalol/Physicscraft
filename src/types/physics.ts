@@ -47,7 +47,7 @@ export interface PhysicsMakerSelection {
   cornerB: { x: number; y: number; z: number } | null;
 }
 
-export type CameraViewMode = 'first_person' | 'third_person' | 'orbit';
+export type CameraViewMode = 'first_person' | 'third_person' | 'front';
 
 export enum VoxelType {
   AIR = 0,

@@ -81,6 +81,7 @@ export class PlayerModel {
   public walkCycle: number = 0;
   public swingAnimation: number = 0;
   public isFirstPerson: boolean = false;
+  public isFrontView: boolean = false;
 
   constructor(scene: THREE.Scene) {
     this.root = new THREE.Group();
@@ -294,6 +295,10 @@ export class PlayerModel {
     this.rightArmGroup.rotation.set(0, 0, 0);
   }
 
+  public setFrontViewMode(isFrontView: boolean) {
+    this.isFrontView = isFrontView;
+  }
+
   /** Day/night light tint (the skin materials are unlit, so tint them directly) */
   public setLightTint(color: THREE.Color) {
     this.layer1Material.color.copy(color);
@@ -385,7 +390,7 @@ export class PlayerModel {
   public update(delta: number, speed: number, isGrounded: boolean, pitch: number, yaw: number) {
     // Body orientation: model's face is on local +Z, so in third person add PI
     // so the face points away from the chase camera (same way the player looks)
-    this.root.rotation.y = this.isFirstPerson ? yaw : yaw + Math.PI;
+    this.root.rotation.y = this.isFirstPerson ? yaw : this.isFrontView ? yaw : yaw + Math.PI;
 
     if (this.isFirstPerson) {
       this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.5);

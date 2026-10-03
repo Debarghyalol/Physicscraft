@@ -110,6 +110,7 @@ export class PlayerController {
   public setViewMode(mode: CameraViewMode) {
     this.viewMode = mode;
     this.model.setFirstPersonMode(mode === 'first_person');
+    this.model.setFrontViewMode(mode === 'front');
   }
 
   public setFlying(flying: boolean) {
@@ -286,14 +287,17 @@ export class PlayerController {
       this.camera.rotation.x = this.pitch;
       this.camera.rotation.z = 0;
     } else {
-      // Third person: over-the-shoulder chase camera with anti-block clipping
+      // Third person: chase camera behind the player. Front view places the camera in front,
+      // looking back at the player's face.
       const targetPos = PlayerController.scratchVec.set(pos.x, pos.y + 0.72, pos.z);
       const maxDist = 3.5;
+      const frontView = this.viewMode === 'front';
+      const distanceSign = frontView ? -1 : 1;
 
       const camDir = new THREE.Vector3(
-        Math.sin(this.yaw) * Math.cos(this.pitch),
+        Math.sin(this.yaw) * Math.cos(this.pitch) * distanceSign,
         -Math.sin(this.pitch),
-        Math.cos(this.yaw) * Math.cos(this.pitch)
+        Math.cos(this.yaw) * Math.cos(this.pitch) * distanceSign
       ).normalize();
 
       // Check if any block blocks the camera line of sight
