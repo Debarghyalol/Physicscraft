@@ -390,7 +390,7 @@ export class PlayerModel {
   public update(delta: number, speed: number, isGrounded: boolean, pitch: number, yaw: number) {
     // Body orientation: model's face is on local +Z, so in third person add PI
     // so the face points away from the chase camera (same way the player looks)
-    this.root.rotation.y = this.isFirstPerson ? yaw : this.isFrontView ? yaw : yaw + Math.PI;
+    this.root.rotation.y = this.isFirstPerson ? yaw : yaw + Math.PI;
 
     if (this.isFirstPerson) {
       this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.5);
