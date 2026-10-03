@@ -57,6 +57,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const debugHistoryRef = useRef<DebugFrameSample[]>([]);
   const graphicsRef = useRef(graphics);
   graphicsRef.current = graphics;
+  const fpsRef = useRef(60);
 
   // Player Input Ref for continuous 60fps simulation
   const playerInputRef = useRef<PlayerInput>({
@@ -168,6 +169,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const computedFps = Math.round((frameCount * 1000) / (now - fpsTimer));
         frameCount = 0;
         fpsTimer = now;
+        fpsRef.current = computedFps;
         setCurrentFps(computedFps);
 
         onUpdateStats({
@@ -215,7 +217,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const meshes = scene.children.reduce((count, object) => count + (object instanceof THREE.Mesh ? 1 : 0), 0);
         const sample: DebugFrameSample = {
           frameMs: renderEnd - frameStart,
-          fps: currentFps,
+          fps: fpsRef.current,
           physicsMs: physicsEnd - physicsStart,
           renderMs: renderEnd - renderStart,
           streamingMs,
