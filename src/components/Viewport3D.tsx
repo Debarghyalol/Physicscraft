@@ -107,6 +107,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     engineRef.current = engine;
 
     let isDisposed = false;
+    const steveLight = new THREE.Color();
     engine.initialize().then(() => {
       if (isDisposed) return;
       onEngineReady(engine);
@@ -154,6 +155,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const playerPos = engine.player.getPosition();
         const isUnderground = engine.voxelWorld.updateLighting(playerPos, delta);
         envManager.setUndergroundLighting(isUnderground);
+
+        // Day/night + flood-fill voxel lighting
+        const skyDim = 1 - envManager.minecraftSky.getDaylight();
+        engine.voxelWorld.setSkyDim(skyDim);
+        engine.voxelWorld.setLightTint(envManager.getWarmTint());
+        engine.voxelWorld.getLightColorAt(playerPos.x, playerPos.y + 1.0, playerPos.z, skyDim, steveLight);
+        steveLight.multiply(envManager.getWarmTint());
+        engine.player.model.setLightTint(steveLight);
       }
 
       // Render Three.js scene
