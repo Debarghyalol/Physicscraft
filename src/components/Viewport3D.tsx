@@ -15,6 +15,7 @@ import { PlayerInput } from '../player/PlayerController';
 import { GraphicsSettings } from './SettingsModal';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import { ViewportFrameOverlay } from './ViewportFrameOverlay';
+import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -49,6 +50,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [currentFps, setCurrentFps] = useState(60);
   const [isFlying, setIsFlying] = useState(false);
   const lastPresetRef = useRef<string | null>(null);
+  const [debugSample, setDebugSample] = useState<DebugFrameSample>({
+    frameMs: 0, fps: 60, physicsMs: 0, renderMs: 0, streamingMs: 0, generationMs: 0,
+    chunks: 0, meshes: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, jsHeapMb: null,
+  });
+  const debugHistoryRef = useRef<DebugFrameSample[]>([]);
 
   // Player Input Ref for continuous 60fps simulation
   const playerInputRef = useRef<PlayerInput>({
@@ -142,6 +148,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     let lastTime = performance.now();
     let frameCount = 0;
     let fpsTimer = performance.now();
+    const memoryInfo = () => {
+      const perf = performance as Performance & { memory?: { usedJSHeapSize: number } };
+      return perf.memory ? perf.memory.usedJSHeapSize / (1024 * 1024) : null;
+    };
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
@@ -165,14 +175,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         });
       }
 
-      // Step physics with player input
+      const frameStart = performance.now();
+      const physicsStart = performance.now();
       engine.step(Math.min(delta, 0.05), playerInputRef.current);
+      const physicsEnd = performance.now();
 
       // Dynamic Shader-Based Lighting:
       // Updates underground vs surface light transition and cave atmosphere
       if (engine.voxelWorld && engine.player) {
         const playerPos = engine.player.getPosition();
+        const streamingStart = performance.now();
         const isUnderground = engine.voxelWorld.updateLighting(playerPos, delta);
+        const streamingEnd = performance.now();
         envManager.setUndergroundLighting(isUnderground);
 
         // Day/night cycle: sun, moon, stars, clouds, sky colour and world light tint
@@ -187,7 +201,33 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
 
       // Render Three.js scene
+      const renderStart = performance.now();
       renderer.render(scene, camera);
+      const renderEnd = performance.now();
+      if (graphics.debugMode) {
+        const info = renderer.info;
+        const memory = memoryInfo();
+        const meshes = scene.children.reduce((count, object) => count + (object instanceof THREE.Mesh ? 1 : 0), 0);
+        const sample: DebugFrameSample = {
+          frameMs: renderEnd - frameStart,
+          fps: currentFps,
+          physicsMs: physicsEnd - physicsStart,
+          renderMs: renderEnd - renderStart,
+          streamingMs: typeof streamingEnd !== 'undefined' ? streamingEnd - streamingStart : 0,
+          generationMs: engine.voxelWorld.consumeDebugGenerationTime(),
+          chunks: engine.voxelWorld.chunks.size,
+          meshes,
+          drawCalls: info.render.calls,
+          triangles: info.render.triangles,
+          geometries: info.memory.geometries,
+          textures: info.memory.textures,
+          jsHeapMb: memory,
+        };
+        debugHistoryRef.current = debugHistoryRef.current.length >= 120
+          ? [...debugHistoryRef.current.slice(1), sample]
+          : [...debugHistoryRef.current, sample];
+        setDebugSample(sample);
+      }
     };
 
     animate();
@@ -301,6 +341,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       {/* Cinematic Viewport Frame Mode Overlay (Brackets + HUD) */}
       <ViewportFrameOverlay enabled={graphics.viewportFrameMode} fps={currentFps} />
+      <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} />
 
       {/* MCPE Touch Controls Overlay (Direct touch coordinate mining & placing) */}
       <PlayerControlsOverlay

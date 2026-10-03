@@ -44,6 +44,7 @@ export default function App() {
     wireframe: false,
     fov: 65,
     skyPreset: 'daylight',
+    debugMode: false,
   });
 
   // Controls Settings
