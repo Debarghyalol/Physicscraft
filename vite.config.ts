@@ -47,6 +47,13 @@ export default defineConfig(() => {
         '@': path.resolve('.'),
       },
     },
+    // `npm start` (used by hosts like Render's Web Service): serve the built `dist` folder.
+    // allowedHosts: true lets it answer on any hostname (e.g. *.onrender.com).
+    preview: {
+      host: '0.0.0.0',
+      port: Number(process.env.PORT) || 4173,
+      allowedHosts: true as const,
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
