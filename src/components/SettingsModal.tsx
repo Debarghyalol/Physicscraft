@@ -9,6 +9,7 @@ export interface GraphicsSettings {
   wireframe: boolean;
   fov: number;
   skyPreset: SkyPreset;
+  debugMode: boolean;
 }
 
 export interface SettingsModalProps {
@@ -202,6 +203,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="mc-button py-2.5 text-xs"
             >
               Resource Packs...
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onChangeGraphics({ debugMode: !graphics.debugMode })}
+              className={\`mc-button py-2.5 text-xs ${graphics.debugMode ? 'ring-2 ring-white/70' : ''}\`}
+            >
+              Debug Mode: {graphics.debugMode ? 'ON' : 'OFF'}
             </button>
 
             {/* Mouse Look Sensitivity */}
