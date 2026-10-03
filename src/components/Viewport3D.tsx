@@ -52,7 +52,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [isFlying, setIsFlying] = useState(false);
   const lastPresetRef = useRef<string | null>(null);
   const [debugSample, setDebugSample] = useState<DebugFrameSample>({
-    frameMs: 0, fps: 60, physicsMs: 0, renderMs: 0, streamingMs: 0, generationMs: 0,
+    frameMs: 0, physicsMs: 0, renderMs: 0, streamingMs: 0, generationMs: 0,
     chunks: 0, meshes: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, jsHeapMb: null,
   });
   const debugHistoryRef = useRef<DebugFrameSample[]>([]);
@@ -79,6 +79,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
     if (engineRef.current?.voxelWorld) {
       engineRef.current.voxelWorld.setWireframe(graphics.wireframe);
+      engineRef.current.voxelWorld.setRenderDistance(graphics.renderDistance);
     }
     if (cameraRef.current) {
       cameraRef.current.fov = graphics.fov;
@@ -128,6 +129,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     let unsubscribePacks: (() => void) | null = null;
     engine.initialize().then(() => {
       if (isDisposed) return;
+      engine.voxelWorld.setRenderDistance(graphicsRef.current.renderDistance);
       onEngineReady(engine);
       // Clean Minecraft world by default: no clutter physics objects
       engine.loadPreset('empty');
@@ -217,7 +219,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const meshes = scene.children.reduce((count, object) => count + (object instanceof THREE.Mesh ? 1 : 0), 0);
         const sample: DebugFrameSample = {
           frameMs: renderEnd - frameStart,
-          fps: fpsRef.current,
           physicsMs: physicsEnd - physicsStart,
           renderMs: renderEnd - renderStart,
           streamingMs,
