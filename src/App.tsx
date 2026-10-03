@@ -144,7 +144,10 @@ export default function App() {
 
   // Toggle View Mode (1st / 3rd person)
   const handleToggleViewMode = () => {
-    const nextMode: CameraViewMode = viewMode === 'first_person' ? 'third_person' : 'first_person';
+    const nextMode: CameraViewMode =
+      viewMode === 'first_person' ? 'third_person' :
+      viewMode === 'third_person' ? 'front' :
+      'first_person';
     setViewMode(nextMode);
     if (engine?.player) {
       engine.player.setViewMode(nextMode);
@@ -160,6 +163,10 @@ export default function App() {
         if (gameState === 'playing') handleReset();
       }
       if (e.key === 'm' || e.key === 'M') handleToggleMute();
+      if (e.key === 'F3') {
+        e.preventDefault();
+        setGraphics((prev) => ({ ...prev, debugMode: !prev.debugMode }));
+      }
       if (e.key === 'Escape') {
         if (gameState === 'playing') {
           setIsSettingsOpen((prev) => !prev);
