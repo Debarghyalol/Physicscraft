@@ -115,6 +115,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     engineRef.current = engine;
 
     let isDisposed = false;
+    const steveLight = new THREE.Color();
     let unsubscribePacks: (() => void) | null = null;
     engine.initialize().then(() => {
       if (isDisposed) return;
@@ -176,9 +177,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
         // Day/night cycle: sun, moon, stars, clouds, sky colour and world light tint
         envManager.update(delta, playerPos);
-        const tint = envManager.getWorldTint();
-        engine.voxelWorld.setLightTint(tint);
-        engine.player.model.setLightTint(tint);
+        const skyDim = 1 - envManager.minecraftSky.getDaylight();
+        engine.voxelWorld.setSkyDim(skyDim);
+        engine.voxelWorld.setLightTint(envManager.getWarmTint());
+        // Steve is lit by the flood-fill light at his position (caves are dark, glowstone lights him up)
+        engine.voxelWorld.getLightColorAt(playerPos.x, playerPos.y + 1.0, playerPos.z, skyDim, steveLight);
+        steveLight.multiply(envManager.getWarmTint());
+        engine.player.model.setLightTint(steveLight);
       }
 
       // Render Three.js scene

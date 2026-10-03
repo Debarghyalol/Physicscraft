@@ -117,7 +117,7 @@ export class PhysicsEngine {
    * Bedrock bottom fallback collider (y=0) to prevent falling through bottom of world
    */
   private setupLandscapePhysics() {
-    const floorBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
+    const floorBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, -66, 0);
     this.floorBody = this.world.createRigidBody(floorBodyDesc);
 
     const groundSize = 180;
@@ -530,6 +530,7 @@ export class PhysicsEngine {
     const ey = Math.floor(epicenter.y);
     const ez = Math.floor(epicenter.z);
     const rBlocks = Math.ceil(radius * 0.42);
+    this.voxelWorld.beginBatch();
     for (let bx = ex - rBlocks; bx <= ex + rBlocks; bx++) {
       for (let by = ey - rBlocks; by <= ey + rBlocks; by++) {
         for (let bz = ez - rBlocks; bz <= ez + rBlocks; bz++) {
@@ -542,6 +543,7 @@ export class PhysicsEngine {
         }
       }
     }
+    this.voxelWorld.endBatch();
 
     for (const entity of this.entities.values()) {
       const bodyPos = entity.body.translation();
@@ -1426,6 +1428,7 @@ export class PhysicsEngine {
       this.player.update(scaledDt, playerInput);
       const pos = this.player.getPosition();
       this.voxelWorld.updatePlayerPosition(pos.x, pos.z);
+      this.voxelWorld.update();
     }
 
     // Apply drag spring force if a rigid body is grabbed
@@ -1525,7 +1528,7 @@ export class PhysicsEngine {
       entity.mesh.position.set(pos.x, pos.y, pos.z);
       entity.mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
 
-      if (pos.y < -35) {
+      if (pos.y < -80) {
         toRemove.push(id);
       }
     }
@@ -1543,7 +1546,7 @@ export class PhysicsEngine {
       contraption.group.position.set(pos.x, pos.y, pos.z);
       contraption.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
 
-      if (pos.y < -35) {
+      if (pos.y < -80) {
         contraptionsToRemove.push(id);
       }
     }

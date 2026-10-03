@@ -62,6 +62,7 @@ export enum VoxelType {
   COBBLESTONE = 9,
   TNT = 10,
   GOLD = 11,
+  GLOWSTONE = 12,
 }
 
 export type StructurePreset =

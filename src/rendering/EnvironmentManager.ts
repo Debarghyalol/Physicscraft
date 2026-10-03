@@ -54,6 +54,7 @@ export class EnvironmentManager {
 
   public currentSettings: EnvironmentSettings;
   private worldTint = new THREE.Color();
+  private voxelTint = new THREE.Color();
   private white = new THREE.Color(1, 1, 1);
   private warmTint = new THREE.Color(1.0, 0.7, 0.45);
 
@@ -170,6 +171,14 @@ export class EnvironmentManager {
     this.ambientLight.groundColor.setHex(0x334155);
     this.ambientLight.intensity = THREE.MathUtils.lerp(0.16, this.currentSettings.ambientIntensity, d);
     this.fillLight.intensity = 0.2 * d;
+  }
+
+  /** Sunset / sunrise glow only (voxel brightness comes from per-vertex light + sky dim). */
+  public getWarmTint(): THREE.Color {
+    const sky = this.minecraftSky;
+    const h = Math.cos((sky.timeOfDay - 0.25) * 2 * Math.PI);
+    const warm = THREE.MathUtils.clamp(1 - Math.abs(h) / 0.3, 0, 1);
+    return this.voxelTint.copy(this.white).lerp(this.warmTint, warm * 0.3);
   }
 
   /** Colour multiplier for unlit (baked-light) materials: voxels and Steve. */
