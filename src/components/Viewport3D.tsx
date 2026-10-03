@@ -180,6 +180,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       engine.step(Math.min(delta, 0.05), playerInputRef.current);
       const physicsEnd = performance.now();
 
+      let streamingMs = 0;
+
       // Dynamic Shader-Based Lighting:
       // Updates underground vs surface light transition and cave atmosphere
       if (engine.voxelWorld && engine.player) {
@@ -187,6 +189,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const streamingStart = performance.now();
         const isUnderground = engine.voxelWorld.updateLighting(playerPos, delta);
         const streamingEnd = performance.now();
+        streamingMs = streamingEnd - streamingStart;
         envManager.setUndergroundLighting(isUnderground);
 
         // Day/night cycle: sun, moon, stars, clouds, sky colour and world light tint
@@ -213,7 +216,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           fps: currentFps,
           physicsMs: physicsEnd - physicsStart,
           renderMs: renderEnd - renderStart,
-          streamingMs: typeof streamingEnd !== 'undefined' ? streamingEnd - streamingStart : 0,
+          streamingMs,
           generationMs: engine.voxelWorld.consumeDebugGenerationTime(),
           chunks: engine.voxelWorld.chunks.size,
           meshes,
