@@ -43,6 +43,7 @@ export default function App() {
     viewportFrameMode: false,
     wireframe: false,
     fov: 65,
+    renderDistance: 3,
     skyPreset: 'daylight',
     debugMode: false,
   });
@@ -221,7 +222,6 @@ export default function App() {
             onOpenSettings={() => setIsSettingsOpen(true)}
             fps={stats.fps}
             blockCount={stats.count}
-            onReset={handleReset}
           />
 
           {/* 3D Physics Viewport with Rapier 3D + Voxel Streaming + Dynamic Shader Lighting */}

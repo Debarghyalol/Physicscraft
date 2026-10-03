@@ -1,19 +1,17 @@
 import React from 'react';
-import { Settings, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
+import { Settings, Maximize2, Minimize2 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface TopHeaderProps {
   onOpenSettings: () => void;
   fps: number;
   blockCount: number;
-  onReset: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenSettings,
   fps,
   blockCount,
-  onReset,
 }) => {
   const [isFullscreen, setIsFullscreen] = React.useState(false);
 
@@ -76,14 +74,6 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           title="Landscape / Fullscreen Mode"
         >
           {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-        </button>
-
-        <button
-          onClick={onReset}
-          className="p-2 rounded-xl bg-black/50 hover:bg-black/75 backdrop-blur-md border border-white/20 text-white shadow-lg transition active:scale-95"
-          title="Reset Simulation (R)"
-        >
-          <RotateCcw className="w-4 h-4" />
         </button>
 
         <PWAInstallButton />

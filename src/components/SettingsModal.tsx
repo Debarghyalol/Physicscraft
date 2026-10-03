@@ -8,6 +8,7 @@ export interface GraphicsSettings {
   viewportFrameMode: boolean;
   wireframe: boolean;
   fov: number;
+  renderDistance: number;
   skyPreset: SkyPreset;
   debugMode: boolean;
 }
@@ -132,7 +133,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       {subView === 'options' && (
         <div className="relative z-10 w-full max-w-xl h-full max-h-[92vh] mc-dirt-bg border-4 border-black/75 shadow-2xl flex flex-col items-center justify-between overflow-hidden">
           {/* Header */}
-          <div className="w-full py-4 text-center border-b-2 border-black/50 bg-black/40">
+          <div className="w-full py-4 text-center">
             <h2 className="text-base sm:text-lg font-bold text-[#e0e0e0] drop-shadow-[2px_2px_0px_#222222]">
               Options
             </h2>
@@ -152,6 +153,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 step="1"
                 value={graphics.fov}
                 onChange={(e) => onChangeGraphics({ fov: Number(e.target.value) })}
+                className="w-full accent-white cursor-pointer"
+              />
+            </div>
+
+            {/* Render Distance */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-[#aaaaaa] drop-shadow-[1px_1px_0px_#000000]">
+                Render Distance: {graphics.renderDistance} chunks
+              </label>
+              <input
+                type="range"
+                min="2"
+                max="35"
+                step="1"
+                value={graphics.renderDistance}
+                onChange={(e) => onChangeGraphics({ renderDistance: Number(e.target.value) })}
                 className="w-full accent-white cursor-pointer"
               />
             </div>
@@ -231,7 +248,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Bottom Done Button */}
-          <div className="w-full py-4 border-t-2 border-black/50 bg-black/40 flex items-center justify-center">
+          <div className="w-full py-4 flex items-center justify-center">
             <button
               onClick={() => setSubView('game_menu')}
               className="mc-button w-48 py-2.5 text-xs uppercase"

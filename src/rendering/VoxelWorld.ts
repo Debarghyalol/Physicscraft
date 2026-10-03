@@ -201,6 +201,23 @@ export class VoxelWorld {
   public seed: number = 1337;
   public renderDistance: number = 3; // chunks meshed around the player
 
+  /** Change the streamed/meshed radius without forcing synchronous world generation. */
+  public setRenderDistance(distance: number) {
+    const next = Math.max(2, Math.min(35, Math.round(distance)));
+    if (next === this.renderDistance) return;
+    this.renderDistance = next;
+
+    // Rebuild the streaming request set around the current player chunk. Work is still
+    // performed by the normal incremental streaming loop rather than generated here.
+    if (Number.isFinite(this.streamCx) && Number.isFinite(this.streamCz)) {
+      const cx = this.streamCx;
+      const cz = this.streamCz;
+      this.streamCx = NaN;
+      this.streamCz = NaN;
+      this.updatePlayerPosition(cx * CHUNK_SIZE_X, cz * CHUNK_SIZE_Z);
+    }
+  }
+
   // Scratch buffers (avoid allocations while meshing / lighting)
   private padB = new Uint8Array(PAD * PAD * PAD);
   private padL = new Uint8Array(PAD * PAD * PAD);
