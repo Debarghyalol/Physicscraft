@@ -1592,8 +1592,11 @@ export class VoxelWorld {
   /** Per-frame work: budgeted streaming + subchunk rebuilds. */
   public update() {
     const t0 = performance.now();
-    this.streamWork(t0 + 6);
-    this.processDirty(t0 + 10);
+    // Keep chunk generation/meshing well below a frame's 16.7 ms budget at 60 FPS.
+    // Individual terrain/light/mesh operations can exceed the deadline, so use a conservative
+    // budget and let the queue drain over subsequent frames instead of causing visible hitches.
+    this.streamWork(t0 + 2);
+    this.processDirty(t0 + 4);
     this.debugGenerationTimeMs += performance.now() - t0;
   }
 
