@@ -15,7 +15,7 @@ export interface PlayerInput {
 
 export class PlayerController {
   public body!: RAPIER.RigidBody;
-  public collider!: RAPIER.Collider;
+  public collider: RAPIER.Collider | null = null;
   public model: PlayerModel;
   public camera: THREE.PerspectiveCamera;
   public world: RAPIER.World;
@@ -86,25 +86,18 @@ export class PlayerController {
   }
 
   private createPhysicsBody(spawnPos: [number, number, number]) {
-    // Dynamic capsule body with locked rotations (pure translation controller)
-    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+    // Keep the Rapier body as a lightweight position/velocity container so the
+    // rest of the engine can continue to use player.translation()/linvel().
+    // It has NO collider: voxel terrain collision is handled by custom AABB tests.
+    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
       .setTranslation(spawnPos[0], spawnPos[1], spawnPos[2])
       .lockRotations()
-      .setLinearDamping(0.05)
+      .setGravityScale(0)
+      .setLinearDamping(0)
       .setCanSleep(false);
 
     this.body = this.world.createRigidBody(bodyDesc);
-
-    // Player capsule: radius = 0.34m, halfHeight = 0.55m (Total height ~ 1.78m)
-    // Zero friction + Min combine rule prevents capsule from ever sticking/climbing against walls
-    const colliderDesc = RAPIER.ColliderDesc.capsule(0.55, 0.34)
-      .setFriction(0.0)
-      .setRestitution(0.0)
-      .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
-      .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Min)
-      .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
-
-    this.collider = this.world.createCollider(colliderDesc, this.body);
+    this.collider = null;
   }
 
   public setViewMode(mode: CameraViewMode) {
@@ -116,7 +109,6 @@ export class PlayerController {
   public setFlying(flying: boolean) {
     if (this.isFlying === flying) return;
     this.isFlying = flying;
-    if (this.body) this.body.setGravityScale(flying ? 0 : 1, true);
     this.onFlyingChange?.(flying);
   }
 
@@ -136,16 +128,11 @@ export class PlayerController {
   public update(delta: number, input: PlayerInput) {
     if (!this.body) return;
 
-    const pos = this.body.translation();
-    const linvel = this.body.linvel();
+    let pos = this.body.translation();
+    let linvel = this.body.linvel();
 
-    // 1. Ground detection via downward raycast from capsule base
-    const rayOrigin = new RAPIER.Vector3(pos.x, pos.y - 0.75, pos.z);
-    const rayDir = new RAPIER.Vector3(0, -1, 0);
-    const ray = new RAPIER.Ray(rayOrigin, rayDir);
-    const hit = this.world.castRay(ray, 0.35, true, undefined, undefined, this.collider);
-
-    this.isGrounded = hit !== null && hit.timeOfImpact < 0.28;
+    // Terrain collision is voxel-native: no Rapier raycasts or terrain trimeshes.
+    this.isGrounded = this.checkGrounded(pos.x, pos.y, pos.z);
 
     // Double-tap jump (within 320ms) toggles flight
     const nowMs = performance.now();
@@ -159,81 +146,65 @@ export class PlayerController {
     }
     this.prevJump = input.jump;
 
-    // 2. Horizontal Movement & Anti-Wall-Stick Sliding
+    // 2. Horizontal movement + voxel AABB collision.
     const speed = this.isFlying ? this.flySpeed : input.sprint ? this.sprintSpeed : this.walkSpeed;
 
-    // Camera horizontal forward and strafe directions
     PlayerController.scratchForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
     PlayerController.scratchRight.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
 
-    let targetVelX =
+    const targetVelX =
       (PlayerController.scratchForward.x * input.moveForward +
-        PlayerController.scratchRight.x * input.moveRight) *
-      speed;
-    let targetVelZ =
+        PlayerController.scratchRight.x * input.moveRight) * speed;
+    const targetVelZ =
       (PlayerController.scratchForward.z * input.moveForward +
-        PlayerController.scratchRight.z * input.moveRight) *
-      speed;
-
-    // Smooth Wall-Sliding: If moving toward a wall, project velocity onto wall surface
-    // This stops horizontal velocity from fighting contact constraints and sticking in air!
-    const moveMag = Math.hypot(targetVelX, targetVelZ);
-    if (moveMag > 0.05) {
-      const dirX = targetVelX / moveMag;
-      const dirZ = targetVelZ / moveMag;
-      const rayDist = 0.45; // capsule radius (0.34) + margin
-
-      for (const yOffset of [-0.4, 0.0, 0.4]) {
-        const rayStart = new RAPIER.Vector3(pos.x, pos.y + yOffset, pos.z);
-        const rayDir = new RAPIER.Vector3(dirX, 0, dirZ);
-        const wallHit = this.world.castRayAndGetNormal(
-          new RAPIER.Ray(rayStart, rayDir),
-          rayDist,
-          true,
-          undefined,
-          undefined,
-          this.collider
-        );
-
-        if (wallHit && Math.abs(wallHit.normal.y) < 0.5) {
-          const normalDot = targetVelX * wallHit.normal.x + targetVelZ * wallHit.normal.z;
-          if (normalDot < 0) {
-            targetVelX -= normalDot * wallHit.normal.x;
-            targetVelZ -= normalDot * wallHit.normal.z;
-
-            // In air: gently push capsule away from wall surface to prevent trimesh edge snags
-            if (!this.isGrounded && wallHit.timeOfImpact < 0.36) {
-              const nudgeX = wallHit.normal.x * 0.008;
-              const nudgeZ = wallHit.normal.z * 0.008;
-              this.body.setTranslation({ x: pos.x + nudgeX, y: pos.y, z: pos.z + nudgeZ }, true);
-            }
-          }
-          break;
-        }
-      }
-    }
+        PlayerController.scratchRight.z * input.moveRight) * speed;
 
     const accel = this.isFlying ? 10 : this.isGrounded ? 18 : 8;
-
-    const newVx = THREE.MathUtils.lerp(linvel.x, targetVelX, delta * accel);
-    const newVz = THREE.MathUtils.lerp(linvel.z, targetVelZ, delta * accel);
+    let newVx = THREE.MathUtils.lerp(linvel.x, targetVelX, Math.min(1, delta * accel));
+    let newVz = THREE.MathUtils.lerp(linvel.z, targetVelZ, Math.min(1, delta * accel));
     let newVy = linvel.y;
 
-    // 3. Jump & In-Air Gravity (Prevents sticking to wall when jumping into corners)
+    // Gravity / jump is integrated manually because the player has no Rapier collider.
     if (this.isFlying) {
       const dir = (input.jump ? 1 : 0) - (input.descend ? 1 : 0);
       newVy = THREE.MathUtils.lerp(linvel.y, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
-      // Landing: descending into the ground ends flight
-      if (this.isGrounded && input.descend) this.setFlying(false);
     } else if (input.jump && this.isGrounded && linvel.y < 2.0) {
       newVy = this.jumpVelocity;
+      this.isGrounded = false;
       soundManager.playJump();
     } else if (!this.isGrounded) {
-      // Apply clean downward acceleration so player always slides down walls
       newVy = Math.max(-28, linvel.y - 24.0 * delta);
+    } else if (newVy < 0) {
+      newVy = 0;
     }
 
+    // Move each axis independently. This gives stable block-face sliding and avoids
+    // Rapier terrain collision entirely.
+    let nextX = pos.x;
+    let nextY = pos.y;
+    let nextZ = pos.z;
+
+    const xResult = this.moveAlongAxis(nextX, nextY, nextZ, newVx * delta, 0);
+    nextX = xResult.position;
+    if (xResult.collided) newVx = 0;
+
+    const zResult = this.moveAlongAxis(nextX, nextY, nextZ, newVz * delta, 2);
+    nextZ = zResult.position;
+    if (zResult.collided) newVz = 0;
+
+    const yResult = this.moveAlongAxis(nextX, nextY, nextZ, newVy * delta, 1);
+    nextY = yResult.position;
+    if (yResult.collided) {
+      if (newVy < 0) this.isGrounded = true;
+      newVy = 0;
+    } else if (!this.isFlying) {
+      this.isGrounded = this.checkGrounded(nextX, nextY, nextZ);
+    }
+
+    this.body.setTranslation({ x: nextX, y: nextY, z: nextZ }, true);
     this.body.setLinvel({ x: newVx, y: newVy, z: newVz }, true);
+    pos = this.body.translation();
+    linvel = this.body.linvel();
 
     this.currentSpeed = Math.hypot(newVx, newVz);
 
@@ -275,6 +246,134 @@ export class PlayerController {
     } else {
       this.targetHighlightMesh.visible = false;
     }
+  }
+
+  private static readonly PLAYER_HALF_WIDTH = 0.34;
+  private static readonly PLAYER_HALF_HEIGHT = 0.89;
+  private static readonly COLLISION_EPSILON = 0.0001;
+
+  private isSolidBlock(x: number, y: number, z: number): boolean {
+    return this.voxelWorld.getVoxel(x, y, z) !== VoxelType.AIR;
+  }
+
+  private moveAlongAxis(
+    x: number,
+    y: number,
+    z: number,
+    delta: number,
+    axis: 0 | 1 | 2
+  ): { position: number; collided: boolean } {
+    if (delta === 0) return { position: axis === 0 ? x : axis === 1 ? y : z, collided: false };
+
+    const hw = PlayerController.PLAYER_HALF_WIDTH;
+    const hh = PlayerController.PLAYER_HALF_HEIGHT;
+    const eps = PlayerController.COLLISION_EPSILON;
+
+    let nx = x;
+    let ny = y;
+    let nz = z;
+    if (axis === 0) nx += delta;
+    else if (axis === 1) ny += delta;
+    else nz += delta;
+
+    const minX = Math.floor(Math.min(x - hw, nx - hw));
+    const maxX = Math.floor(Math.max(x + hw, nx + hw));
+    const minY = Math.floor(Math.min(y - hh, ny - hh));
+    const maxY = Math.floor(Math.max(y + hh, ny + hh));
+    const minZ = Math.floor(Math.min(z - hw, nz - hw));
+    const maxZ = Math.floor(Math.max(z + hw, nz + hw));
+
+    let resolved = axis === 0 ? nx : axis === 1 ? ny : nz;
+    let collided = false;
+
+    if (axis === 0) {
+      const minPY = ny - hh + eps;
+      const maxPY = ny + hh - eps;
+      const minPZ = nz - hw + eps;
+      const maxPZ = nz + hw - eps;
+      for (let by = minY; by <= maxY; by++) {
+        for (let bz = minZ; bz <= maxZ; bz++) {
+          if (maxPY <= by || minPY >= by + 1 || maxPZ <= bz || minPZ >= bz + 1) continue;
+          for (let bx = minX; bx <= maxX; bx++) {
+            if (!this.isSolidBlock(bx, by, bz)) continue;
+            if (delta > 0 && x + hw <= bx && nx + hw > bx) {
+              resolved = bx - hw - eps;
+              collided = true;
+            } else if (delta < 0 && x - hw >= bx + 1 && nx - hw < bx + 1) {
+              resolved = bx + 1 + hw + eps;
+              collided = true;
+            }
+          }
+        }
+      }
+    } else if (axis === 2) {
+      const minPY = ny - hh + eps;
+      const maxPY = ny + hh - eps;
+      const minPX = nx - hw + eps;
+      const maxPX = nx + hw - eps;
+      for (let by = minY; by <= maxY; by++) {
+        for (let bx = minX; bx <= maxX; bx++) {
+          if (maxPY <= by || minPY >= by + 1 || maxPX <= bx || minPX >= bx + 1) continue;
+          for (let bz = minZ; bz <= maxZ; bz++) {
+            if (!this.isSolidBlock(bx, by, bz)) continue;
+            if (delta > 0 && z + hw <= bz && nz + hw > bz) {
+              resolved = bz - hw - eps;
+              collided = true;
+            } else if (delta < 0 && z - hw >= bz + 1 && nz - hw < bz + 1) {
+              resolved = bz + 1 + hw + eps;
+              collided = true;
+            }
+          }
+        }
+      }
+    } else {
+      const minPX = nx - hw + eps;
+      const maxPX = nx + hw - eps;
+      const minPZ = nz - hw + eps;
+      const maxPZ = nz + hw - eps;
+      for (let bx = minX; bx <= maxX; bx++) {
+        for (let bz = minZ; bz <= maxZ; bz++) {
+          if (maxPX <= bx || minPX >= bx + 1 || maxPZ <= bz || minPZ >= bz + 1) continue;
+          for (let by = minY; by <= maxY; by++) {
+            if (!this.isSolidBlock(bx, by, bz)) continue;
+            if (delta > 0 && y + hh <= by && ny + hh > by) {
+              resolved = by - hh - eps;
+              collided = true;
+            } else if (delta < 0 && y - hh >= by + 1 && ny - hh < by + 1) {
+              resolved = by + 1 + hh + eps;
+              collided = true;
+            }
+          }
+        }
+      }
+    }
+
+    return { position: resolved, collided };
+  }
+
+  private checkGrounded(x: number, y: number, z: number): boolean {
+    const hw = PlayerController.PLAYER_HALF_WIDTH - 0.03;
+    const minX = Math.floor(x - hw);
+    const maxX = Math.floor(x + hw);
+    const minZ = Math.floor(z - hw);
+    const maxZ = Math.floor(z + hw);
+    const footY = y - PlayerController.PLAYER_HALF_HEIGHT;
+    const by = Math.floor(footY - 0.01);
+    for (let bx = minX; bx <= maxX; bx++) {
+      for (let bz = minZ; bz <= maxZ; bz++) {
+        if (this.isSolidBlock(bx, by, bz) && footY <= by + 0.08) return true;
+      }
+    }
+    return false;
+  }
+
+  public applyImpulse(impulse: { x: number; y: number; z: number }) {
+    const v = this.body.linvel();
+    this.body.setLinvel({
+      x: v.x + impulse.x,
+      y: v.y + impulse.y,
+      z: v.z + impulse.z,
+    }, true);
   }
 
   private updateCamera(pos: RAPIER.Vector3) {
@@ -459,7 +558,7 @@ export class PlayerController {
     this.targetHighlightMesh.geometry.dispose();
     this.model.dispose();
     if (this.world && this.body) {
-      this.world.removeCollider(this.collider, false);
+      if (this.collider) this.world.removeCollider(this.collider, false);
       this.world.removeRigidBody(this.body);
     }
   }

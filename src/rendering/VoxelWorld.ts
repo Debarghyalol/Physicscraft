@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
-import RAPIER from '@dimforge/rapier3d-compat';
 import { VoxelType } from '../types/physics';
 
 export const CHUNK_SIZE_X = 16;
@@ -155,7 +154,6 @@ export class ChunkColumn {
   modified = false; // edited by the player: never discarded when far away
   opaqueMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   transMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
-  colliders: (RAPIER.Collider | null)[] = new Array(SECTION_COUNT).fill(null);
 
   constructor(cx: number, cz: number) {
     this.cx = cx;
@@ -177,11 +175,10 @@ export interface VoxelRaycastHit {
  */
 export class VoxelWorld {
   public scene: THREE.Scene;
-  public rapierWorld: RAPIER.World | null = null;
   private noise: any;
   private treeNoise: any;
 
-  public terrainBody: RAPIER.RigidBody | null = null;
+  // Terrain collision is handled by PlayerController's voxel AABB collision.
   private mountainNoise: any;
   private caveNoise: any;
 
@@ -251,11 +248,9 @@ export class VoxelWorld {
     this.generateWorldChunks();
   }
 
-  public setRapierWorld(world: RAPIER.World) {
-    this.rapierWorld = world;
-    const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
-    this.terrainBody = world.createRigidBody(bodyDesc);
-    this.buildPhysicsColliders();
+  public setRapierWorld(_world: unknown) {
+    // Kept as a compatibility hook. Static voxel terrain is no longer inserted
+    // into Rapier as trimesh colliders.
   }
 
   private initNoise() {
@@ -1395,50 +1390,12 @@ export class VoxelWorld {
   //  Physics colliders (one trimesh per subchunk, rebuilt only when geometry changes)
   // ======================================================================
 
-  private updateSectionCollider(col: ChunkColumn, sy: number, mb: MeshBuilder) {
-    if (!this.rapierWorld || !this.terrainBody) return;
-    const existing = col.colliders[sy];
-    if (existing) {
-      this.rapierWorld.removeCollider(existing, false);
-      col.colliders[sy] = null;
-    }
-    if (mb.vc === 0) return;
-    this.createSectionCollider(col, sy, mb.pos.slice(0, mb.vc * 3), mb.idx.slice(0, mb.ic));
+  private updateSectionCollider(_col: ChunkColumn, _sy: number, _mb: MeshBuilder) {
+    // No terrain colliders: voxel collision is resolved directly from block AABBs.
   }
 
-  private createSectionCollider(col: ChunkColumn, sy: number, vertices: Float32Array, indices: Uint32Array) {
-    if (!this.rapierWorld || !this.terrainBody) return;
-    try {
-      const desc = RAPIER.ColliderDesc.trimesh(vertices, indices)
-        .setFriction(0.0)
-        .setRestitution(0.0)
-        .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
-        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Min)
-        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
-      col.colliders[sy] = this.rapierWorld.createCollider(desc, this.terrainBody);
-    } catch (e) {
-      console.warn('Failed to build trimesh collider for subchunk', col.cx, col.cz, sy, e);
-    }
-  }
-
-  /** (Re)build colliders for every meshed subchunk (used when the Rapier world is attached). */
   public buildPhysicsColliders() {
-    if (!this.rapierWorld || !this.terrainBody) return;
-    for (const col of this.chunks.values()) {
-      for (let sy = 0; sy < SECTION_COUNT; sy++) {
-        const old = col.colliders[sy];
-        if (old) {
-          this.rapierWorld.removeCollider(old, false);
-          col.colliders[sy] = null;
-        }
-        const mesh = col.opaqueMeshes[sy];
-        if (!mesh) continue;
-        const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
-        const index = mesh.geometry.index;
-        if (!pos || !index) continue;
-        this.createSectionCollider(col, sy, new Float32Array(pos.array), new Uint32Array(index.array));
-      }
-    }
+    // Compatibility no-op. Terrain is intentionally not registered with Rapier.
   }
 
   // ======================================================================
@@ -1586,11 +1543,6 @@ export class VoxelWorld {
         this.scene.remove(t);
         t.geometry.dispose();
         col.transMeshes[sy] = null;
-      }
-      const c = col.colliders[sy];
-      if (c && this.rapierWorld) {
-        this.rapierWorld.removeCollider(c, false);
-        col.colliders[sy] = null;
       }
     }
   }
@@ -1791,9 +1743,6 @@ export class VoxelWorld {
 
   public dispose() {
     this.clearAllChunks();
-    if (this.rapierWorld && this.terrainBody) {
-      this.rapierWorld.removeRigidBody(this.terrainBody);
-    }
     this.atlasTexture.dispose();
     this.material.dispose();
     this.transparentMaterial.dispose();
