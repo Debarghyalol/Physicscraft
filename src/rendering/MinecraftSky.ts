@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
+import { resourcePacks } from '../resourcepack/ResourcePackManager';
 
 /**
  * Minecraft sky system
@@ -18,7 +19,8 @@ const CLOUD_THICKNESS = 4; // blocks
 const CLOUD_Y = 108; // base height of the cloud layer
 const CLOUD_RADIUS = 20; // cells rendered around the camera
 const CLOUD_SPEED = 0.6; // blocks / second (0.03 blocks per tick)
-const MASK_SIZE = 256; // vanilla clouds.png is 256x256
+let MASK_W = 256; // vanilla clouds.png is 256x256
+let MASK_H = 256;
 
 const CLOUD_VERT = /* glsl */ `
   attribute float shade;
@@ -78,7 +80,10 @@ export class MinecraftSky {
   private currentFogColor = new THREE.Color();
 
   // Clouds
-  private cloudMask = new Uint8Array(MASK_SIZE * MASK_SIZE);
+  private cloudMask: Uint8Array = new Uint8Array(256 * 256);
+  private defaultCloudMask: Uint8Array | null = null;
+  private defaultSun!: THREE.Texture;
+  private defaultMoons: THREE.Texture[] = [];
   private cloudMaterial: THREE.ShaderMaterial;
   private cloudScroll = 0;
   private cloudCellX = Number.NaN;
@@ -152,6 +157,9 @@ export class MinecraftSky {
 
     // 4. Clouds
     this.generateCloudMask(1337);
+    this.defaultCloudMask = this.cloudMask;
+    this.defaultSun = this.sunTexture;
+    this.defaultMoons = this.moonTextures;
     this.cloudMaterial = new THREE.ShaderMaterial({
       vertexShader: CLOUD_VERT,
       fragmentShader: CLOUD_FRAG,
@@ -179,21 +187,24 @@ export class MinecraftSky {
   /** Procedural stand-in for vanilla's clouds.png: a 256x256 on/off cell mask. */
   private generateCloudMask(seed: number) {
     const noise = createNoise2D(mulberry32(seed));
-    for (let y = 0; y < MASK_SIZE; y++) {
-      for (let x = 0; x < MASK_SIZE; x++) {
+    MASK_W = 256;
+    MASK_H = 256;
+    this.cloudMask = new Uint8Array(MASK_W * MASK_H);
+    for (let y = 0; y < MASK_H; y++) {
+      for (let x = 0; x < MASK_W; x++) {
         const v =
           noise(x * 0.045, y * 0.045) * 0.65 +
           noise(x * 0.11 + 40, y * 0.11 + 40) * 0.3 +
           noise(x * 0.25 + 90, y * 0.25 + 90) * 0.1;
-        this.cloudMask[y * MASK_SIZE + x] = v > 0.18 ? 1 : 0;
+        this.cloudMask[y * MASK_W + x] = v > 0.18 ? 1 : 0;
       }
     }
   }
 
   private cloudAt(i: number, j: number): boolean {
-    const x = ((i % MASK_SIZE) + MASK_SIZE) % MASK_SIZE;
-    const y = ((j % MASK_SIZE) + MASK_SIZE) % MASK_SIZE;
-    return this.cloudMask[y * MASK_SIZE + x] === 1;
+    const x = ((i % MASK_W) + MASK_W) % MASK_W;
+    const y = ((j % MASK_H) + MASK_H) % MASK_H;
+    return this.cloudMask[y * MASK_W + x] === 1;
   }
 
   /** Builds the cloud mesh around cell (cx, cz) with vanilla culling + face shading. */
@@ -249,6 +260,61 @@ export class MinecraftSky {
   }
 
   // ------------------------------------------------------------------ moon
+
+  /** Use sun / moon phases / cloud shape from the enabled resource packs (or the defaults). */
+  public async applyResourcePack() {
+    const mkTex = (c: HTMLCanvasElement) => {
+      const t = new THREE.CanvasTexture(c);
+      t.magFilter = THREE.NearestFilter;
+      t.minFilter = THREE.NearestFilter;
+      t.generateMipmaps = false;
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+
+    // Sun
+    const sun = await resourcePacks.getTexture(['environment/sun']);
+    const oldSun = this.sunTexture;
+    this.sunTexture = sun ? mkTex(sun) : this.defaultSun;
+    if (oldSun !== this.defaultSun && oldSun !== this.sunTexture) oldSun.dispose();
+    (this.sunMesh.material as THREE.MeshBasicMaterial).map = this.sunTexture;
+    (this.sunMesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
+
+    // Moon phases: vanilla sheet is 4 columns x 2 rows (phase 0..7, row-major)
+    const sheet = await resourcePacks.getTexture(['environment/moon_phases']);
+    for (const t of this.moonTextures) if (!this.defaultMoons.includes(t)) t.dispose();
+    if (sheet) {
+      const w = sheet.width / 4;
+      const h = sheet.height === sheet.width / 2 ? sheet.height / 2 : w;
+      this.moonTextures = [];
+      for (let ph = 0; ph < 8; ph++) {
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        c.getContext('2d')!.drawImage(sheet, (ph % 4) * w, Math.floor(ph / 4) * h, w, h, 0, 0, w, h);
+        this.moonTextures.push(mkTex(c));
+      }
+    } else {
+      this.moonTextures = this.defaultMoons;
+    }
+    this.setMoonPhase(this.currentMoonPhase);
+
+    // Clouds: any non-transparent pixel of clouds.png is a cloud cell
+    const clouds = await resourcePacks.getTexture(['environment/clouds']);
+    if (clouds) {
+      const g = clouds.getContext('2d')!;
+      const data = g.getImageData(0, 0, clouds.width, clouds.height).data;
+      MASK_W = clouds.width;
+      MASK_H = clouds.height;
+      this.cloudMask = new Uint8Array(MASK_W * MASK_H);
+      for (let i = 0; i < MASK_W * MASK_H; i++) this.cloudMask[i] = data[i * 4 + 3] > 0 ? 1 : 0;
+    } else if (this.defaultCloudMask) {
+      MASK_W = 256;
+      MASK_H = 256;
+      this.cloudMask = this.defaultCloudMask;
+    }
+    this.cloudCellX = Number.NaN; // force a mesh rebuild
+  }
 
   public setMoonPhase(phase: number) {
     this.currentMoonPhase = ((phase % 8) + 8) % 8;

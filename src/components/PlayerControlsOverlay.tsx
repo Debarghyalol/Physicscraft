@@ -686,7 +686,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           style={{
             width: '364px',
             height: '44px',
-            backgroundImage: 'url(/textures/gui/hotbar.png)',
+            backgroundImage: 'var(--rp-hotbar, url(/textures/gui/hotbar.png))',
             backgroundSize: '100% 100%',
             imageRendering: 'pixelated',
           }}
@@ -702,7 +702,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                   height: '48px',
                   left: `${selectedIdx * 40 - 2}px`,
                   top: '-2px',
-                  backgroundImage: 'url(/textures/gui/hotbar_selection.png)',
+                  backgroundImage: 'var(--rp-hotbar-selection, url(/textures/gui/hotbar_selection.png))',
                   backgroundSize: '100% 100%',
                   imageRendering: 'pixelated',
                   zIndex: 10,

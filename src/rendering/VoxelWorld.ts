@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { VoxelType } from '../types/physics';
@@ -43,6 +44,7 @@ export class VoxelWorld {
   public material!: THREE.MeshBasicMaterial;
   public transparentMaterial!: THREE.MeshBasicMaterial;
   private atlasTexture!: THREE.CanvasTexture;
+  private baseAtlasCanvas!: HTMLCanvasElement;
   public shaderUniforms: Record<string, { value: any }> | null = null;
   public currentUnderground: number = 0.0;
 
@@ -278,6 +280,7 @@ export class VoxelWorld {
       c.fillRect(ox + 11, oy + 10, 2, 2);
     });
 
+    this.baseAtlasCanvas = canvas;
     this.atlasTexture = new THREE.CanvasTexture(canvas);
     this.atlasTexture.magFilter = THREE.NearestFilter;
     this.atlasTexture.minFilter = THREE.NearestFilter;
@@ -308,6 +311,87 @@ export class VoxelWorld {
    */
   public updateLighting(_playerPos: THREE.Vector3, _delta: number): boolean {
     return false;
+  }
+
+  /**
+   * Rebuild the block atlas from the enabled resource packs (falls back to the built-in
+   * procedural tiles for anything a pack does not provide). Supports HD packs (up to 128px).
+   * Chunk UVs are fractional, so no remeshing is needed.
+   */
+  public async applyResourcePack() {
+    // [tile column, texture candidates, tint colour or null, optional overlay texture]
+    const grassTint = '#91bd59';
+    const leafTint = '#77ab2f';
+    const tiles: Array<[number, string[], string | null, string[]?]> = [
+      [0, ['block/grass_block_top'], grassTint],
+      [1, ['block/grass_block_side'], null, ['block/grass_block_side_overlay']],
+      [2, ['block/dirt'], null],
+      [3, ['block/stone'], null],
+      [4, ['block/bedrock'], null],
+      [5, ['block/oak_log'], null],
+      [6, ['block/oak_log_top'], null],
+      [7, ['block/oak_leaves'], leafTint],
+      [8, ['block/sand'], null],
+      [9, ['block/cobblestone'], null],
+      [10, ['block/tnt_side'], null],
+      [11, ['block/gold_block'], null],
+      [12, ['block/glass'], null],
+    ];
+
+    const loaded = await Promise.all(
+      tiles.map(async ([col, names, tint, overlay]) => ({
+        col,
+        tint,
+        img: await resourcePacks.getTexture(names),
+        overlay: overlay ? await resourcePacks.getTexture(overlay) : null,
+      }))
+    );
+
+    let res = 16;
+    for (const t of loaded) if (t.img) res = Math.max(res, Math.min(128, t.img.width));
+    const size = res * 16;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this.baseAtlasCanvas, 0, 0, size, size);
+
+    const tinted = (img: HTMLCanvasElement, color: string) => {
+      const c = document.createElement('canvas');
+      c.width = res;
+      c.height = res;
+      const g = c.getContext('2d')!;
+      g.imageSmoothingEnabled = false;
+      g.drawImage(img, 0, 0, res, res);
+      g.globalCompositeOperation = 'multiply';
+      g.fillStyle = color;
+      g.fillRect(0, 0, res, res);
+      g.globalCompositeOperation = 'destination-in'; // keep original alpha
+      g.drawImage(img, 0, 0, res, res);
+      return c;
+    };
+
+    for (const t of loaded) {
+      if (!t.img) continue;
+      const x = t.col * res;
+      ctx.clearRect(x, 0, res, res);
+      ctx.drawImage(t.tint ? tinted(t.img, t.tint) : t.img, x, 0, res, res);
+      if (t.overlay) ctx.drawImage(tinted(t.overlay, grassTint), x, 0, res, res);
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const old = this.atlasTexture;
+    this.atlasTexture = tex;
+    this.material.map = tex;
+    this.transparentMaterial.map = tex;
+    this.material.needsUpdate = true;
+    this.transparentMaterial.needsUpdate = true;
+    old.dispose();
   }
 
   /** Day/night world tint (voxel materials are unlit, so multiply their colour) */

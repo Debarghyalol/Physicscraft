@@ -13,6 +13,7 @@ import { EnvironmentManager } from '../rendering/EnvironmentManager';
 import { PlayerControlsOverlay } from './PlayerControlsOverlay';
 import { PlayerInput } from '../player/PlayerController';
 import { GraphicsSettings } from './SettingsModal';
+import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 
 interface Viewport3DProps {
@@ -114,6 +115,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     engineRef.current = engine;
 
     let isDisposed = false;
+    let unsubscribePacks: (() => void) | null = null;
     engine.initialize().then(() => {
       if (isDisposed) return;
       onEngineReady(engine);
@@ -123,6 +125,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.player.setViewMode('first_person');
         engine.player.onFlyingChange = setIsFlying;
       }
+
+      // Resource packs: apply now and whenever the selection changes
+      const applyPacks = () => {
+        engine.voxelWorld.applyResourcePack();
+        envManager.minecraftSky.applyResourcePack();
+        engine.player?.model.applyResourcePack();
+      };
+      applyPacks();
+      unsubscribePacks = resourcePacks.subscribe(applyPacks);
     });
 
     // 5. Animation & Simulation Loop
@@ -190,6 +201,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     return () => {
       isDisposed = true;
+      unsubscribePacks?.();
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
       envManager.dispose();

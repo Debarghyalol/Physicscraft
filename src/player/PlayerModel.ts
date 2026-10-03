@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { resourcePacks } from '../resourcepack/ResourcePackManager';
 
 /**
  * Helper to compute authentic Minecraft 64x64 skin UV coordinates
@@ -299,6 +300,53 @@ export class PlayerModel {
   /** Parent the first-person arm to the camera (camera must be in the scene) */
   public attachFirstPersonRig(camera: THREE.Camera) {
     camera.add(this.fpRig);
+  }
+
+  /** Swap Steve's skin for the enabled resource pack's (or restore the default). */
+  public async applyResourcePack() {
+    const img = await resourcePacks.getTexture([
+      'entity/player/wide/steve',
+      'entity/steve',
+      'entity/player/slim/steve',
+    ]);
+    let tex: THREE.Texture;
+    if (img) {
+      let src: HTMLCanvasElement = img;
+      if (img.height * 2 === img.width) {
+        // Legacy 64x32 skin -> 64x64 (mirror right limbs onto the left-limb slots)
+        const s = img.width / 64;
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.width;
+        const g = c.getContext('2d')!;
+        g.imageSmoothingEnabled = false;
+        g.drawImage(img, 0, 0);
+        const mirror = (sx: number, sy: number, w: number, h: number, dx: number, dy: number) => {
+          g.save();
+          g.translate((dx + w) * s, dy * s);
+          g.scale(-1, 1);
+          g.drawImage(img, sx * s, sy * s, w * s, h * s, 0, 0, w * s, h * s);
+          g.restore();
+        };
+        mirror(0, 16, 16, 16, 16, 48); // right leg -> left leg
+        mirror(40, 16, 16, 16, 32, 48); // right arm -> left arm
+        src = c;
+      }
+      tex = new THREE.CanvasTexture(src);
+    } else {
+      tex = new THREE.TextureLoader().load('/textures/entity/steve.png');
+    }
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const old = this.skinTexture;
+    this.skinTexture = tex;
+    this.layer1Material.map = tex;
+    this.layer2Material.map = tex;
+    this.layer1Material.needsUpdate = true;
+    this.layer2Material.needsUpdate = true;
+    old.dispose();
   }
 
   public triggerSwing() {
