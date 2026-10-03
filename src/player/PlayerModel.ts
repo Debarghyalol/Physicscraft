@@ -14,11 +14,12 @@ function setSkinUVs(
 ) {
   const textureWidth = 64;
   const textureHeight = 64;
+  const e = 0.25;
   const toFaceVertices = (x1: number, y1: number, x2: number, y2: number) => [
-    new THREE.Vector2(x1 / textureWidth, 1.0 - y2 / textureHeight),
-    new THREE.Vector2(x2 / textureWidth, 1.0 - y2 / textureHeight),
-    new THREE.Vector2(x2 / textureWidth, 1.0 - y1 / textureHeight),
-    new THREE.Vector2(x1 / textureWidth, 1.0 - y1 / textureHeight),
+    new THREE.Vector2((x1 + e) / textureWidth, 1.0 - (y2 - e) / textureHeight),
+    new THREE.Vector2((x2 - e) / textureWidth, 1.0 - (y2 - e) / textureHeight),
+    new THREE.Vector2((x2 - e) / textureWidth, 1.0 - (y1 + e) / textureHeight),
+    new THREE.Vector2((x1 + e) / textureWidth, 1.0 - (y1 + e) / textureHeight),
   ];
 
   const top = toFaceVertices(u + depth, v, u + width + depth, v + depth);
