@@ -129,8 +129,11 @@ export class EnvironmentManager {
 
   public updateDistanceFog(renderDistanceChunks: number = 3) {
     if (this.scene.fog && this.scene.fog instanceof THREE.Fog) {
-      const farDist = renderDistanceChunks * 16 + 8;
-      const nearDist = Math.max(16, farDist - 22);
+      // Minecraft's render-distance fog is tied to the active render distance.
+      // Keep it proportional so changing the chunk distance also changes the
+      // visible horizon instead of leaving the old fixed 52-block fog.
+      const farDist = Math.max(32, renderDistanceChunks * 16);
+      const nearDist = Math.max(16, farDist * 0.72);
       this.scene.fog.near = nearDist;
       this.scene.fog.far = farDist;
     }

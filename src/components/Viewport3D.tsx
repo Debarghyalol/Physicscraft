@@ -71,6 +71,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   useEffect(() => {
     if (envManagerRef.current) {
       envManagerRef.current.setShadowsEnabled(graphics.shadows);
+      envManagerRef.current.updateDistanceFog(graphics.renderDistance);
       // Only apply the preset when it actually changes (so other settings don't reset the clock)
       if (lastPresetRef.current !== graphics.skyPreset) {
         lastPresetRef.current = graphics.skyPreset;
@@ -119,6 +120,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     lastPresetRef.current = graphics.skyPreset;
     envManager.setPreset(graphics.skyPreset);
     envManager.setShadowsEnabled(graphics.shadows);
+    envManager.updateDistanceFog(graphics.renderDistance);
 
     // 4. Initialize Physics Engine (Rapier 3D + Minecraft VoxelWorld + Steve + SoftBodies)
     const engine = new PhysicsEngine(scene, camera);

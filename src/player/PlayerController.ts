@@ -29,10 +29,23 @@ export class PlayerController {
   // Movement parameters
   public isGrounded: boolean = false;
   public currentSpeed: number = 0;
-  public readonly walkSpeed: number = 5.2;
-  public readonly sprintSpeed: number = 8.8;
-  public readonly jumpVelocity: number = 10.9;
-  public readonly gravityAcceleration: number = 48.0;
+  // Minecraft-style movement uses 20 simulation ticks/sec. Vanilla player speed is
+  // about 4.317 blocks/s walking and 5.612 blocks/s sprinting. We keep the same
+  // acceleration/friction model, then apply a game-feel multiplier for Physicscraft.
+  public readonly walkSpeed: number = 7.55;
+  public readonly sprintSpeed: number = 9.82;
+  private readonly movementSpeedMultiplier: number = 1.75;
+  private readonly mcGroundAcceleration: number = 0.098;
+  private readonly mcSprintAcceleration: number = 0.1274;
+  private readonly mcGroundFriction: number = 0.546;
+  private readonly mcAirFriction: number = 0.91;
+
+  // Vanilla jump is 0.42 blocks/tick; Physicscraft gives it a modest boost.
+  private readonly jumpStrengthMultiplier: number = 1.15;
+  public readonly jumpVelocity: number = 8.4 * this.jumpStrengthMultiplier;
+  public readonly gravityAcceleration: number = 32.0;
+  private readonly verticalDragPerTick: number = 0.98;
+  private readonly terminalVelocity: number = 78.4;
 
   // Creative-style flight (toggle by double-tapping jump)
   public isFlying: boolean = false;
@@ -202,7 +215,23 @@ export class PlayerController {
       this.isGrounded = this.checkGrounded(nextX, nextY, nextZ);
     }
 
-    this.body.setTranslation({ x: nextX, y: nextY, z: nextZ }, true);
+    if (this.isFlying) {
+      let nextX = pos.x;
+      let nextY = pos.y;
+      let nextZ = pos.z;
+      const xResult = this.moveAlongAxis(nextX, nextY, nextZ, newVx * delta, 0);
+      nextX = xResult.position;
+      if (xResult.collided) newVx = 0;
+      const zResult = this.moveAlongAxis(nextX, nextY, nextZ, newVz * delta, 2);
+      nextZ = zResult.position;
+      if (zResult.collided) newVz = 0;
+      const yResult = this.moveAlongAxis(nextX, nextY, nextZ, newVy * delta, 1);
+      nextY = yResult.position;
+      if (yResult.collided) newVy = 0;
+      pos = { x: nextX, y: nextY, z: nextZ } as RAPIER.Vector3;
+    }
+
+    this.body.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true);
     this.body.setLinvel({ x: newVx, y: newVy, z: newVz }, true);
     pos = this.body.translation();
     linvel = this.body.linvel();
