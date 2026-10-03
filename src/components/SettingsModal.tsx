@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CameraViewMode, StructurePreset } from '../types/physics';
+import { ResourcePacksScreen } from './ResourcePacksScreen';
 import { SkyPreset } from '../rendering/EnvironmentManager';
 
 export interface GraphicsSettings {
@@ -53,7 +54,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleMute,
   onLeaveWorld,
 }) => {
-  const [subView, setSubView] = useState<'game_menu' | 'options'>('game_menu');
+  const [subView, setSubView] = useState<'game_menu' | 'options' | 'resource_packs'>('game_menu');
 
   if (!isOpen) return null;
 
@@ -63,7 +64,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-xs"
         onClick={() => {
-          if (subView === 'options') {
+          if (subView === 'resource_packs') {
+            setSubView('options');
+          } else if (subView === 'options') {
             setSubView('game_menu');
           } else {
             onClose();
@@ -120,6 +123,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* VIEW 3: RESOURCE PACKS */}
+      {subView === 'resource_packs' && <ResourcePacksScreen onDone={() => setSubView('options')} />}
 
       {/* VIEW 2: AUTHENTIC MINECRAFT JAVA "OPTIONS" */}
       {subView === 'options' && (
@@ -187,6 +193,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="mc-button py-2.5 text-xs"
             >
               Chunk Wireframe: {graphics.wireframe ? 'ON' : 'OFF'}
+            </button>
+
+            {/* Resource Packs (Minecraft Java resource pack import) */}
+            <button
+              type="button"
+              onClick={() => setSubView('resource_packs')}
+              className="mc-button py-2.5 text-xs"
+            >
+              Resource Packs...
             </button>
 
             {/* Mouse Look Sensitivity */}

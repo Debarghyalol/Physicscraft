@@ -4,7 +4,7 @@
 @layer utilities {
   /* Repeating dirt background for Minecraft Java menus */
   .mc-dirt-bg {
-    background-image: url('/textures/gui/options_background.png');
+    background-image: var(--rp-options-bg, url('/textures/gui/options_background.png'));
     background-repeat: repeat;
     background-size: 64px 64px;
     image-rendering: pixelated;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { resourcePacks } from '../resourcepack/ResourcePackManager';
 
 /**
  * Helper to compute authentic Minecraft 64x64 skin UV coordinates
@@ -14,11 +15,14 @@ function setSkinUVs(
 ) {
   const textureWidth = 64;
   const textureHeight = 64;
+  // Inset every face by a quarter texel: with MSAA / rounding the sampler can land just outside the
+  // face, which used to pull in transparent or neighbouring skin pixels (the dark seam between the shoes).
+  const e = 0.25;
   const toFaceVertices = (x1: number, y1: number, x2: number, y2: number) => [
-    new THREE.Vector2(x1 / textureWidth, 1.0 - y2 / textureHeight),
-    new THREE.Vector2(x2 / textureWidth, 1.0 - y2 / textureHeight),
-    new THREE.Vector2(x2 / textureWidth, 1.0 - y1 / textureHeight),
-    new THREE.Vector2(x1 / textureWidth, 1.0 - y1 / textureHeight),
+    new THREE.Vector2((x1 + e) / textureWidth, 1.0 - (y2 - e) / textureHeight),
+    new THREE.Vector2((x2 - e) / textureWidth, 1.0 - (y2 - e) / textureHeight),
+    new THREE.Vector2((x2 - e) / textureWidth, 1.0 - (y1 + e) / textureHeight),
+    new THREE.Vector2((x1 + e) / textureWidth, 1.0 - (y1 + e) / textureHeight),
   ];
 
   const top = toFaceVertices(u + depth, v, u + width + depth, v + depth);
@@ -61,7 +65,14 @@ export class PlayerModel {
   public rightArmGroup: THREE.Group;
   public leftLegGroup: THREE.Group;
   public rightLegGroup: THREE.Group;
-  public heldItem: THREE.Group;
+  // First-person arm rig (child of the camera) + its swing joints
+  public fpRig: THREE.Group;
+  private fpSwingPos: THREE.Group;
+  private fpSwingYaw: THREE.Group;
+  private fpSwingRoll: THREE.Group;
+  private fpMeshes: THREE.Mesh[] = [];
+  private fpSwingTime: number = 0; // 0..1 vanilla swingProgress
+  private fpSwinging: boolean = false;
 
   private skinTexture: THREE.Texture;
   private layer1Material: THREE.MeshBasicMaterial;
@@ -80,6 +91,7 @@ export class PlayerModel {
     this.skinTexture.magFilter = THREE.NearestFilter;
     this.skinTexture.minFilter = THREE.NearestFilter;
     this.skinTexture.generateMipmaps = false;
+    this.skinTexture.colorSpace = THREE.SRGBColorSpace;
 
     // Layer 1: Solid base skin
     this.layer1Material = new THREE.MeshBasicMaterial({
@@ -150,11 +162,51 @@ export class PlayerModel {
     const rightArmMesh2 = new THREE.Mesh(rightArmGeo2, this.layer2Material);
     this.rightArmGroup.add(rightArmMesh2);
 
-    // Held iron pickaxe
-    this.heldItem = this.createHeldPickaxe();
-    this.heldItem.position.set(0, -10 * px, 3 * px);
-    this.heldItem.rotation.set(Math.PI / 4, 0, 0);
-    this.rightArmGroup.add(this.heldItem);
+    // ---- First-person arm: exact port of vanilla ItemInHandRenderer.renderPlayerArm ----
+    // translate(0.64,-0.6,-0.72) rotY(45) [swing] translate(-1,3.6,3.5) rotZ(120) rotX(200)
+    // rotY(-135) translate(5.6,0,0), then the arm part (pivot -5,2,0) in model space (y down).
+    const d2r = Math.PI / 180;
+    this.fpRig = new THREE.Group();
+    this.fpSwingPos = new THREE.Group();
+    this.fpSwingPos.position.set(0.64, -0.6, -0.72);
+    this.fpRig.add(this.fpSwingPos);
+    const fpYaw45 = new THREE.Group();
+    fpYaw45.rotation.y = 45 * d2r;
+    this.fpSwingPos.add(fpYaw45);
+    this.fpSwingYaw = new THREE.Group();
+    fpYaw45.add(this.fpSwingYaw);
+    this.fpSwingRoll = new THREE.Group();
+    this.fpSwingYaw.add(this.fpSwingRoll);
+    const fpT1 = new THREE.Group();
+    fpT1.position.set(-1, 3.6, 3.5);
+    this.fpSwingRoll.add(fpT1);
+    const fpRz = new THREE.Group();
+    fpRz.rotation.z = 120 * d2r;
+    fpT1.add(fpRz);
+    const fpRx = new THREE.Group();
+    fpRx.rotation.x = 200 * d2r;
+    fpRz.add(fpRx);
+    const fpRy = new THREE.Group();
+    fpRy.rotation.y = -135 * d2r;
+    fpRx.add(fpRy);
+    const fpT2 = new THREE.Group();
+    fpT2.position.x = 5.6;
+    fpRy.add(fpT2);
+    // Model space is y-down (entity renderer applies scale(-1,-1,1) = rotZ(180) to our y-up geometry)
+    const fpMount = new THREE.Group();
+    fpMount.position.set(-6 * px, 0, 0);
+    fpMount.rotation.z = Math.PI;
+    fpT2.add(fpMount);
+    const fpArm1 = new THREE.Mesh(rightArmGeo1, this.layer1Material);
+    const fpArm2 = new THREE.Mesh(rightArmGeo2, this.layer2Material);
+    // Draw the hand on top of the world (vanilla clears depth before the hand pass)
+    fpArm1.renderOrder = 1000;
+    fpArm2.renderOrder = 1001;
+    fpArm1.frustumCulled = false;
+    fpArm2.frustumCulled = false;
+    this.fpMeshes.push(fpArm1, fpArm2);
+    fpMount.add(fpArm1, fpArm2);
+    this.fpRig.visible = false;
 
     this.root.add(this.rightArmGroup);
 
@@ -218,26 +270,6 @@ export class PlayerModel {
     scene.add(this.root);
   }
 
-  private createHeldPickaxe(): THREE.Group {
-    const group = new THREE.Group();
-
-    // Wooden handle
-    const handleGeo = new THREE.BoxGeometry(0.06, 0.65, 0.06);
-    const handleMat = new THREE.MeshBasicMaterial({ color: 0x8b5a2b });
-    const handle = new THREE.Mesh(handleGeo, handleMat);
-    handle.position.y = 0.25;
-    group.add(handle);
-
-    // Iron pickaxe head
-    const headGeo = new THREE.BoxGeometry(0.44, 0.09, 0.08);
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xd8d8d8 });
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.position.y = 0.54;
-    group.add(head);
-
-    return group;
-  }
-
   /**
    * Set first-person vs third-person mode
    */
@@ -251,41 +283,120 @@ export class PlayerModel {
     this.leftLegGroup.visible = !isFirstPerson;
     this.rightLegGroup.visible = !isFirstPerson;
 
-    if (isFirstPerson) {
-      // Classic Minecraft 1st person hand view
-      this.rightArmGroup.position.set(0.32, 1.42, -0.42);
-      this.rightArmGroup.rotation.set(-Math.PI / 6, Math.PI / 8, 0);
+    // First person uses the camera-attached rig; third person uses the body's own arm
+    this.fpSwinging = false;
+    this.fpSwingTime = 0;
+    this.rightArmGroup.visible = !isFirstPerson;
+    this.fpRig.visible = isFirstPerson;
+    this.layer1Material.depthTest = !isFirstPerson;
+    this.layer2Material.depthTest = !isFirstPerson;
+    this.rightArmGroup.position.set(0.375, 1.5, 0);
+    this.rightArmGroup.rotation.set(0, 0, 0);
+  }
+
+  /** Day/night light tint (the skin materials are unlit, so tint them directly) */
+  public setLightTint(color: THREE.Color) {
+    this.layer1Material.color.copy(color);
+    this.layer2Material.color.copy(color);
+  }
+
+  /** Parent the first-person arm to the camera (camera must be in the scene) */
+  public attachFirstPersonRig(camera: THREE.Camera) {
+    camera.add(this.fpRig);
+  }
+
+  /** Swap Steve's skin for the enabled resource pack's (or restore the default). */
+  public async applyResourcePack() {
+    const img = await resourcePacks.getTexture([
+      'entity/player/wide/steve',
+      'entity/steve',
+      'entity/player/slim/steve',
+    ]);
+    let tex: THREE.Texture;
+    if (img) {
+      let src: HTMLCanvasElement = img;
+      if (img.height * 2 === img.width) {
+        // Legacy 64x32 skin -> 64x64 (mirror right limbs onto the left-limb slots)
+        const s = img.width / 64;
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.width;
+        const g = c.getContext('2d')!;
+        g.imageSmoothingEnabled = false;
+        g.drawImage(img, 0, 0);
+        const mirror = (sx: number, sy: number, w: number, h: number, dx: number, dy: number) => {
+          g.save();
+          g.translate((dx + w) * s, dy * s);
+          g.scale(-1, 1);
+          g.drawImage(img, sx * s, sy * s, w * s, h * s, 0, 0, w * s, h * s);
+          g.restore();
+        };
+        mirror(0, 16, 16, 16, 16, 48); // right leg -> left leg
+        mirror(40, 16, 16, 16, 32, 48); // right arm -> left arm
+        src = c;
+      }
+      tex = new THREE.CanvasTexture(src);
     } else {
-      // Third person: connect shoulder joint
-      this.rightArmGroup.position.set(0.375, 1.5, 0);
-      this.rightArmGroup.rotation.set(0, 0, 0);
+      tex = new THREE.TextureLoader().load('/textures/entity/steve.png');
     }
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const old = this.skinTexture;
+    this.skinTexture = tex;
+    this.layer1Material.map = tex;
+    this.layer2Material.map = tex;
+    this.layer1Material.needsUpdate = true;
+    this.layer2Material.needsUpdate = true;
+    old.dispose();
   }
 
   public triggerSwing() {
     this.swingAnimation = 1.0;
+    this.fpSwinging = true;
+    this.fpSwingTime = 0;
+  }
+
+  /** Vanilla swing animation applied to the first-person arm (swing lasts 0.3s) */
+  private updateFirstPersonSwing(delta: number) {
+    if (this.fpSwinging) {
+      this.fpSwingTime += delta / 0.3;
+      if (this.fpSwingTime >= 1) {
+        this.fpSwinging = false;
+        this.fpSwingTime = 0;
+      }
+    }
+    const s = this.fpSwingTime;
+    const g = Math.sqrt(s);
+    const h = -0.3 * Math.sin(g * Math.PI);
+    const i = 0.4 * Math.sin(g * Math.PI * 2);
+    const j = -0.4 * Math.sin(s * Math.PI);
+    this.fpSwingPos.position.set(h + 0.64, i - 0.6, j - 0.72);
+    const k = Math.sin(s * s * Math.PI);
+    const l = Math.sin(g * Math.PI);
+    this.fpSwingYaw.rotation.y = l * 70 * (Math.PI / 180);
+    this.fpSwingRoll.rotation.z = k * -20 * (Math.PI / 180);
   }
 
   /**
    * Update character walking limb animations and head tracking
    */
   public update(delta: number, speed: number, isGrounded: boolean, pitch: number, yaw: number) {
-    // Body orientation
-    this.root.rotation.y = yaw;
+    // Body orientation: model's face is on local +Z, so in third person add PI
+    // so the face points away from the chase camera (same way the player looks)
+    this.root.rotation.y = this.isFirstPerson ? yaw : yaw + Math.PI;
 
     if (this.isFirstPerson) {
-      // First person mining swing
-      if (this.swingAnimation > 0) {
-        this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.5);
-        const swingT = Math.sin(this.swingAnimation * Math.PI);
-        this.rightArmGroup.rotation.x = -Math.PI / 6 - 0.7 * swingT;
-        this.rightArmGroup.rotation.y = Math.PI / 8 + 0.4 * swingT;
-      }
+      this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.5);
+      this.updateFirstPersonSwing(delta);
       return;
     }
 
     // Third-person head pitch look up/down
-    this.headGroup.rotation.x = Math.max(-1.1, Math.min(1.1, pitch));
+    // Face is on +Z: positive rotation.x tilts it down, so invert pitch
+    // (looking up -> head tilts up, looking down -> head tilts down)
+    this.headGroup.rotation.x = -Math.max(-1.1, Math.min(1.1, pitch));
 
     // Walk limb swing animation
     if (speed > 0.1 && isGrounded) {

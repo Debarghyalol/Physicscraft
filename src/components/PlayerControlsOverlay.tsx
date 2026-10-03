@@ -10,6 +10,7 @@ export interface PlayerControlsOverlayProps {
   onActionMine: (coords?: { x: number; y: number }) => void;
   onActionPlace: (coords?: { x: number; y: number }) => void;
   onToggleViewMode: () => void;
+  isFlying?: boolean;
   viewMode: CameraViewMode;
   selectedVoxel: VoxelType;
   onSelectVoxel: (v: VoxelType) => void;
@@ -26,7 +27,7 @@ export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
   { type: VoxelType.SAND, name: 'Sand' },
   { type: VoxelType.COBBLESTONE, name: 'Cobblestone' },
   { type: VoxelType.GLASS, name: 'Glass' },
-  { type: VoxelType.TNT, name: 'TNT' },
+  { type: VoxelType.GLOWSTONE, name: 'Glowstone' },
 ];
 
 /**
@@ -112,6 +113,17 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
           <line x1="8" y1="12" x2="16" y2="18" stroke="#ffffff" strokeWidth="1" strokeLinecap="round" />
         </svg>
       );
+    case VoxelType.GLOWSTONE:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#ffe08a" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#d9a441" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#b8832f" />
+          <rect x="9" y="6" width="2" height="2" fill="#fff6c8" />
+          <rect x="5" y="12" width="2" height="2" fill="#fff0a8" />
+          <rect x="16" y="13" width="2" height="2" fill="#f7d36b" />
+        </svg>
+      );
     case VoxelType.TNT:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
@@ -140,6 +152,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onSelectVoxel,
   onTogglePhysicsMaker,
   isPhysicsMakerActive,
+  isFlying = false,
 }) => {
   const isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
@@ -156,6 +169,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
 
   // Jump button active
   const [jumpPressed, setJumpPressed] = useState(false);
+  const [descendPressed, setDescendPressed] = useState(false);
 
   // Mobile touch aim & MCPE state separation
   const lookTouchId = useRef<number | null>(null);
@@ -191,19 +205,23 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     right = Math.max(-1, Math.min(1, right));
 
     const jump = jumpPressed || keysDown.current.has('Space');
-    const sprint = isSprinting || keysDown.current.has('ShiftLeft') || keysDown.current.has('ShiftRight');
+    const shift = keysDown.current.has('ShiftLeft') || keysDown.current.has('ShiftRight');
+    // While flying: Shift / C / on-screen button = descend (sprint is disabled)
+    const descend = isFlying && (descendPressed || shift || keysDown.current.has('KeyC'));
+    const sprint = !isFlying && (isSprinting || shift);
 
     onInputUpdate({
       moveForward: forward,
       moveRight: right,
       jump,
       sprint,
+      descend,
     });
-  }, [dpadDir, isSprinting, jumpPressed, onInputUpdate]);
+  }, [dpadDir, isSprinting, jumpPressed, descendPressed, isFlying, onInputUpdate]);
 
   useEffect(() => {
     emitInput();
-  }, [dpadDir, jumpPressed, isSprinting, emitInput]);
+  }, [dpadDir, jumpPressed, isSprinting, descendPressed, isFlying, emitInput]);
 
   // Keyboard Event Listeners for PC
   useEffect(() => {
@@ -624,6 +642,28 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           <Camera className="w-5 h-5" />
         </button>
 
+        {/* Fly-down button (only while flying) */}
+        {isFlying && (
+          <button
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              setDescendPressed(true);
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              setDescendPressed(false);
+            }}
+            onMouseDown={() => setDescendPressed(true)}
+            onMouseUp={() => setDescendPressed(false)}
+            className={`mcpe-action-btn w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-white text-2xl font-bold shadow-2xl ${
+              descendPressed ? 'active' : ''
+            }`}
+            title="Fly down"
+          >
+            ▼
+          </button>
+        )}
+
         {/* MCPE Jump Button */}
         <button
           onTouchStart={(e) => {
@@ -657,7 +697,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           style={{
             width: '364px',
             height: '44px',
-            backgroundImage: 'url(/textures/gui/hotbar.png)',
+            backgroundImage: 'var(--rp-hotbar, url(/textures/gui/hotbar.png))',
             backgroundSize: '100% 100%',
             imageRendering: 'pixelated',
           }}
@@ -673,7 +713,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                   height: '48px',
                   left: `${selectedIdx * 40 - 2}px`,
                   top: '-2px',
-                  backgroundImage: 'url(/textures/gui/hotbar_selection.png)',
+                  backgroundImage: 'var(--rp-hotbar-selection, url(/textures/gui/hotbar_selection.png))',
                   backgroundSize: '100% 100%',
                   imageRendering: 'pixelated',
                   zIndex: 10,

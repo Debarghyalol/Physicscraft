@@ -13,6 +13,7 @@ import { EnvironmentManager } from '../rendering/EnvironmentManager';
 import { PlayerControlsOverlay } from './PlayerControlsOverlay';
 import { PlayerInput } from '../player/PlayerController';
 import { GraphicsSettings } from './SettingsModal';
+import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 
 interface Viewport3DProps {
@@ -46,6 +47,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const [selectedVoxel, setSelectedVoxel] = useState<VoxelType>(VoxelType.STONE);
   const [currentFps, setCurrentFps] = useState(60);
+  const [isFlying, setIsFlying] = useState(false);
+  const lastPresetRef = useRef<string | null>(null);
 
   // Player Input Ref for continuous 60fps simulation
   const playerInputRef = useRef<PlayerInput>({
@@ -59,7 +62,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   useEffect(() => {
     if (envManagerRef.current) {
       envManagerRef.current.setShadowsEnabled(graphics.shadows);
-      envManagerRef.current.setPreset(graphics.skyPreset);
+      // Only apply the preset when it actually changes (so other settings don't reset the clock)
+      if (lastPresetRef.current !== graphics.skyPreset) {
+        lastPresetRef.current = graphics.skyPreset;
+        envManagerRef.current.setPreset(graphics.skyPreset);
+      }
     }
     if (engineRef.current?.voxelWorld) {
       engineRef.current.voxelWorld.setWireframe(graphics.wireframe);
@@ -99,6 +106,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // 3. Procedural Sky & Lighting
     const envManager = new EnvironmentManager(scene, renderer);
     envManagerRef.current = envManager;
+    lastPresetRef.current = graphics.skyPreset;
     envManager.setPreset(graphics.skyPreset);
     envManager.setShadowsEnabled(graphics.shadows);
 
@@ -107,6 +115,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     engineRef.current = engine;
 
     let isDisposed = false;
+    const steveLight = new THREE.Color();
+    let unsubscribePacks: (() => void) | null = null;
     engine.initialize().then(() => {
       if (isDisposed) return;
       onEngineReady(engine);
@@ -114,7 +124,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       engine.loadPreset('empty');
       if (engine.player) {
         engine.player.setViewMode('first_person');
+        engine.player.onFlyingChange = setIsFlying;
       }
+
+      // Resource packs: apply now and whenever the selection changes
+      const applyPacks = () => {
+        engine.voxelWorld.applyResourcePack();
+        envManager.minecraftSky.applyResourcePack();
+        engine.player?.model.applyResourcePack();
+      };
+      applyPacks();
+      unsubscribePacks = resourcePacks.subscribe(applyPacks);
     });
 
     // 5. Animation & Simulation Loop
@@ -154,6 +174,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const playerPos = engine.player.getPosition();
         const isUnderground = engine.voxelWorld.updateLighting(playerPos, delta);
         envManager.setUndergroundLighting(isUnderground);
+
+        // Day/night cycle: sun, moon, stars, clouds, sky colour and world light tint
+        envManager.update(delta, playerPos);
+        const skyDim = 1 - envManager.minecraftSky.getDaylight();
+        engine.voxelWorld.setSkyDim(skyDim);
+        engine.voxelWorld.setLightTint(envManager.getWarmTint());
+        // Steve is lit by the flood-fill light at his position (caves are dark, glowstone lights him up)
+        engine.voxelWorld.getLightColorAt(playerPos.x, playerPos.y + 1.0, playerPos.z, skyDim, steveLight);
+        steveLight.multiply(envManager.getWarmTint());
+        engine.player.model.setLightTint(steveLight);
       }
 
       // Render Three.js scene
@@ -176,6 +206,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     return () => {
       isDisposed = true;
+      unsubscribePacks?.();
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
       envManager.dispose();
@@ -279,6 +310,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onActionMine={handleActionMine}
         onActionPlace={handleActionPlace}
         onToggleViewMode={onToggleViewMode}
+        isFlying={isFlying}
         viewMode={viewMode}
         selectedVoxel={selectedVoxel}
         onSelectVoxel={handleSelectVoxel}

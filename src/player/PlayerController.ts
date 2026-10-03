@@ -10,6 +10,7 @@ export interface PlayerInput {
   moveRight: number;   // -1 to 1
   jump: boolean;
   sprint: boolean;
+  descend?: boolean; // fly down (only used while flying)
 }
 
 export class PlayerController {
@@ -31,6 +32,14 @@ export class PlayerController {
   public readonly walkSpeed: number = 5.2;
   public readonly sprintSpeed: number = 8.8;
   public readonly jumpVelocity: number = 7.6;
+
+  // Creative-style flight (toggle by double-tapping jump)
+  public isFlying: boolean = false;
+  public onFlyingChange?: (flying: boolean) => void;
+  public readonly flySpeed: number = 10.5;
+  public readonly flyVerticalSpeed: number = 7.5;
+  private prevJump: boolean = false;
+  private lastJumpPressTime: number = -10000;
 
   // Selected voxel for building
   public selectedVoxel: VoxelType = VoxelType.STONE;
@@ -60,6 +69,9 @@ export class PlayerController {
     this.camera = camera;
     this.voxelWorld = voxelWorld;
     this.model = new PlayerModel(scene);
+    // Camera must live in the scene so the first-person arm (a camera child) renders
+    if (!camera.parent) scene.add(camera);
+    this.model.attachFirstPersonRig(camera);
 
     // Create Minecraft black wireframe cube for block selection highlight
     const wireGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.005, 1.005, 1.005));
@@ -100,6 +112,13 @@ export class PlayerController {
     this.model.setFirstPersonMode(mode === 'first_person');
   }
 
+  public setFlying(flying: boolean) {
+    if (this.isFlying === flying) return;
+    this.isFlying = flying;
+    if (this.body) this.body.setGravityScale(flying ? 0 : 1, true);
+    this.onFlyingChange?.(flying);
+  }
+
   public toggleViewMode() {
     if (this.viewMode === 'first_person') {
       this.setViewMode('third_person');
@@ -127,8 +146,20 @@ export class PlayerController {
 
     this.isGrounded = hit !== null && hit.timeOfImpact < 0.28;
 
+    // Double-tap jump (within 320ms) toggles flight
+    const nowMs = performance.now();
+    if (input.jump && !this.prevJump) {
+      if (nowMs - this.lastJumpPressTime < 320) {
+        this.setFlying(!this.isFlying);
+        this.lastJumpPressTime = -10000;
+      } else {
+        this.lastJumpPressTime = nowMs;
+      }
+    }
+    this.prevJump = input.jump;
+
     // 2. Horizontal Movement & Anti-Wall-Stick Sliding
-    const speed = input.sprint ? this.sprintSpeed : this.walkSpeed;
+    const speed = this.isFlying ? this.flySpeed : input.sprint ? this.sprintSpeed : this.walkSpeed;
 
     // Camera horizontal forward and strafe directions
     PlayerController.scratchForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
@@ -181,14 +212,19 @@ export class PlayerController {
       }
     }
 
-    const accel = this.isGrounded ? 18 : 8;
+    const accel = this.isFlying ? 10 : this.isGrounded ? 18 : 8;
 
     const newVx = THREE.MathUtils.lerp(linvel.x, targetVelX, delta * accel);
     const newVz = THREE.MathUtils.lerp(linvel.z, targetVelZ, delta * accel);
     let newVy = linvel.y;
 
     // 3. Jump & In-Air Gravity (Prevents sticking to wall when jumping into corners)
-    if (input.jump && this.isGrounded && linvel.y < 2.0) {
+    if (this.isFlying) {
+      const dir = (input.jump ? 1 : 0) - (input.descend ? 1 : 0);
+      newVy = THREE.MathUtils.lerp(linvel.y, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
+      // Landing: descending into the ground ends flight
+      if (this.isGrounded && input.descend) this.setFlying(false);
+    } else if (input.jump && this.isGrounded && linvel.y < 2.0) {
       newVy = this.jumpVelocity;
       soundManager.playJump();
     } else if (!this.isGrounded) {
@@ -201,13 +237,13 @@ export class PlayerController {
     this.currentSpeed = Math.hypot(newVx, newVz);
 
     // Footsteps sound
-    if (this.currentSpeed > 1.2 && this.isGrounded) {
+    if (this.currentSpeed > 1.2 && this.isGrounded && !this.isFlying) {
       soundManager.playFootstep('grass');
     }
 
     // 4. Sync 3D Player Model
     this.model.root.position.set(pos.x, pos.y - 0.9, pos.z);
-    this.model.update(delta, this.currentSpeed, this.isGrounded, this.pitch, this.yaw);
+    this.model.update(delta, this.currentSpeed, this.isGrounded && !this.isFlying, this.pitch, this.yaw);
 
     // 5. Update Camera Position & Orientation
     this.updateCamera(pos);
@@ -256,7 +292,7 @@ export class PlayerController {
 
       const camDir = new THREE.Vector3(
         Math.sin(this.yaw) * Math.cos(this.pitch),
-        Math.max(0.08, -Math.sin(this.pitch) + 0.15),
+        -Math.sin(this.pitch),
         Math.cos(this.yaw) * Math.cos(this.pitch)
       ).normalize();
 

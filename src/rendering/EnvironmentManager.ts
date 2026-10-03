@@ -14,20 +14,20 @@ export const SKY_PRESETS: Record<SkyPreset, EnvironmentSettings> = {
   daylight: {
     preset: 'daylight',
     timeOfDay: 0.25,
-    sunIntensity: 1.15,
-    ambientIntensity: 0.38,
+    sunIntensity: 0.9,
+    ambientIntensity: 0.45,
   },
   sunset: {
     preset: 'sunset',
     timeOfDay: 0.48,
-    sunIntensity: 1.25,
-    ambientIntensity: 0.32,
+    sunIntensity: 0.9,
+    ambientIntensity: 0.4,
   },
   dawn: {
     preset: 'dawn',
     timeOfDay: 0.05,
-    sunIntensity: 1.1,
-    ambientIntensity: 0.35,
+    sunIntensity: 0.85,
+    ambientIntensity: 0.4,
   },
   midnight: {
     preset: 'midnight',
@@ -38,8 +38,8 @@ export const SKY_PRESETS: Record<SkyPreset, EnvironmentSettings> = {
   studio: {
     preset: 'studio',
     timeOfDay: 0.22,
-    sunIntensity: 1.2,
-    ambientIntensity: 0.42,
+    sunIntensity: 0.9,
+    ambientIntensity: 0.45,
   },
 };
 
@@ -53,6 +53,10 @@ export class EnvironmentManager {
   public ambientLight: THREE.HemisphereLight;
 
   public currentSettings: EnvironmentSettings;
+  private worldTint = new THREE.Color();
+  private voxelTint = new THREE.Color();
+  private white = new THREE.Color(1, 1, 1);
+  private warmTint = new THREE.Color(1.0, 0.7, 0.45);
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.scene = scene;
@@ -92,8 +96,9 @@ export class EnvironmentManager {
     this.scene.fog = new THREE.Fog(fogColor, 28, 52);
 
     // Color tone mapping calibrated for vivid, punchy colors with zero milky haze
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.98;
+    // No filmic tone mapping: ACES lifted/desaturated the unlit voxel colours (the "white wash").
+    this.renderer.toneMapping = THREE.NoToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
 
     this.applySettings(this.currentSettings);
   }
@@ -142,6 +147,7 @@ export class EnvironmentManager {
     if (playerPos) {
       // Keep sun light shadow frustum centered on player
       const sunDir = this.minecraftSky.getSunDirection();
+      if (sunDir.y < 0) sunDir.negate(); // at night the light comes from the moon's side of the sky
       this.sunLight.position.copy(playerPos).add(sunDir.multiplyScalar(40));
       this.sunLight.target.position.copy(playerPos);
       this.sunLight.target.updateMatrixWorld();
@@ -149,32 +155,41 @@ export class EnvironmentManager {
   }
 
   private updateLightingColors() {
-    const time = this.minecraftSky.timeOfDay;
-    const angle = (time - 0.25) * 2.0 * Math.PI;
-    const sunHeight = Math.cos(angle);
+    const sky = this.minecraftSky;
+    const d = sky.getDaylight(); // 0 night .. 1 day
+    const h = Math.cos((sky.timeOfDay - 0.25) * 2 * Math.PI);
+    const warm = THREE.MathUtils.clamp(1 - Math.abs(h) / 0.3, 0, 1); // sunrise / sunset glow
 
-    if (sunHeight > 0.15) {
-      // Day
-      this.sunLight.color.setHex(0xfffbeb);
-      this.sunLight.intensity = this.currentSettings.sunIntensity;
-      this.ambientLight.color.setHex(0xffffff);
-      this.ambientLight.groundColor.setHex(0x334155);
-      this.ambientLight.intensity = this.currentSettings.ambientIntensity;
-    } else if (sunHeight > -0.15) {
-      // Sunset / Dawn
-      this.sunLight.color.setHex(0xf97316);
-      this.sunLight.intensity = this.currentSettings.sunIntensity * 1.1;
-      this.ambientLight.color.setHex(0xfde047);
-      this.ambientLight.groundColor.setHex(0x1e1b4b);
-      this.ambientLight.intensity = this.currentSettings.ambientIntensity * 0.9;
+    if (h >= 0) {
+      this.sunLight.color.setHex(0xfffbeb).lerp(new THREE.Color(0xff9a4d), warm * 0.7);
+      this.sunLight.intensity = this.currentSettings.sunIntensity * d;
     } else {
-      // Night (Moonlight)
-      this.sunLight.color.setHex(0x93c5fd);
-      this.sunLight.intensity = 0.35;
-      this.ambientLight.color.setHex(0x38bdf8);
-      this.ambientLight.groundColor.setHex(0x0f172a);
-      this.ambientLight.intensity = 0.22;
+      this.sunLight.color.setHex(0x9db8ff); // moonlight
+      this.sunLight.intensity = 0.25 * (1 - d);
     }
+    this.ambientLight.color.setHex(0xffffff).lerp(new THREE.Color(0x4a5a8a), 1 - d);
+    this.ambientLight.groundColor.setHex(0x334155);
+    this.ambientLight.intensity = THREE.MathUtils.lerp(0.16, this.currentSettings.ambientIntensity, d);
+    this.fillLight.intensity = 0.2 * d;
+  }
+
+  /** Sunset / sunrise glow only (voxel brightness comes from per-vertex light + sky dim). */
+  public getWarmTint(): THREE.Color {
+    const sky = this.minecraftSky;
+    const h = Math.cos((sky.timeOfDay - 0.25) * 2 * Math.PI);
+    const warm = THREE.MathUtils.clamp(1 - Math.abs(h) / 0.3, 0, 1);
+    return this.voxelTint.copy(this.white).lerp(this.warmTint, warm * 0.3);
+  }
+
+  /** Colour multiplier for unlit (baked-light) materials: voxels and Steve. */
+  public getWorldTint(): THREE.Color {
+    const sky = this.minecraftSky;
+    const d = sky.getDaylight();
+    const h = Math.cos((sky.timeOfDay - 0.25) * 2 * Math.PI);
+    const warm = THREE.MathUtils.clamp(1 - Math.abs(h) / 0.3, 0, 1);
+    this.worldTint.setRGB(0.07, 0.09, 0.2).lerp(this.white, d);
+    this.worldTint.lerp(this.warmTint, warm * 0.3);
+    return this.worldTint;
   }
 
   public applySettings(settings: Partial<EnvironmentSettings>) {

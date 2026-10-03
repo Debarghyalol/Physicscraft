@@ -89,6 +89,7 @@ function createWoodTexture(): THREE.CanvasTexture {
   ctx.strokeRect(4, 4, 504, 504);
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   return texture;
@@ -116,7 +117,7 @@ function createStoneTexture(): THREE.CanvasTexture {
   ctx.lineWidth = 8;
   ctx.strokeRect(4, 4, 504, 504);
 
-  return new THREE.CanvasTexture(canvas);
+  { const t = new THREE.CanvasTexture(canvas); t.colorSpace = THREE.SRGBColorSpace; return t; }
 }
 
 function createTNTTexture(theme: VisualTheme = 'realistic'): THREE.CanvasTexture {
@@ -148,7 +149,7 @@ function createTNTTexture(theme: VisualTheme = 'realistic'): THREE.CanvasTexture
   ctx.lineWidth = 10;
   ctx.strokeRect(5, 5, 502, 502);
 
-  return new THREE.CanvasTexture(canvas);
+  { const t = new THREE.CanvasTexture(canvas); t.colorSpace = THREE.SRGBColorSpace; return t; }
 }
 
 // Material cache: key is `${materialType}_${theme}`
