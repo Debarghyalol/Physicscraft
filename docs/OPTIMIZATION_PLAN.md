@@ -16,6 +16,30 @@ The current streaming code uses time deadlines, but JavaScript cannot interrupt 
 
 The main-thread game step currently includes voxel streaming work, terrain generation, lighting work, mesh construction, and physics-related updates. These workloads can therefore compete directly with input, physics, and rendering.
 
+## Observed Fast-Movement Profile
+
+A mobile fast-movement capture was used as a concrete baseline for the optimization work. The debug overlay reported:
+
+| Metric | Observed |
+| --- | ---: |
+| Frame time | 46.80 ms |
+| Engine step / "Physics" | 45.40 ms |
+| Render | 1.30 ms |
+| Streaming lighting update | 0.00 ms |
+| Generation | 5.50 ms |
+| Loaded chunks | 144 |
+| Meshes | 383 |
+| Draw calls | 62 |
+| Triangles | 51,598 |
+| Geometries | 225 |
+| Textures | 6 |
+| JS heap | 124.9 MB |
+
+The dominant cost in this sample is the engine step rather than GPU rendering: about 45.4 ms of a 46.8 ms frame is spent inside `engine.step()`. The current telemetry label "Physics" is broader than Rapier-only physics because the engine step also contains voxel streaming work. The 5.5 ms generation measurement is therefore part of that broader main-thread step.
+
+This changes the optimization priority: first isolate the work inside `engine.step()` into Rapier simulation, voxel generation, meshing, collider updates, and other engine tasks. Each expensive stage can then be optimized independently instead of assuming the full 45.4 ms is physics.
+
+The capture also shows rendering at 1.3 ms with 62 draw calls and 51,598 triangles. Render distance can now be configured up to 35 chunks for testing, but 35 chunks should be treated as a stress-test setting rather than a performance target because the streamed area can increase CPU, memory, mesh, and collider workload substantially.
 ## Main Bottlenecks Identified
 
 ### 1. Synchronous chunk generation
@@ -143,7 +167,7 @@ Targets:
 
 Before and after each optimization stage, record:
 - Total frame time
-- Physics time
+- Engine-step time, split into actual Rapier time and voxel/engine work
 - Terrain generation time
 - Lighting time
 - Mesh generation time
@@ -196,10 +220,17 @@ The existing telemetry should be split into these categories instead of grouping
 The optimization work should be considered successful only when measurements show:
 - No large frame spikes caused by entering newly generated terrain.
 - Camera/input remain responsive during chunk streaming.
+- Engine-step spikes have a named, measurable source rather than being grouped under the broad "Physics" label.
 - Physics remains stable while terrain loads.
 - Visible terrain appears progressively without freezing the game loop.
 - Memory usage remains bounded during long-distance exploration.
 - Any worker/queue complexity produces measurable gains rather than only theoretical improvements.
+
+## UI/Profiling Controls
+
+- Render distance is configurable from 2 to 35 chunks.
+- Changing render distance must rebuild the streaming request set without synchronously generating the new area.
+- The debug overlay keeps frame-time and performance graphs but no longer displays a separate FPS metric.
 
 ## Validation Checklist
 
