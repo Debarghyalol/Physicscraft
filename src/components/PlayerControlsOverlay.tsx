@@ -26,7 +26,7 @@ export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
   { type: VoxelType.SAND, name: 'Sand' },
   { type: VoxelType.COBBLESTONE, name: 'Cobblestone' },
   { type: VoxelType.GLASS, name: 'Glass' },
-  { type: VoxelType.TNT, name: 'TNT' },
+  { type: VoxelType.GLOWSTONE, name: 'Glowstone' },
 ];
 
 /**
@@ -110,6 +110,17 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
           <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="rgba(180, 215, 245, 0.45)" stroke="#ffffff" strokeWidth="0.8" />
           <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="rgba(150, 195, 235, 0.45)" stroke="#ffffff" strokeWidth="0.8" />
           <line x1="8" y1="12" x2="16" y2="18" stroke="#ffffff" strokeWidth="1" strokeLinecap="round" />
+        </svg>
+      );
+    case VoxelType.GLOWSTONE:
+      return (
+        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#ffe08a" />
+          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#d9a441" />
+          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#b8832f" />
+          <rect x="9" y="6" width="2" height="2" fill="#fff6c8" />
+          <rect x="5" y="12" width="2" height="2" fill="#fff0a8" />
+          <rect x="16" y="13" width="2" height="2" fill="#f7d36b" />
         </svg>
       );
     case VoxelType.TNT:
