@@ -55,6 +55,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     chunks: 0, meshes: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, jsHeapMb: null,
   });
   const debugHistoryRef = useRef<DebugFrameSample[]>([]);
+  const graphicsRef = useRef(graphics);
+  graphicsRef.current = graphics;
 
   // Player Input Ref for continuous 60fps simulation
   const playerInputRef = useRef<PlayerInput>({
@@ -207,7 +209,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const renderStart = performance.now();
       renderer.render(scene, camera);
       const renderEnd = performance.now();
-      if (graphics.debugMode) {
+      if (graphicsRef.current.debugMode) {
         const info = renderer.info;
         const memory = memoryInfo();
         const meshes = scene.children.reduce((count, object) => count + (object instanceof THREE.Mesh ? 1 : 0), 0);
