@@ -388,11 +388,13 @@ export class PlayerModel {
    * Update character walking limb animations and head tracking
    */
   public update(delta: number, speed: number, isGrounded: boolean, pitch: number, yaw: number) {
-    // The movement/look direction is -Z at yaw=0, while the skin's face is on
-    // the model's local +Z face. Third-person camera is behind the player, so the
-    // body must be rotated 180° from the camera-facing direction. Front view puts
-    // the camera in front, so the normal yaw already points the face toward it.
-    this.root.rotation.y = this.isFirstPerson ? yaw : this.isFrontView ? yaw : yaw + Math.PI;
+    // The movement/look direction is -Z at yaw=0, while the skin's face is on the
+    // model's local +Z face, so the body is always turned by PI to point the face
+    // along the player's look direction. The camera decides what you see:
+    //  - third person: camera is behind the player -> back of the head
+    //  - front view: camera is in front of the player (distanceSign = -1) -> the face
+    // The body orientation therefore must NOT change between those two modes.
+    this.root.rotation.y = this.isFirstPerson ? yaw : yaw + Math.PI;
 
     if (this.isFirstPerson) {
       this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.5);
