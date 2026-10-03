@@ -48,6 +48,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const [selectedVoxel, setSelectedVoxel] = useState<VoxelType>(VoxelType.STONE);
   const [currentFps, setCurrentFps] = useState(60);
+  const fpsRef = useRef(60);
   const [isFlying, setIsFlying] = useState(false);
   const lastPresetRef = useRef<string | null>(null);
   const [debugSample, setDebugSample] = useState<DebugFrameSample>({
@@ -168,6 +169,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const computedFps = Math.round((frameCount * 1000) / (now - fpsTimer));
         frameCount = 0;
         fpsTimer = now;
+        fpsRef.current = computedFps;
         setCurrentFps(computedFps);
 
         onUpdateStats({
@@ -215,7 +217,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const meshes = scene.children.reduce((count, object) => count + (object instanceof THREE.Mesh ? 1 : 0), 0);
         const sample: DebugFrameSample = {
           frameMs: renderEnd - frameStart,
-          fps: currentFps,
+          fps: fpsRef.current,
           physicsMs: physicsEnd - physicsStart,
           renderMs: renderEnd - renderStart,
           streamingMs,
