@@ -100,7 +100,6 @@ export class PhysicsEngine {
     this.eventQueue = new RAPIER.EventQueue(true);
 
     this.voxelWorld.setRapierWorld(this.world);
-    this.setupLandscapePhysics();
 
     // Create Rapier-powered Player Character (Steve) standing safely on grass outside structure zone
     const spawnX = 0;
@@ -116,21 +115,6 @@ export class PhysicsEngine {
   /**
    * Bedrock bottom fallback collider (y=0) to prevent falling through bottom of world
    */
-  private setupLandscapePhysics() {
-    const floorBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, -66, 0);
-    this.floorBody = this.world.createRigidBody(floorBodyDesc);
-
-    const groundSize = 180;
-    const floorColliderDesc = RAPIER.ColliderDesc.cuboid(groundSize / 2, 0.5, groundSize / 2)
-      .setTranslation(0, 0, 0)
-      .setFriction(0.2)
-      .setRestitution(0.0)
-      .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
-      .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
-
-    this.floorCollider = this.world.createCollider(floorColliderDesc, this.floorBody);
-  }
-
   public setWallsEnabled(enabled: boolean) {
     this.hasWalls = enabled;
   }
@@ -521,7 +505,7 @@ export class PhysicsEngine {
         const pDir = pVec.clone().sub(epicenter).normalize();
         pDir.y = Math.max(pDir.y + 0.45, 0.3);
         const impulse = (strength * 0.4) * Math.pow(1 - pDist / radius, 1.2);
-        this.player.body.applyImpulse({ x: pDir.x * impulse, y: pDir.y * impulse + 3.5, z: pDir.z * impulse }, true);
+        this.player.applyImpulse({ x: pDir.x * impulse, y: pDir.y * impulse + 3.5, z: pDir.z * impulse });
       }
     }
 
@@ -1735,10 +1719,6 @@ export class PhysicsEngine {
     this.voxelWorld.dispose();
     if (this.player) {
       this.player.dispose(this.scene);
-    }
-    if (this.floorBody) {
-      this.world.removeCollider(this.floorCollider, false);
-      this.world.removeRigidBody(this.floorBody);
     }
     if (this.world) {
       this.world.free();
