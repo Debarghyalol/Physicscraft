@@ -98,7 +98,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onClick={onToggleViewMode}
               className="mc-button w-full py-2.5 text-xs uppercase"
             >
-              Camera: {viewMode === 'first_person' ? 'First Person' : 'Third Person'}
+              Camera: {viewMode === 'first_person' ? 'First Person' : viewMode === 'third_person' ? 'Third Person' : 'Front View'}
             </button>
 
             {/* Options... */}
