@@ -394,10 +394,10 @@ export class PlayerModel {
     // should see the same facial side without changing the body's yaw.
     this.root.rotation.y = this.isFirstPerson ? yaw : yaw + Math.PI;
 
-    // The head is a separate pivot, so compensate for the skin/head orientation
-    // only in front view. This keeps the corrected third-person/back view intact
-    // while making the face point toward the front camera.
-    this.headGroup.rotation.y = this.isFrontView ? Math.PI : 0;
+    // The front camera is placed in the player's forward direction, so the same
+    // body orientation already points the face toward the camera. Do not rotate
+    // the head independently in front view, otherwise it turns the face away.
+    this.headGroup.rotation.y = 0;
 
     if (this.isFirstPerson) {
       this.swingAnimation = Math.max(0, this.swingAnimation - delta * 4.5);
