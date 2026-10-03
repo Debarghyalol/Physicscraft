@@ -41,8 +41,8 @@ export class PlayerController {
   private readonly mcAirFriction: number = 0.91;
 
   // Vanilla jump is 0.42 blocks/tick; Physicscraft gives it a modest boost.
-  public readonly jumpVelocity: number = 9.66;
   private readonly jumpStrengthMultiplier: number = 1.15;
+  public readonly jumpVelocity: number = 8.4 * this.jumpStrengthMultiplier;
   public readonly gravityAcceleration: number = 32.0;
   private readonly verticalDragPerTick: number = 0.98;
   private readonly terminalVelocity: number = 78.4;
