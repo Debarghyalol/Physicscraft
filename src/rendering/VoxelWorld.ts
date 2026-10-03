@@ -196,6 +196,11 @@ export class VoxelWorld {
   private lastMarkKey = -1;
   private batchDepth = 0;
   private terrainQueue: Array<[number, number, number]> = [];
+  private terrainQueueIndex = 0;
+  private lightQueue: ChunkColumn[] = [];
+  private readyQueue: ChunkColumn[] = [];
+  private queuedLight = new Set<number>();
+  private queuedReady = new Set<number>();
   private streamCx = NaN;
   private streamCz = NaN;
   public seed: number = 1337;
@@ -207,8 +212,8 @@ export class VoxelWorld {
     if (next === this.renderDistance) return;
     this.renderDistance = next;
 
-    // Rebuild the streaming request set around the current player chunk. Work is still
-    // performed by the normal incremental streaming loop rather than generated here.
+    // Rebuild the request queues around the current player chunk. Do not perform generation
+    // synchronously here: the normal frame-budgeted streamer will drain the queues.
     if (Number.isFinite(this.streamCx) && Number.isFinite(this.streamCz)) {
       const cx = this.streamCx;
       const cz = this.streamCz;
@@ -1503,7 +1508,9 @@ export class VoxelWorld {
     this.streamCz = pcz;
 
     const r = this.renderDistance;
-    // Terrain queue: everything within r+2 that is not generated yet, nearest first
+    // Terrain queue: everything within r+2 that is not generated yet, nearest first.
+    // Use an index instead of Array.shift() so a large render-distance queue does not
+    // repeatedly move thousands of entries in memory.
     const q: Array<[number, number, number]> = [];
     for (let cx = pcx - r - 2; cx <= pcx + r + 2; cx++) {
       for (let cz = pcz - r - 2; cz <= pcz + r + 2; cz++) {
@@ -1512,14 +1519,55 @@ export class VoxelWorld {
     }
     q.sort((a, b) => a[2] - b[2]);
     this.terrainQueue = q;
+    this.terrainQueueIndex = 0;
 
-    // Unload far chunks: drop meshes beyond r+1, delete untouched columns beyond r+3
+    // Rebuild the secondary queues once per player-chunk/radius change. This replaces the
+    // old O(radius²) lighting/readiness scan that ran every frame and became a bottleneck
+    // at large render distances.
+    this.lightQueue.length = 0;
+    this.readyQueue.length = 0;
+    this.queuedLight.clear();
+    this.queuedReady.clear();
+
+    // Unload far chunks: drop meshes beyond r+1, delete untouched columns beyond r+3.
     for (const [key, col] of this.chunks) {
       const d = Math.max(Math.abs(col.cx - pcx), Math.abs(col.cz - pcz));
       if (d > r + 1) this.disposeColumnMeshes(col);
       if (d > r + 3 && !col.modified) {
         this.chunks.delete(key);
         this.invalidateColCache();
+        continue;
+      }
+      if (d <= r + 1 && !col.lit) this.queueLight(col);
+      if (d <= r && col.lit && !col.ready) this.queueReady(col);
+    }
+  }
+
+  private queueLight(col: ChunkColumn) {
+    if (col.lit) return;
+    const d = Math.max(Math.abs(col.cx - this.streamCx), Math.abs(col.cz - this.streamCz));
+    if (d > this.renderDistance + 1) return;
+    const key = this.ckey(col.cx, col.cz);
+    if (this.queuedLight.has(key)) return;
+    this.queuedLight.add(key);
+    this.lightQueue.push(col);
+  }
+
+  private queueReady(col: ChunkColumn) {
+    if (!col.lit || col.ready) return;
+    const d = Math.max(Math.abs(col.cx - this.streamCx), Math.abs(col.cz - this.streamCz));
+    if (d > this.renderDistance) return;
+    const key = this.ckey(col.cx, col.cz);
+    if (this.queuedReady.has(key)) return;
+    this.queuedReady.add(key);
+    this.readyQueue.push(col);
+  }
+
+  private queueReadyNeighborhood(col: ChunkColumn) {
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = this.chunks.get(this.ckey(col.cx + dx, col.cz + dz));
+        if (n) this.queueReady(n);
       }
     }
   }
@@ -1549,53 +1597,57 @@ export class VoxelWorld {
 
   /** Generate terrain -> light -> mesh for chunks around the player within a time budget. */
   private streamWork(deadline: number) {
-    const pcx = this.streamCx;
-    const pcz = this.streamCz;
-    const r = this.renderDistance;
-
-    // 1. terrain
-    while (this.terrainQueue.length && performance.now() < deadline) {
-      const [cx, cz] = this.terrainQueue.shift()!;
-      if (!this.chunks.has(this.ckey(cx, cz))) this.getChunk(cx, cz);
+    // 1. Terrain generation. getChunk() can be expensive, so check the deadline before
+    // every column and let subsequent frames continue the queue.
+    while (this.terrainQueueIndex < this.terrainQueue.length && performance.now() < deadline) {
+      const [cx, cz] = this.terrainQueue[this.terrainQueueIndex++];
+      if (!this.chunks.has(this.ckey(cx, cz))) {
+        const col = this.getChunk(cx, cz);
+        this.queueLight(col);
+      }
+    }
+    if (this.terrainQueueIndex >= this.terrainQueue.length) {
+      this.terrainQueue.length = 0;
+      this.terrainQueueIndex = 0;
     }
 
-    // 2. lighting (r+1 ring so every meshed chunk has lit neighbours)
-    for (let ring = 0; ring <= r + 1; ring++) {
-      for (let cx = pcx - ring; cx <= pcx + ring; cx++) {
-        for (let cz = pcz - ring; cz <= pcz + ring; cz++) {
-          if (Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz)) !== ring) continue;
-          const col = this.chunks.get(this.ckey(cx, cz));
-          if (col && !col.lit) {
-            if (performance.now() >= deadline) return;
-            this.initChunkLight(col);
+    // 2. Lighting. This is now an explicit queue rather than scanning every chunk inside
+    // the render-distance square on every frame.
+    while (this.lightQueue.length && performance.now() < deadline) {
+      const col = this.lightQueue.pop()!;
+      this.queuedLight.delete(this.ckey(col.cx, col.cz));
+      if (!this.chunks.has(this.ckey(col.cx, col.cz)) || col.lit) continue;
+      this.initChunkLight(col);
+      this.queueReadyNeighborhood(col);
+    }
+
+    // 3. Mark chunks mesh-ready only after their 3x3 neighbourhood is lit.
+    while (this.readyQueue.length && performance.now() < deadline) {
+      const col = this.readyQueue.pop()!;
+      this.queuedReady.delete(this.ckey(col.cx, col.cz));
+      if (!this.chunks.has(this.ckey(col.cx, col.cz)) || !col.lit || col.ready) continue;
+
+      let ok = true;
+      for (let dz = -1; dz <= 1 && ok; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const n = this.chunks.get(this.ckey(col.cx + dx, col.cz + dz));
+          if (!n || !n.lit) {
+            ok = false;
+            break;
           }
         }
       }
-    }
+      if (!ok) continue;
 
-    // 3. mark chunks mesh-ready once all 8 neighbours are lit (fixes unculled border faces)
-    for (let cx = pcx - r; cx <= pcx + r; cx++) {
-      for (let cz = pcz - r; cz <= pcz + r; cz++) {
-        const col = this.chunks.get(this.ckey(cx, cz));
-        if (!col || col.ready || !col.lit) continue;
-        let ok = true;
-        for (let dz = -1; dz <= 1 && ok; dz++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const n = this.chunks.get(this.ckey(cx + dx, cz + dz));
-            if (!n || !n.lit) { ok = false; break; }
-          }
-        }
-        if (!ok) continue;
-        col.ready = true;
-        for (let sy = 0; sy < SECTION_COUNT; sy++) {
-          if (col.counts[sy] > 0) this.markDirty(cx, cz, sy, true);
-        }
+      col.ready = true;
+      for (let sy = 0; sy < SECTION_COUNT; sy++) {
+        if (col.counts[sy] > 0) this.markDirty(col.cx, col.cz, sy, true);
       }
     }
   }
 
   private streamIdle(): boolean {
-    if (this.terrainQueue.length || this.dirty.size) return false;
+    if (this.terrainQueueIndex < this.terrainQueue.length || this.lightQueue.length || this.readyQueue.length || this.dirty.size) return false;
     const r = this.renderDistance;
     for (let cx = this.streamCx - r; cx <= this.streamCx + r; cx++) {
       for (let cz = this.streamCz - r; cz <= this.streamCz + r; cz++) {
@@ -1654,6 +1706,11 @@ export class VoxelWorld {
     this.chunks.clear();
     this.dirty.clear();
     this.terrainQueue = [];
+    this.terrainQueueIndex = 0;
+    this.lightQueue.length = 0;
+    this.readyQueue.length = 0;
+    this.queuedLight.clear();
+    this.queuedReady.clear();
     this.invalidateColCache();
     this.streamCx = NaN;
     this.streamCz = NaN;
