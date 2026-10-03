@@ -89,7 +89,7 @@ export class PlayerController {
     // Keep the Rapier body as a lightweight position/velocity container so the
     // rest of the engine can continue to use player.translation()/linvel().
     // It has NO collider: voxel terrain collision is handled by custom AABB tests.
-    const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
+    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
       .setTranslation(spawnPos[0], spawnPos[1], spawnPos[2])
       .lockRotations()
       .setGravityScale(0)
