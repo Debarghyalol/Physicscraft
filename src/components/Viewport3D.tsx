@@ -46,6 +46,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const [selectedVoxel, setSelectedVoxel] = useState<VoxelType>(VoxelType.STONE);
   const [currentFps, setCurrentFps] = useState(60);
+  const [isFlying, setIsFlying] = useState(false);
+  const lastPresetRef = useRef<string | null>(null);
 
   // Player Input Ref for continuous 60fps simulation
   const playerInputRef = useRef<PlayerInput>({
@@ -59,7 +61,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   useEffect(() => {
     if (envManagerRef.current) {
       envManagerRef.current.setShadowsEnabled(graphics.shadows);
-      envManagerRef.current.setPreset(graphics.skyPreset);
+      // Only apply the preset when it actually changes (so other settings don't reset the clock)
+      if (lastPresetRef.current !== graphics.skyPreset) {
+        lastPresetRef.current = graphics.skyPreset;
+        envManagerRef.current.setPreset(graphics.skyPreset);
+      }
     }
     if (engineRef.current?.voxelWorld) {
       engineRef.current.voxelWorld.setWireframe(graphics.wireframe);
@@ -99,6 +105,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // 3. Procedural Sky & Lighting
     const envManager = new EnvironmentManager(scene, renderer);
     envManagerRef.current = envManager;
+    lastPresetRef.current = graphics.skyPreset;
     envManager.setPreset(graphics.skyPreset);
     envManager.setShadowsEnabled(graphics.shadows);
 
@@ -114,6 +121,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       engine.loadPreset('empty');
       if (engine.player) {
         engine.player.setViewMode('first_person');
+        engine.player.onFlyingChange = setIsFlying;
       }
     });
 
@@ -154,6 +162,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const playerPos = engine.player.getPosition();
         const isUnderground = engine.voxelWorld.updateLighting(playerPos, delta);
         envManager.setUndergroundLighting(isUnderground);
+
+        // Day/night cycle: sun, moon, stars, clouds, sky colour and world light tint
+        envManager.update(delta, playerPos);
+        const tint = envManager.getWorldTint();
+        engine.voxelWorld.setLightTint(tint);
+        engine.player.model.setLightTint(tint);
       }
 
       // Render Three.js scene
@@ -279,6 +293,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onActionMine={handleActionMine}
         onActionPlace={handleActionPlace}
         onToggleViewMode={onToggleViewMode}
+        isFlying={isFlying}
         viewMode={viewMode}
         selectedVoxel={selectedVoxel}
         onSelectVoxel={handleSelectVoxel}

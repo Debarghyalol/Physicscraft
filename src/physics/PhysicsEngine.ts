@@ -674,10 +674,7 @@ export class PhysicsEngine {
         break;
       case 'empty':
       default:
-        this.spawnBlock('cube', 'wood', [0, 9.5, 0]);
-        this.spawnSoftBody([2.5, 10.5, 0], [1.8, 1.8, 1.8], '#ec4899');
-        this.spawnBlock('sphere', 'rubber', [-2.5, 9.5, 0]);
-        this.spawnBlock('cube', 'tnt', [0, 12.0, 0]);
+        // Empty world: no starter physics objects
         break;
     }
   }

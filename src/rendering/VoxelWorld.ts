@@ -282,6 +282,7 @@ export class VoxelWorld {
     this.atlasTexture.magFilter = THREE.NearestFilter;
     this.atlasTexture.minFilter = THREE.NearestFilter;
     this.atlasTexture.generateMipmaps = false;
+    this.atlasTexture.colorSpace = THREE.SRGBColorSpace;
 
     // Authentic Minecraft Opaque Material with native vertexColors for deep AO & face lighting
     this.material = new THREE.MeshBasicMaterial({
@@ -307,6 +308,12 @@ export class VoxelWorld {
    */
   public updateLighting(_playerPos: THREE.Vector3, _delta: number): boolean {
     return false;
+  }
+
+  /** Day/night world tint (voxel materials are unlit, so multiply their colour) */
+  public setLightTint(color: THREE.Color) {
+    this.material.color.copy(color);
+    this.transparentMaterial.color.copy(color);
   }
 
   public setWireframe(enabled: boolean) {
@@ -857,10 +864,12 @@ export class VoxelWorld {
             const faceLight = getFaceLight(wx + dx, wy + dy, wz + dz, face);
 
             // Native vertex colors with face directional lighting * Ambient Occlusion
-            const col0 = Math.max(0.2, ao0 * faceLight);
-            const col1 = Math.max(0.2, ao1 * faceLight);
-            const col2 = Math.max(0.2, ao2 * faceLight);
-            const col3 = Math.max(0.2, ao3 * faceLight);
+            // Shading is authored in Minecraft's gamma space; convert to linear so the
+            // sRGB output stage reproduces the original (not washed-out) look.
+            const col0 = Math.pow(Math.max(0.2, ao0 * faceLight), 2.2);
+            const col1 = Math.pow(Math.max(0.2, ao1 * faceLight), 2.2);
+            const col2 = Math.pow(Math.max(0.2, ao2 * faceLight), 2.2);
+            const col3 = Math.pow(Math.max(0.2, ao3 * faceLight), 2.2);
 
             targetColors.push(
               col0, col0, col0,

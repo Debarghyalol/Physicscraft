@@ -10,6 +10,7 @@ export interface PlayerControlsOverlayProps {
   onActionMine: (coords?: { x: number; y: number }) => void;
   onActionPlace: (coords?: { x: number; y: number }) => void;
   onToggleViewMode: () => void;
+  isFlying?: boolean;
   viewMode: CameraViewMode;
   selectedVoxel: VoxelType;
   onSelectVoxel: (v: VoxelType) => void;
@@ -140,6 +141,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onSelectVoxel,
   onTogglePhysicsMaker,
   isPhysicsMakerActive,
+  isFlying = false,
 }) => {
   const isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
@@ -156,6 +158,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
 
   // Jump button active
   const [jumpPressed, setJumpPressed] = useState(false);
+  const [descendPressed, setDescendPressed] = useState(false);
 
   // Mobile touch aim & MCPE state separation
   const lookTouchId = useRef<number | null>(null);
@@ -191,19 +194,23 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     right = Math.max(-1, Math.min(1, right));
 
     const jump = jumpPressed || keysDown.current.has('Space');
-    const sprint = isSprinting || keysDown.current.has('ShiftLeft') || keysDown.current.has('ShiftRight');
+    const shift = keysDown.current.has('ShiftLeft') || keysDown.current.has('ShiftRight');
+    // While flying: Shift / C / on-screen button = descend (sprint is disabled)
+    const descend = isFlying && (descendPressed || shift || keysDown.current.has('KeyC'));
+    const sprint = !isFlying && (isSprinting || shift);
 
     onInputUpdate({
       moveForward: forward,
       moveRight: right,
       jump,
       sprint,
+      descend,
     });
-  }, [dpadDir, isSprinting, jumpPressed, onInputUpdate]);
+  }, [dpadDir, isSprinting, jumpPressed, descendPressed, isFlying, onInputUpdate]);
 
   useEffect(() => {
     emitInput();
-  }, [dpadDir, jumpPressed, isSprinting, emitInput]);
+  }, [dpadDir, jumpPressed, isSprinting, descendPressed, isFlying, emitInput]);
 
   // Keyboard Event Listeners for PC
   useEffect(() => {
@@ -623,6 +630,28 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         >
           <Camera className="w-5 h-5" />
         </button>
+
+        {/* Fly-down button (only while flying) */}
+        {isFlying && (
+          <button
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              setDescendPressed(true);
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              setDescendPressed(false);
+            }}
+            onMouseDown={() => setDescendPressed(true)}
+            onMouseUp={() => setDescendPressed(false)}
+            className={`mcpe-action-btn w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-white text-2xl font-bold shadow-2xl ${
+              descendPressed ? 'active' : ''
+            }`}
+            title="Fly down"
+          >
+            ▼
+          </button>
+        )}
 
         {/* MCPE Jump Button */}
         <button
