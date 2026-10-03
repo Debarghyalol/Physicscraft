@@ -154,7 +154,6 @@ export class ChunkColumn {
   modified = false; // edited by the player: never discarded when far away
   opaqueMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   transMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
-  colliders: (RAPIER.Collider | null)[] = new Array(SECTION_COUNT).fill(null);
 
   constructor(cx: number, cz: number) {
     this.cx = cx;
@@ -176,7 +175,6 @@ export interface VoxelRaycastHit {
  */
 export class VoxelWorld {
   public scene: THREE.Scene;
-  public rapierWorld: RAPIER.World | null = null;
   private noise: any;
   private treeNoise: any;
 
@@ -1546,11 +1544,6 @@ export class VoxelWorld {
         t.geometry.dispose();
         col.transMeshes[sy] = null;
       }
-      const c = col.colliders[sy];
-      if (c && this.rapierWorld) {
-        this.rapierWorld.removeCollider(c, false);
-        col.colliders[sy] = null;
-      }
     }
   }
 
@@ -1750,9 +1743,6 @@ export class VoxelWorld {
 
   public dispose() {
     this.clearAllChunks();
-    if (this.rapierWorld && this.terrainBody) {
-      this.rapierWorld.removeRigidBody(this.terrainBody);
-    }
     this.atlasTexture.dispose();
     this.material.dispose();
     this.transparentMaterial.dispose();
