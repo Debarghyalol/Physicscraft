@@ -208,7 +208,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button
               type="button"
               onClick={() => onChangeGraphics({ debugMode: !graphics.debugMode })}
-              className={\`mc-button py-2.5 text-xs ${graphics.debugMode ? 'ring-2 ring-white/70' : ''}\`}
+              className={`mc-button py-2.5 text-xs ${graphics.debugMode ? 'ring-2 ring-white/70' : ''}`}
             >
               Debug Mode: {graphics.debugMode ? 'ON' : 'OFF'}
             </button>
