@@ -31,8 +31,8 @@ export class PlayerController {
   public currentSpeed: number = 0;
   public readonly walkSpeed: number = 5.2;
   public readonly sprintSpeed: number = 8.8;
-  public readonly jumpVelocity: number = 8.9;
-  public readonly gravityAcceleration: number = 32.0;
+  public readonly jumpVelocity: number = 10.9;
+  public readonly gravityAcceleration: number = 48.0;
 
   // Creative-style flight (toggle by double-tapping jump)
   public isFlying: boolean = false;
@@ -174,7 +174,7 @@ export class PlayerController {
       this.isGrounded = false;
       soundManager.playJump();
     } else if (!this.isGrounded) {
-      newVy = Math.max(-40, linvel.y - this.gravityAcceleration * delta);
+      newVy = Math.max(-60, linvel.y - this.gravityAcceleration * delta);
     } else if (newVy < 0) {
       newVy = 0;
     }
