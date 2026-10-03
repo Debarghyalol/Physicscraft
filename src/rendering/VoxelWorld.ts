@@ -211,6 +211,7 @@ export class VoxelWorld {
   private skyScratch = new Float32Array(4);
   private blkScratch = new Float32Array(4);
   private leafTopScratch = new Int16Array(256);
+  private debugGenerationTimeMs = 0;
 
   // Voxel materials: Opaque & Transparent (Glass) with crisp pixelated Minecraft texture atlas
   public material!: THREE.MeshBasicMaterial;
@@ -1593,6 +1594,13 @@ export class VoxelWorld {
     const t0 = performance.now();
     this.streamWork(t0 + 6);
     this.processDirty(t0 + 10);
+    this.debugGenerationTimeMs += performance.now() - t0;
+  }
+
+  public consumeDebugGenerationTime() {
+    const value = this.debugGenerationTimeMs;
+    this.debugGenerationTimeMs = 0;
+    return value;
   }
 
   /** Synchronously generate, light and mesh everything around a chunk (used on load / reseed). */
