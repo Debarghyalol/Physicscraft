@@ -29,6 +29,13 @@ export class PlayerController {
   // Movement parameters
   public isGrounded: boolean = false;
   public currentSpeed: number = 0;
+  // Player velocity is stored here rather than in the Rapier body. The body is
+  // kinematicPositionBased, and Rapier discards setLinvel() on such bodies (linvel()
+  // always reads back 0), which reset the velocity to zero every frame and made
+  // walking, jumping and flying far slower than intended (and frame-rate dependent).
+  private velX: number = 0;
+  private velY: number = 0;
+  private velZ: number = 0;
   // Minecraft-style movement uses 20 simulation ticks/sec. Vanilla player speed is
   // about 4.317 blocks/s walking and 5.612 blocks/s sprinting. We keep the same
   // acceleration/friction model, then apply a game-feel multiplier for Physicscraft.
@@ -100,9 +107,10 @@ export class PlayerController {
   }
 
   private createPhysicsBody(spawnPos: [number, number, number]) {
-    // Keep the Rapier body as a lightweight position/velocity container so the
-    // rest of the engine can continue to use player.translation()/linvel().
-    // It has NO collider: voxel terrain collision is handled by custom AABB tests.
+    // Keep the Rapier body as a lightweight position container so the rest of the
+    // engine can continue to use player.translation(). Velocity is NOT stored on it
+    // (see velX/velY/velZ). It has NO collider: voxel terrain collision is handled
+    // by custom AABB tests.
     const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
       .setTranslation(spawnPos[0], spawnPos[1], spawnPos[2])
       .lockRotations()
@@ -143,7 +151,6 @@ export class PlayerController {
     if (!this.body) return;
 
     let pos = this.body.translation();
-    let linvel = this.body.linvel();
 
     // Terrain collision is voxel-native: no Rapier raycasts or terrain trimeshes.
     this.isGrounded = this.checkGrounded(pos.x, pos.y, pos.z);
@@ -174,20 +181,20 @@ export class PlayerController {
         PlayerController.scratchRight.z * input.moveRight) * speed;
 
     const accel = this.isFlying ? 10 : this.isGrounded ? 18 : 8;
-    let newVx = THREE.MathUtils.lerp(linvel.x, targetVelX, Math.min(1, delta * accel));
-    let newVz = THREE.MathUtils.lerp(linvel.z, targetVelZ, Math.min(1, delta * accel));
-    let newVy = linvel.y;
+    let newVx = THREE.MathUtils.lerp(this.velX, targetVelX, Math.min(1, delta * accel));
+    let newVz = THREE.MathUtils.lerp(this.velZ, targetVelZ, Math.min(1, delta * accel));
+    let newVy = this.velY;
 
     // Gravity / jump is integrated manually because the player has no Rapier collider.
     if (this.isFlying) {
       const dir = (input.jump ? 1 : 0) - (input.descend ? 1 : 0);
-      newVy = THREE.MathUtils.lerp(linvel.y, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
-    } else if (input.jump && this.isGrounded && linvel.y < 2.0) {
+      newVy = THREE.MathUtils.lerp(this.velY, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
+    } else if (input.jump && this.isGrounded && this.velY < 2.0) {
       newVy = this.jumpVelocity;
       this.isGrounded = false;
       soundManager.playJump();
     } else if (!this.isGrounded) {
-      newVy = Math.max(-60, linvel.y - this.gravityAcceleration * delta);
+      newVy = Math.max(-60, this.velY - this.gravityAcceleration * delta);
     } else if (newVy < 0) {
       newVy = 0;
     }
@@ -215,26 +222,13 @@ export class PlayerController {
       this.isGrounded = this.checkGrounded(nextX, nextY, nextZ);
     }
 
-    if (this.isFlying) {
-      let nextX = pos.x;
-      let nextY = pos.y;
-      let nextZ = pos.z;
-      const xResult = this.moveAlongAxis(nextX, nextY, nextZ, newVx * delta, 0);
-      nextX = xResult.position;
-      if (xResult.collided) newVx = 0;
-      const zResult = this.moveAlongAxis(nextX, nextY, nextZ, newVz * delta, 2);
-      nextZ = zResult.position;
-      if (zResult.collided) newVz = 0;
-      const yResult = this.moveAlongAxis(nextX, nextY, nextZ, newVy * delta, 1);
-      nextY = yResult.position;
-      if (yResult.collided) newVy = 0;
-      pos = { x: nextX, y: nextY, z: nextZ } as RAPIER.Vector3;
-    }
-
-    this.body.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true);
-    this.body.setLinvel({ x: newVx, y: newVy, z: newVz }, true);
+    // Commit the collision-resolved position (walking, falling and flying alike) and
+    // keep the velocity for the next frame.
+    this.body.setTranslation({ x: nextX, y: nextY, z: nextZ }, true);
+    this.velX = newVx;
+    this.velY = newVy;
+    this.velZ = newVz;
     pos = this.body.translation();
-    linvel = this.body.linvel();
 
     this.currentSpeed = Math.hypot(newVx, newVz);
 
@@ -391,7 +385,8 @@ export class PlayerController {
     const by = Math.floor(footY - 0.01);
     for (let bx = minX; bx <= maxX; bx++) {
       for (let bz = minZ; bz <= maxZ; bz++) {
-        if (this.isSolidBlock(bx, by, bz) && footY <= by + 0.08) return true;
+        // Block `by` spans [by, by + 1], so compare against its TOP face (by + 1).
+        if (this.isSolidBlock(bx, by, bz) && footY <= by + 1 + 0.08) return true;
       }
     }
     return false;
@@ -569,6 +564,9 @@ export class PlayerController {
     if (this.body) {
       this.body.setTranslation({ x, y, z }, true);
       this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      this.velX = 0;
+      this.velY = 0;
+      this.velZ = 0;
       this.model.root.position.set(x, y - 0.9, z);
       this.camera.position.set(x, y + 0.68, z);
     }
