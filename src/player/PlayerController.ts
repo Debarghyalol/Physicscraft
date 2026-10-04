@@ -64,6 +64,8 @@ export class PlayerController {
   // Minecraft-style wireframe block highlight outline
   public targetHighlightMesh: THREE.LineSegments;
   public currentTargetedBlock: any = null;
+  /** Called after the player breaks a block (used for break particles). */
+  public onBlockBroken?: (x: number, y: number, z: number, type: VoxelType) => void;
   public activeTouchCoords: { x: number; y: number } | null = null;
 
   public setAimTouchCoords(coords: { x: number; y: number } | null) {
@@ -474,6 +476,7 @@ export class PlayerController {
 
     if (hit && hit.voxelType !== VoxelType.BEDROCK) {
       this.voxelWorld.setVoxel(hit.blockX, hit.blockY, hit.blockZ, VoxelType.AIR);
+      this.onBlockBroken?.(hit.blockX, hit.blockY, hit.blockZ, hit.voxelType);
       soundManager.playBlockBreak(hit.voxelType === VoxelType.GRASS ? 'grass' : 'stone');
       return true;
     }

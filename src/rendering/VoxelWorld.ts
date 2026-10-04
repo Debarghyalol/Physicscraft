@@ -1698,6 +1698,42 @@ export class VoxelWorld {
     out.setRGB(r, g, bl);
   }
 
+  /**
+   * Inner UV rectangles `[u0, v0, u1, v1]` of the atlas tiles used by a block's faces
+   * (deduplicated). Used to cut break-particle fragments out of the block's own texture,
+   * so particles follow resource packs automatically.
+   */
+  public getBlockTileRects(voxel: VoxelType): Array<[number, number, number, number]> {
+    const cols = new Set<number>();
+    for (let face = 0; face < 6; face++) cols.add(this.getVoxelFaceTile(voxel, face)[0]);
+    return [...cols].map((col) => [
+      (col + ATLAS_INNER_MIN) / 16,
+      ATLAS_INNER_MIN_V,
+      (col + ATLAS_INNER_MAX) / 16,
+      ATLAS_INNER_MAX_V,
+    ]);
+  }
+
+  private static readonly NEIGHBOR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
+    [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+  ];
+  private lightScratch = new THREE.Color();
+
+  /**
+   * Light colour around block cell (bx, by, bz): the brightest of its six neighbours, since
+   * a solid cell has no light of its own. Uses the current day/night level.
+   */
+  public getBlockSurroundLight(bx: number, by: number, bz: number, out: THREE.Color) {
+    const skyDim = this.lightUniforms.uSkyDim.value;
+    out.setRGB(0, 0, 0);
+    for (const [dx, dy, dz] of VoxelWorld.NEIGHBOR_OFFSETS) {
+      this.getLightColorAt(bx + dx + 0.5, by + dy + 0.5, bz + dz + 0.5, skyDim, this.lightScratch);
+      out.r = Math.max(out.r, this.lightScratch.r);
+      out.g = Math.max(out.g, this.lightScratch.g);
+      out.b = Math.max(out.b, this.lightScratch.b);
+    }
+  }
+
   public raycastVoxel(ray: THREE.Ray, maxDistance: number = 8.0): VoxelRaycastHit | null {
     let t = 0;
     const step = 0.08;
