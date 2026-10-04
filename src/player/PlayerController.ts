@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d-compat';
 import { PlayerModel } from './PlayerModel';
 import { VoxelWorld } from '../rendering/VoxelWorld';
 import { CameraViewMode, VoxelType } from '../types/physics';
@@ -14,11 +13,8 @@ export interface PlayerInput {
 }
 
 export class PlayerController {
-  public body!: RAPIER.RigidBody;
-  public collider: RAPIER.Collider | null = null;
   public model: PlayerModel;
   public camera: THREE.PerspectiveCamera;
-  public world: RAPIER.World;
   public voxelWorld: VoxelWorld;
 
   // Camera Orientation
@@ -29,10 +25,10 @@ export class PlayerController {
   // Movement parameters
   public isGrounded: boolean = false;
   public currentSpeed: number = 0;
-  // Player velocity is stored here rather than in the Rapier body. The body is
-  // kinematicPositionBased, and Rapier discards setLinvel() on such bodies (linvel()
-  // always reads back 0), which reset the velocity to zero every frame and made
-  // walking, jumping and flying far slower than intended (and frame-rate dependent).
+  // The player is not a Rapier body: position and velocity are plain state, and terrain
+  // collision is custom voxel AABB (moveAlongAxis). (A kinematic Rapier body used to hold
+  // the velocity, but it discards setLinvel(), which zeroed velocity every frame.)
+  public readonly position = new THREE.Vector3();
   private velX: number = 0;
   private velY: number = 0;
   private velZ: number = 0;
@@ -80,13 +76,11 @@ export class PlayerController {
   private static scratchRight = new THREE.Vector3();
 
   constructor(
-    world: RAPIER.World,
     scene: THREE.Scene,
     camera: THREE.PerspectiveCamera,
     voxelWorld: VoxelWorld,
     spawnPos: [number, number, number] = [0, 10.5, 0]
   ) {
-    this.world = world;
     this.camera = camera;
     this.voxelWorld = voxelWorld;
     this.model = new PlayerModel(scene);
@@ -101,25 +95,9 @@ export class PlayerController {
     this.targetHighlightMesh.visible = false;
     scene.add(this.targetHighlightMesh);
 
-    this.createPhysicsBody(spawnPos);
+    this.position.set(spawnPos[0], spawnPos[1], spawnPos[2]);
     // Start game in FIRST PERSON as requested
     this.setViewMode('first_person');
-  }
-
-  private createPhysicsBody(spawnPos: [number, number, number]) {
-    // Keep the Rapier body as a lightweight position container so the rest of the
-    // engine can continue to use player.translation(). Velocity is NOT stored on it
-    // (see velX/velY/velZ). It has NO collider: voxel terrain collision is handled
-    // by custom AABB tests.
-    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
-      .setTranslation(spawnPos[0], spawnPos[1], spawnPos[2])
-      .lockRotations()
-      .setGravityScale(0)
-      .setLinearDamping(0)
-      .setCanSleep(false);
-
-    this.body = this.world.createRigidBody(bodyDesc);
-    this.collider = null;
   }
 
   public setViewMode(mode: CameraViewMode) {
@@ -148,9 +126,7 @@ export class PlayerController {
   }
 
   public update(delta: number, input: PlayerInput) {
-    if (!this.body) return;
-
-    let pos = this.body.translation();
+    const pos = this.position;
 
     // Terrain collision is voxel-native: no Rapier raycasts or terrain trimeshes.
     this.isGrounded = this.checkGrounded(pos.x, pos.y, pos.z);
@@ -224,11 +200,10 @@ export class PlayerController {
 
     // Commit the collision-resolved position (walking, falling and flying alike) and
     // keep the velocity for the next frame.
-    this.body.setTranslation({ x: nextX, y: nextY, z: nextZ }, true);
+    this.position.set(nextX, nextY, nextZ);
     this.velX = newVx;
     this.velY = newVy;
     this.velZ = newVz;
-    pos = this.body.translation();
 
     this.currentSpeed = Math.hypot(newVx, newVz);
 
@@ -393,15 +368,12 @@ export class PlayerController {
   }
 
   public applyImpulse(impulse: { x: number; y: number; z: number }) {
-    const v = this.body.linvel();
-    this.body.setLinvel({
-      x: v.x + impulse.x,
-      y: v.y + impulse.y,
-      z: v.z + impulse.z,
-    }, true);
+    this.velX += impulse.x;
+    this.velY += impulse.y;
+    this.velZ += impulse.z;
   }
 
-  private updateCamera(pos: RAPIER.Vector3) {
+  private updateCamera(pos: THREE.Vector3) {
     if (this.viewMode === 'first_person') {
       // First person: at Steve's eye height
       this.camera.position.set(pos.x, pos.y + 0.68, pos.z);
@@ -455,7 +427,7 @@ export class PlayerController {
    * Check if placing a block at (bx, by, bz) overlaps Steve's physics capsule
    */
   public canPlaceAt(bx: number, by: number, bz: number): boolean {
-    const playerPos = this.body.translation();
+    const playerPos = this.position;
     const pMinX = playerPos.x - 0.55;
     const pMaxX = playerPos.x + 0.55;
     const pMinY = playerPos.y - 1.05;
@@ -561,23 +533,16 @@ export class PlayerController {
   }
 
   public teleport(x: number, y: number, z: number) {
-    if (this.body) {
-      this.body.setTranslation({ x, y, z }, true);
-      this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      this.velX = 0;
-      this.velY = 0;
-      this.velZ = 0;
-      this.model.root.position.set(x, y - 0.9, z);
-      this.camera.position.set(x, y + 0.68, z);
-    }
+    this.position.set(x, y, z);
+    this.velX = 0;
+    this.velY = 0;
+    this.velZ = 0;
+    this.model.root.position.set(x, y - 0.9, z);
+    this.camera.position.set(x, y + 0.68, z);
   }
 
   public getPosition(): THREE.Vector3 {
-    if (this.body) {
-      const p = this.body.translation();
-      return new THREE.Vector3(p.x, p.y, p.z);
-    }
-    return new THREE.Vector3(0, 10, 0);
+    return this.position.clone();
   }
 
   public dispose(scene: THREE.Scene) {
@@ -585,9 +550,5 @@ export class PlayerController {
     scene.remove(this.targetHighlightMesh);
     this.targetHighlightMesh.geometry.dispose();
     this.model.dispose();
-    if (this.world && this.body) {
-      if (this.collider) this.world.removeCollider(this.collider, false);
-      this.world.removeRigidBody(this.body);
-    }
   }
 }
