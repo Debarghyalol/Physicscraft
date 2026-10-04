@@ -53,7 +53,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const lastPresetRef = useRef<string | null>(null);
   const [debugSample, setDebugSample] = useState<DebugFrameSample>({
     frameMs: 0, physicsMs: 0, renderMs: 0, streamingMs: 0, generationMs: 0,
-    chunks: 0, meshes: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, jsHeapMb: null,
+    chunks: 0, meshes: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, jsHeapMb: null, playerPos: null,
   });
   const debugHistoryRef = useRef<DebugFrameSample[]>([]);
   const graphicsRef = useRef(graphics);
@@ -232,6 +232,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           geometries: info.memory.geometries,
           textures: info.memory.textures,
           jsHeapMb: memory,
+          playerPos: engine.player ? engine.player.getPosition() : null,
         };
         debugHistoryRef.current = debugHistoryRef.current.length >= 120
           ? [...debugHistoryRef.current.slice(1), sample]

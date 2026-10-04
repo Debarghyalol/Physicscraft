@@ -13,6 +13,7 @@ export interface DebugFrameSample {
   geometries: number;
   textures: number;
   jsHeapMb: number | null;
+  playerPos: { x: number; y: number; z: number } | null;
 }
 
 export interface DebugOverlayProps {
@@ -57,8 +58,14 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, his
 
   return (
     <div className="absolute inset-0 z-40 pointer-events-none select-none text-white font-mono text-[11px] leading-[15px] drop-shadow-[1px_1px_1px_rgba(0,0,0,0.95)]">
-      <div className="absolute top-2 left-2 max-w-[390px]">
+      <div className="absolute top-12 left-2 max-w-[390px]">
         <div className="text-white/90 mb-0.5">Physicscraft Debug (F3)</div>
+        <Metric
+          label="XYZ"
+          value={sample.playerPos
+            ? fmt(sample.playerPos.x, 3) + ' / ' + fmt(sample.playerPos.y, 3) + ' / ' + fmt(sample.playerPos.z, 3)
+            : '—'}
+        />
         <Metric label="Frame" value={fmt(sample.frameMs, 2) + ' ms'} />
         <Metric label="Physics" value={fmt(sample.physicsMs, 2) + ' ms'} />
         <Metric label="Render" value={fmt(sample.renderMs, 2) + ' ms'} />
