@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d-compat';
 import { PlayerModel } from './PlayerModel';
 import { VoxelWorld } from '../rendering/VoxelWorld';
 import { CameraViewMode, VoxelType } from '../types/physics';
@@ -14,11 +13,8 @@ export interface PlayerInput {
 }
 
 export class PlayerController {
-  public body!: RAPIER.RigidBody;
-  public collider: RAPIER.Collider | null = null;
   public model: PlayerModel;
   public camera: THREE.PerspectiveCamera;
-  public world: RAPIER.World;
   public voxelWorld: VoxelWorld;
 
   // Camera Orientation
@@ -29,6 +25,13 @@ export class PlayerController {
   // Movement parameters
   public isGrounded: boolean = false;
   public currentSpeed: number = 0;
+  // The player is not a Rapier body: position and velocity are plain state, and terrain
+  // collision is custom voxel AABB (moveAlongAxis). (A kinematic Rapier body used to hold
+  // the velocity, but it discards setLinvel(), which zeroed velocity every frame.)
+  public readonly position = new THREE.Vector3();
+  private velX: number = 0;
+  private velY: number = 0;
+  private velZ: number = 0;
   // Minecraft-style movement uses 20 simulation ticks/sec. Vanilla player speed is
   // about 4.317 blocks/s walking and 5.612 blocks/s sprinting. We keep the same
   // acceleration/friction model, then apply a game-feel multiplier for Physicscraft.
@@ -73,13 +76,11 @@ export class PlayerController {
   private static scratchRight = new THREE.Vector3();
 
   constructor(
-    world: RAPIER.World,
     scene: THREE.Scene,
     camera: THREE.PerspectiveCamera,
     voxelWorld: VoxelWorld,
     spawnPos: [number, number, number] = [0, 10.5, 0]
   ) {
-    this.world = world;
     this.camera = camera;
     this.voxelWorld = voxelWorld;
     this.model = new PlayerModel(scene);
@@ -94,24 +95,9 @@ export class PlayerController {
     this.targetHighlightMesh.visible = false;
     scene.add(this.targetHighlightMesh);
 
-    this.createPhysicsBody(spawnPos);
+    this.position.set(spawnPos[0], spawnPos[1], spawnPos[2]);
     // Start game in FIRST PERSON as requested
     this.setViewMode('first_person');
-  }
-
-  private createPhysicsBody(spawnPos: [number, number, number]) {
-    // Keep the Rapier body as a lightweight position/velocity container so the
-    // rest of the engine can continue to use player.translation()/linvel().
-    // It has NO collider: voxel terrain collision is handled by custom AABB tests.
-    const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
-      .setTranslation(spawnPos[0], spawnPos[1], spawnPos[2])
-      .lockRotations()
-      .setGravityScale(0)
-      .setLinearDamping(0)
-      .setCanSleep(false);
-
-    this.body = this.world.createRigidBody(bodyDesc);
-    this.collider = null;
   }
 
   public setViewMode(mode: CameraViewMode) {
@@ -140,10 +126,7 @@ export class PlayerController {
   }
 
   public update(delta: number, input: PlayerInput) {
-    if (!this.body) return;
-
-    let pos = this.body.translation();
-    let linvel = this.body.linvel();
+    const pos = this.position;
 
     // Terrain collision is voxel-native: no Rapier raycasts or terrain trimeshes.
     this.isGrounded = this.checkGrounded(pos.x, pos.y, pos.z);
@@ -174,20 +157,20 @@ export class PlayerController {
         PlayerController.scratchRight.z * input.moveRight) * speed;
 
     const accel = this.isFlying ? 10 : this.isGrounded ? 18 : 8;
-    let newVx = THREE.MathUtils.lerp(linvel.x, targetVelX, Math.min(1, delta * accel));
-    let newVz = THREE.MathUtils.lerp(linvel.z, targetVelZ, Math.min(1, delta * accel));
-    let newVy = linvel.y;
+    let newVx = THREE.MathUtils.lerp(this.velX, targetVelX, Math.min(1, delta * accel));
+    let newVz = THREE.MathUtils.lerp(this.velZ, targetVelZ, Math.min(1, delta * accel));
+    let newVy = this.velY;
 
     // Gravity / jump is integrated manually because the player has no Rapier collider.
     if (this.isFlying) {
       const dir = (input.jump ? 1 : 0) - (input.descend ? 1 : 0);
-      newVy = THREE.MathUtils.lerp(linvel.y, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
-    } else if (input.jump && this.isGrounded && linvel.y < 2.0) {
+      newVy = THREE.MathUtils.lerp(this.velY, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
+    } else if (input.jump && this.isGrounded && this.velY < 2.0) {
       newVy = this.jumpVelocity;
       this.isGrounded = false;
       soundManager.playJump();
     } else if (!this.isGrounded) {
-      newVy = Math.max(-60, linvel.y - this.gravityAcceleration * delta);
+      newVy = Math.max(-60, this.velY - this.gravityAcceleration * delta);
     } else if (newVy < 0) {
       newVy = 0;
     }
@@ -215,26 +198,12 @@ export class PlayerController {
       this.isGrounded = this.checkGrounded(nextX, nextY, nextZ);
     }
 
-    if (this.isFlying) {
-      let nextX = pos.x;
-      let nextY = pos.y;
-      let nextZ = pos.z;
-      const xResult = this.moveAlongAxis(nextX, nextY, nextZ, newVx * delta, 0);
-      nextX = xResult.position;
-      if (xResult.collided) newVx = 0;
-      const zResult = this.moveAlongAxis(nextX, nextY, nextZ, newVz * delta, 2);
-      nextZ = zResult.position;
-      if (zResult.collided) newVz = 0;
-      const yResult = this.moveAlongAxis(nextX, nextY, nextZ, newVy * delta, 1);
-      nextY = yResult.position;
-      if (yResult.collided) newVy = 0;
-      pos = { x: nextX, y: nextY, z: nextZ } as RAPIER.Vector3;
-    }
-
-    this.body.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true);
-    this.body.setLinvel({ x: newVx, y: newVy, z: newVz }, true);
-    pos = this.body.translation();
-    linvel = this.body.linvel();
+    // Commit the collision-resolved position (walking, falling and flying alike) and
+    // keep the velocity for the next frame.
+    this.position.set(nextX, nextY, nextZ);
+    this.velX = newVx;
+    this.velY = newVy;
+    this.velZ = newVz;
 
     this.currentSpeed = Math.hypot(newVx, newVz);
 
@@ -391,22 +360,20 @@ export class PlayerController {
     const by = Math.floor(footY - 0.01);
     for (let bx = minX; bx <= maxX; bx++) {
       for (let bz = minZ; bz <= maxZ; bz++) {
-        if (this.isSolidBlock(bx, by, bz) && footY <= by + 0.08) return true;
+        // Block `by` spans [by, by + 1], so compare against its TOP face (by + 1).
+        if (this.isSolidBlock(bx, by, bz) && footY <= by + 1 + 0.08) return true;
       }
     }
     return false;
   }
 
   public applyImpulse(impulse: { x: number; y: number; z: number }) {
-    const v = this.body.linvel();
-    this.body.setLinvel({
-      x: v.x + impulse.x,
-      y: v.y + impulse.y,
-      z: v.z + impulse.z,
-    }, true);
+    this.velX += impulse.x;
+    this.velY += impulse.y;
+    this.velZ += impulse.z;
   }
 
-  private updateCamera(pos: RAPIER.Vector3) {
+  private updateCamera(pos: THREE.Vector3) {
     if (this.viewMode === 'first_person') {
       // First person: at Steve's eye height
       this.camera.position.set(pos.x, pos.y + 0.68, pos.z);
@@ -460,7 +427,7 @@ export class PlayerController {
    * Check if placing a block at (bx, by, bz) overlaps Steve's physics capsule
    */
   public canPlaceAt(bx: number, by: number, bz: number): boolean {
-    const playerPos = this.body.translation();
+    const playerPos = this.position;
     const pMinX = playerPos.x - 0.55;
     const pMaxX = playerPos.x + 0.55;
     const pMinY = playerPos.y - 1.05;
@@ -566,20 +533,16 @@ export class PlayerController {
   }
 
   public teleport(x: number, y: number, z: number) {
-    if (this.body) {
-      this.body.setTranslation({ x, y, z }, true);
-      this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      this.model.root.position.set(x, y - 0.9, z);
-      this.camera.position.set(x, y + 0.68, z);
-    }
+    this.position.set(x, y, z);
+    this.velX = 0;
+    this.velY = 0;
+    this.velZ = 0;
+    this.model.root.position.set(x, y - 0.9, z);
+    this.camera.position.set(x, y + 0.68, z);
   }
 
   public getPosition(): THREE.Vector3 {
-    if (this.body) {
-      const p = this.body.translation();
-      return new THREE.Vector3(p.x, p.y, p.z);
-    }
-    return new THREE.Vector3(0, 10, 0);
+    return this.position.clone();
   }
 
   public dispose(scene: THREE.Scene) {
@@ -587,9 +550,5 @@ export class PlayerController {
     scene.remove(this.targetHighlightMesh);
     this.targetHighlightMesh.geometry.dispose();
     this.model.dispose();
-    if (this.world && this.body) {
-      if (this.collider) this.world.removeCollider(this.collider, false);
-      this.world.removeRigidBody(this.body);
-    }
   }
 }

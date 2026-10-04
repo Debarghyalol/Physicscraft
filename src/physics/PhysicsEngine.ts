@@ -105,7 +105,7 @@ export class PhysicsEngine {
     const spawnX = 0;
     const spawnZ = 6.0;
     const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
-    this.player = new PlayerController(this.world, this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
+    this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
     this.player.yaw = 0;
     this.player.pitch = -0.05;
 
@@ -497,9 +497,8 @@ export class PhysicsEngine {
     this.createExplosionVisual(epicenter);
 
     // Blast player knockback
-    if (this.player && this.player.body) {
-      const pPos = this.player.body.translation();
-      const pVec = new THREE.Vector3(pPos.x, pPos.y, pPos.z);
+    if (this.player) {
+      const pVec = this.player.getPosition();
       const pDist = pVec.distanceTo(epicenter);
       if (pDist < radius && pDist > 0.05) {
         const pDir = pVec.clone().sub(epicenter).normalize();
