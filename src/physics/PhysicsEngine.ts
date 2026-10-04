@@ -18,6 +18,7 @@ import { SoftBody } from './SoftBody';
 import { VoxelWorld } from '../rendering/VoxelWorld';
 import { PlayerController, PlayerInput } from '../player/PlayerController';
 import { SelectionBoxRenderer } from '../rendering/SelectionBoxRenderer';
+import { BlockParticles } from '../rendering/BlockParticles';
 
 export interface PhysicsEntity {
   id: string;
@@ -45,6 +46,7 @@ export class PhysicsEngine {
   public voxelWorld!: VoxelWorld;
   public player!: PlayerController;
   public selectionRenderer: SelectionBoxRenderer;
+  public blockParticles!: BlockParticles;
 
   private entities: Map<string, PhysicsEntity> = new Map();
   private colliderToEntity: Map<number, PhysicsEntity> = new Map();
@@ -108,6 +110,9 @@ export class PhysicsEngine {
     this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
     this.player.yaw = 0;
     this.player.pitch = -0.05;
+
+    this.blockParticles = new BlockParticles(this.scene, this.voxelWorld);
+    this.player.onBlockBroken = (x, y, z, type) => this.blockParticles.spawn(x, y, z, type);
 
     this.isReady = true;
   }
@@ -1551,6 +1556,7 @@ export class PhysicsEngine {
     }
 
     this.updateParticles(scaledDt);
+    this.blockParticles?.update(scaledDt);
   }
 
   /**
@@ -1719,6 +1725,7 @@ export class PhysicsEngine {
     this.clearAllBlocks();
     this.clearAllJoints();
     this.selectionRenderer.dispose();
+    this.blockParticles?.dispose();
     this.voxelWorld.dispose();
     if (this.player) {
       this.player.dispose(this.scene);
