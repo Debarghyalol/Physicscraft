@@ -337,6 +337,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
+      shaderGBufferPass.resize(renderer.domElement.width, renderer.domElement.height);
+      shaderFinalPass.resize(renderer.domElement.width, renderer.domElement.height);
     };
 
     window.addEventListener('resize', handleResize);
