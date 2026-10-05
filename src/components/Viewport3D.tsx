@@ -49,6 +49,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   // Camera & Player State (Starts in FIRST PERSON as requested)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const [selectedVoxel, setSelectedVoxel] = useState<VoxelType>(VoxelType.STONE);
+  const [selectedDisc, setSelectedDisc] = useState<MusicDiscId>('13');
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [currentFps, setCurrentFps] = useState(60);
   const fpsRef = useRef(60);
   const [isFlying, setIsFlying] = useState(false);
