@@ -6,7 +6,18 @@
  * matching Minecraft's menu/game sound groups.
  */
 
-export type MusicMode = 'menu' | 'game';
+export type MusicMode = 'menu' | 'game' | 'disc';
+export type MusicDiscId = '11' | '13' | '5' | 'blocks' | 'bounce' | 'cat' | 'chirp' | 'creator' | 'creator_music_box' | 'far' | 'lava_chicken' | 'mall' | 'mellohi' | 'otherside' | 'pigstep' | 'precipice' | 'relic' | 'stal' | 'strad' | 'tears' | 'wait' | 'ward';
+
+export const MUSIC_DISCS: { id: MusicDiscId; title: string }[] = [
+  { id: '11', title: '11' }, { id: '13', title: '13' }, { id: '5', title: '5' },
+  { id: 'blocks', title: 'Blocks' }, { id: 'bounce', title: 'Creator - Bounce' }, { id: 'cat', title: 'Cat' },
+  { id: 'chirp', title: 'Chirp' }, { id: 'creator', title: 'Creator' }, { id: 'creator_music_box', title: 'Creator - Music Box' },
+  { id: 'far', title: 'Far' }, { id: 'lava_chicken', title: 'Lava Chicken' }, { id: 'mall', title: 'Mall' },
+  { id: 'mellohi', title: 'Mellohi' }, { id: 'otherside', title: 'Otherside' }, { id: 'pigstep', title: 'Pigstep' },
+  { id: 'precipice', title: 'Precipice' }, { id: 'relic', title: 'Relic' }, { id: 'stal', title: 'Stal' },
+  { id: 'strad', title: 'Strad' }, { id: 'tears', title: 'Tears' }, { id: 'wait', title: 'Wait' }, { id: 'ward', title: 'Ward' },
+];
 
 export interface MusicTrackInfo {
   id: string;
@@ -18,6 +29,14 @@ export interface MusicTrackInfo {
 
 const MENU_MUSIC = Object.values(
   import.meta.glob('../../sounds/music/menu/*.ogg', {
+    eager: true,
+    query: '?url',
+    import: 'default',
+  })
+) as string[];
+
+const DISC_MUSIC = Object.values(
+  import.meta.glob('../../sounds/records/*.ogg', {
     eager: true,
     query: '?url',
     import: 'default',
@@ -126,6 +145,20 @@ class MusicEngine {
 
   public playGame() {
     this.startMode('game');
+  }
+
+  public playDisc(id: MusicDiscId) {
+    if (this.muted) return;
+    const url = DISC_MUSIC.find((candidate) => candidate.endsWith('/' + id + '.ogg'));
+    if (!url) return;
+    this.mode = 'disc';
+    this.startTrack(url);
+  }
+
+  public stopDisc() {
+    if (this.mode !== 'disc') return;
+    this.stop();
+    this.mode = 'game';
   }
 
   public stop() {
