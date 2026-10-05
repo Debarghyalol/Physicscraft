@@ -32,28 +32,30 @@ export class PlayerController {
   private velX: number = 0;
   private velY: number = 0;
   private velZ: number = 0;
-  // Minecraft-style movement uses 20 simulation ticks/sec. Vanilla player speed is
-  // about 4.317 blocks/s walking and 5.612 blocks/s sprinting. We keep the same
-  // acceleration/friction model, then apply a game-feel multiplier for Physicscraft.
-  public readonly walkSpeed: number = 7.55;
-  public readonly sprintSpeed: number = 9.82;
-  private readonly movementSpeedMultiplier: number = 1.75;
+  // Java Edition speeds (blocks/second): walking 4.317, sprinting 5.612.
+  // https://minecraft.wiki/w/Player_movement
+  public readonly walkSpeed: number = 4.317;
+  public readonly sprintSpeed: number = 5.612;
   private readonly mcGroundAcceleration: number = 0.098;
   private readonly mcSprintAcceleration: number = 0.1274;
   private readonly mcGroundFriction: number = 0.546;
   private readonly mcAirFriction: number = 0.91;
 
-  // Vanilla jump is 0.42 blocks/tick; Physicscraft gives it a modest boost.
-  private readonly jumpStrengthMultiplier: number = 1.15;
-  public readonly jumpVelocity: number = 8.4 * this.jumpStrengthMultiplier;
+  // Vanilla gravity is 0.08 blocks/tick^2 = 32 blocks/s^2, and a vanilla jump peaks at
+  // about 1.2522 blocks. The launch speed is derived from that height (v = sqrt(2 g h)),
+  // and the vertical integration in update() is exact, so the height is frame-rate independent.
   public readonly gravityAcceleration: number = 32.0;
+  public readonly jumpHeight: number = 1.2522;
+  public readonly jumpVelocity: number = Math.sqrt(2 * this.gravityAcceleration * this.jumpHeight);
   private readonly verticalDragPerTick: number = 0.98;
   private readonly terminalVelocity: number = 78.4;
 
   // Creative-style flight (toggle by double-tapping jump)
   public isFlying: boolean = false;
   public onFlyingChange?: (flying: boolean) => void;
-  public readonly flySpeed: number = 10.5;
+  // Vanilla creative flight: ~10.89 blocks/s horizontally (flying acceleration 0.049 with
+  // 0.91 friction) and 7.5 blocks/s vertically.
+  public readonly flySpeed: number = 10.89;
   public readonly flyVerticalSpeed: number = 7.5;
   private prevJump: boolean = false;
   private lastJumpPressTime: number = -10000;
@@ -151,24 +153,29 @@ export class PlayerController {
     PlayerController.scratchForward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
     PlayerController.scratchRight.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
 
+    // Like vanilla, never let a diagonal input exceed the straight-line speed.
+    const inputLen = Math.hypot(input.moveForward, input.moveRight);
+    const inputScale = inputLen > 1 ? 1 / inputLen : 1;
     const targetVelX =
       (PlayerController.scratchForward.x * input.moveForward +
-        PlayerController.scratchRight.x * input.moveRight) * speed;
+        PlayerController.scratchRight.x * input.moveRight) * speed * inputScale;
     const targetVelZ =
       (PlayerController.scratchForward.z * input.moveForward +
-        PlayerController.scratchRight.z * input.moveRight) * speed;
+        PlayerController.scratchRight.z * input.moveRight) * speed * inputScale;
 
     const accel = this.isFlying ? 10 : this.isGrounded ? 18 : 8;
     let newVx = THREE.MathUtils.lerp(this.velX, targetVelX, Math.min(1, delta * accel));
     let newVz = THREE.MathUtils.lerp(this.velZ, targetVelZ, Math.min(1, delta * accel));
     let newVy = this.velY;
+    let startVy = this.velY; // vertical velocity at the start of this frame
 
     // Gravity / jump is integrated manually because the player has no Rapier collider.
     if (this.isFlying) {
       const dir = (input.jump ? 1 : 0) - (input.descend ? 1 : 0);
       newVy = THREE.MathUtils.lerp(this.velY, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
     } else if (input.jump && this.isGrounded && this.velY < 2.0) {
-      newVy = this.jumpVelocity;
+      startVy = this.jumpVelocity;
+      newVy = this.jumpVelocity - this.gravityAcceleration * delta;
       this.isGrounded = false;
       soundManager.playJump();
     } else if (!this.isGrounded) {
@@ -191,7 +198,10 @@ export class PlayerController {
     nextZ = zResult.position;
     if (zResult.collided) newVz = 0;
 
-    const yResult = this.moveAlongAxis(nextX, nextY, nextZ, newVy * delta, 1);
+    // Flying uses the smoothed velocity directly; walking/falling integrates gravity exactly
+    // (average of start and end velocity), so jump height does not depend on frame rate.
+    const dy = this.isFlying ? newVy * delta : 0.5 * (startVy + newVy) * delta;
+    const yResult = this.moveAlongAxis(nextX, nextY, nextZ, dy, 1);
     nextY = yResult.position;
     if (yResult.collided) {
       if (newVy < 0) this.isGrounded = true;
