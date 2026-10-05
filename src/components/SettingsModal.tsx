@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CameraViewMode, StructurePreset } from '../types/physics';
 import { ResourcePacksScreen } from './ResourcePacksScreen';
+import { ShaderPacksScreen } from './ShaderPacksScreen';
 import { SkyPreset } from '../rendering/EnvironmentManager';
 
 export interface GraphicsSettings {
@@ -56,7 +57,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleMute,
   onLeaveWorld,
 }) => {
-  const [subView, setSubView] = useState<'game_menu' | 'options' | 'resource_packs'>('game_menu');
+  const [subView, setSubView] = useState<'game_menu' | 'options' | 'resource_packs' | 'shader_packs'>('game_menu');
 
   if (!isOpen) return null;
 
@@ -66,7 +67,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-xs"
         onClick={() => {
-          if (subView === 'resource_packs') {
+          if (subView === 'resource_packs' || subView === 'shader_packs') {
             setSubView('options');
           } else if (subView === 'options') {
             setSubView('game_menu');
@@ -128,6 +129,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       {/* VIEW 3: RESOURCE PACKS */}
       {subView === 'resource_packs' && <ResourcePacksScreen onDone={() => setSubView('options')} />}
+      {subView === 'shader_packs' && <ShaderPacksScreen onDone={() => setSubView('options')} />}
 
       {/* VIEW 2: AUTHENTIC MINECRAFT JAVA "OPTIONS" */}
       {subView === 'options' && (
@@ -220,6 +222,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="mc-button py-2.5 text-xs"
             >
               Resource Packs...
+            </button>
+
+            {/* Shader Packs (OptiFine / Iris shader pack import) */}
+            <button
+              type="button"
+              onClick={() => setSubView('shader_packs')}
+              className="mc-button py-2.5 text-xs"
+            >
+              Shader Packs...
             </button>
 
             <button

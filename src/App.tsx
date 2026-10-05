@@ -6,12 +6,14 @@ import { MainMenuScreen, WorldSave } from './components/MainMenuScreen';
 import { PhysicsEngine } from './physics/PhysicsEngine';
 import { ActiveTool, BlockShape, BlockMaterial, StructurePreset, CameraViewMode } from './types/physics';
 import { resourcePacks } from './resourcepack/ResourcePackManager';
+import { shaderPacks } from './shaderpack/ShaderPackManager';
 import { soundManager } from './audio/SoundEffects';
 
 export default function App() {
   // Load persisted resource packs once
   useEffect(() => {
     resourcePacks.init();
+    shaderPacks.init();
   }, []);
 
   // Game lifecycle state: 'menu' shows ONLY the Minecraft Main Menu; 'playing' runs the 3D world
