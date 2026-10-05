@@ -20,6 +20,8 @@ export interface DebugOverlayProps {
   enabled: boolean;
   sample: DebugFrameSample;
   history: DebugFrameSample[];
+  shaderDiagnostics?: string[];
+  onCopyShaderErrors?: () => void;
 }
 
 const fmt = (n: number, digits = 1) => Number.isFinite(n) ? n.toFixed(digits) : '—';
@@ -48,7 +50,13 @@ const Metric: React.FC<{ label: string; value: React.ReactNode }> = ({ label, va
   </div>
 );
 
-export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, history }) => {
+export const DebugOverlay: React.FC<DebugOverlayProps> = ({
+  enabled,
+  sample,
+  history,
+  shaderDiagnostics = [],
+  onCopyShaderErrors,
+}) => {
   if (!enabled) return null;
 
   const frameValues = history.map((s) => s.frameMs);
@@ -78,6 +86,16 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, his
         <Metric label="Geometries" value={sample.geometries} />
         <Metric label="Textures" value={sample.textures} />
         <Metric label="JS heap" value={sample.jsHeapMb == null ? 'unavailable' : fmt(sample.jsHeapMb) + ' MB'} />
+
+        {shaderDiagnostics.length > 0 && (
+          <button
+            type="button"
+            className="pointer-events-auto mt-2 rounded border border-white/30 bg-black/70 px-2 py-1 text-[10px] text-white hover:bg-white/15"
+            onClick={onCopyShaderErrors}
+          >
+            Copy Shader Errors ({shaderDiagnostics.length})
+          </button>
+        )}
       </div>
 
       <div className="absolute top-2 right-2 text-right max-w-[210px]">
