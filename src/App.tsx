@@ -7,6 +7,7 @@ import { PhysicsEngine } from './physics/PhysicsEngine';
 import { ActiveTool, BlockShape, BlockMaterial, StructurePreset, CameraViewMode } from './types/physics';
 import { resourcePacks } from './resourcepack/ResourcePackManager';
 import { soundManager } from './audio/SoundEffects';
+import { musicEngine } from './audio/MusicEngine';
 
 export default function App() {
   // Load persisted resource packs once
@@ -36,6 +37,36 @@ export default function App() {
   // Settings State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+
+  // Minecraft menu/game music follows the application state.
+  useEffect(() => {
+    if (gameState === 'menu') {
+      musicEngine.playMenu();
+    } else {
+      musicEngine.playGame();
+    }
+  }, [gameState]);
+
+  // Keep both effects and music on the same mute switch.
+  useEffect(() => {
+    musicEngine.setMuted(isMuted);
+  }, [isMuted]);
+
+  // Minecraft UI button click sound for every real <button> in the web UI.
+  useEffect(() => {
+    const handleButtonClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const button = target.closest('button');
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+
+      soundManager.playUiClick();
+    };
+
+    document.addEventListener('click', handleButtonClick, true);
+    return () => document.removeEventListener('click', handleButtonClick, true);
+  }, []);
 
   // Graphics Settings (Shadows, Viewport frame mode, Wireframe, FOV, Sky)
   const [graphics, setGraphics] = useState<GraphicsSettings>({
@@ -86,7 +117,6 @@ export default function App() {
     setCurrentWorld(world);
     setCurrentPreset(world.preset);
     setGameState('playing');
-    soundManager.playPop(true);
   };
 
   // Leave active world and return to main menu
@@ -94,7 +124,6 @@ export default function App() {
     setIsSettingsOpen(false);
     setGameState('menu');
     setEngine(null);
-    soundManager.playPop(false);
   };
 
   // Change preset
@@ -102,7 +131,6 @@ export default function App() {
     setCurrentPreset(preset);
     if (engine) {
       engine.loadPreset(preset);
-      soundManager.playPop(true);
     }
   };
 
@@ -110,7 +138,6 @@ export default function App() {
   const handleReset = () => {
     if (engine) {
       engine.loadPreset(currentPreset);
-      soundManager.playPop(false);
     }
   };
 
