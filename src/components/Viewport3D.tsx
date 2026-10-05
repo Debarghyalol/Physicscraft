@@ -22,6 +22,7 @@ import { shaderPacks } from '../shaderpack/ShaderPackManager';
 import { ShaderPackRuntime } from '../shaderpack/ShaderPackRuntime';
 import { ShaderFinalPass } from '../shaderpack/ShaderFinalPass';
 import { ShaderGBufferPass } from '../shaderpack/ShaderGBufferPass';
+import { ShaderFullscreenPass } from '../shaderpack/ShaderFullscreenPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -119,6 +120,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const shaderRuntime = new ShaderPackRuntime(renderer, { debug: graphicsRef.current.debugMode });
     const shaderFinalPass = new ShaderFinalPass(renderer, shaderRuntime);
     const shaderGBufferPass = new ShaderGBufferPass(renderer, shaderRuntime);
+    const shaderFullscreenPass = new ShaderFullscreenPass(renderer, shaderRuntime, (shaderGBufferPass as unknown as { framebuffers: import('../shaderpack/ShaderFramebufferManager').ShaderFramebufferManager }).framebuffers);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = graphics.shadows;
@@ -289,6 +291,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           lightDir
         );
 
+        shaderFullscreenPass.render(
+          'deferred',
+          renderer.domElement.width,
+          renderer.domElement.height,
+          frameCount,
+          Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000,
+        );
+
         const gbufferColor = shaderGBufferPass.colorTexture;
         if (gbufferColor) {
           shaderRendered = shaderFinalPass.renderTexture(
@@ -348,6 +358,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       unsubscribePacks?.();
       unsubscribeShaders();
       shaderGBufferPass.dispose();
+      shaderFullscreenPass.dispose();
       shaderFinalPass.dispose();
       shaderRuntime.dispose();
       cancelAnimationFrame(animationFrameId);
