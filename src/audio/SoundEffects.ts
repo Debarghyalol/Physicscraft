@@ -9,6 +9,7 @@ class SoundSynthesizer {
   private lastSoundTimes: Map<string, number> = new Map();
   private isUnlocked: boolean = false;
   private soundPools: Map<string, HTMLAudioElement[]> = new Map();
+  private busyAudio: Set<HTMLAudioElement> = new Set();
 
   // Keep the Minecraft asset hierarchy intact: dig/* is used for block break/place,
   // while step/* is used for footsteps. UI button clicks use random/click_stereo.
@@ -28,6 +29,12 @@ class SoundSynthesizer {
       query: '?url',
       import: 'default',
     })) as string[],
+    dig_glass: Object.values(import.meta.glob('../../sounds/random/glass*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+
     dig_sand: Object.values(import.meta.glob('../../sounds/dig/sand*.ogg', {
       eager: true,
       query: '?url',
@@ -45,6 +52,11 @@ class SoundSynthesizer {
       import: 'default',
     })) as string[],
     step_wood: Object.values(import.meta.glob('../../sounds/step/wood*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_glass: Object.values(import.meta.glob('../../sounds/random/glass*.ogg', {
       eager: true,
       query: '?url',
       import: 'default',
@@ -81,17 +93,25 @@ class SoundSynthesizer {
       this.soundPools.set(url, pool);
     }
 
-    let audio = pool.find((candidate) => candidate.paused || candidate.ended);
+    // `paused` can still be true for a short time after play() is called. Track
+    // pending playback explicitly so rapid block placement cannot reuse and restart
+    // the same element before the browser has actually started it.
+    let audio = pool.find((candidate) => !this.busyAudio.has(candidate) && (candidate.paused || candidate.ended));
     if (!audio) {
       audio = new Audio(url);
       audio.preload = 'auto';
       pool.push(audio);
+      audio.addEventListener('ended', () => this.busyAudio.delete(audio!), { once: false });
+      audio.addEventListener('error', () => this.busyAudio.delete(audio!), { once: false });
     }
 
+    this.busyAudio.add(audio);
     audio.volume = Math.min(Math.max(volume, 0), 1);
     audio.playbackRate = playbackRate;
     audio.currentTime = 0;
-    void audio.play().catch(() => {});
+    void audio.play().catch(() => {
+      this.busyAudio.delete(audio!);
+    });
   }
 
   private playAssetGroup(
@@ -379,7 +399,7 @@ class SoundSynthesizer {
     this.triggerHaptic([70, 30, 90]);
   }
 
-  public playBlockBreak(type: 'grass' | 'stone' | 'wood' | 'sand' = 'stone') {
+  public playBlockBreak(type: 'grass' | 'stone' | 'wood' | 'sand' | 'glass' = 'stone') {
     if (this.isMuted) return;
 
     const now = performance.now();
@@ -393,13 +413,15 @@ class SoundSynthesizer {
         ? 'dig_wood'
         : type === 'sand'
           ? 'dig_sand'
-          : 'dig_stone';
+          : type === 'glass'
+            ? 'dig_glass'
+            : 'dig_stone';
 
     this.playAssetGroup(group, 0.72, 0.96, 1.04);
     this.triggerHaptic(20);
   }
 
-  public playBlockPlace(type: 'grass' | 'stone' | 'wood' | 'sand' = 'stone') {
+  public playBlockPlace(type: 'grass' | 'stone' | 'wood' | 'sand' | 'glass' = 'stone') {
     if (this.isMuted) return;
 
     const now = performance.now();
@@ -414,14 +436,16 @@ class SoundSynthesizer {
         ? 'dig_wood'
         : type === 'sand'
           ? 'dig_sand'
-          : 'dig_stone';
+          : type === 'glass'
+            ? 'dig_glass'
+            : 'dig_stone';
 
     this.playAssetGroup(group, 0.8, 0.96, 1.04);
     this.triggerHaptic(15);
   }
 
 
-  public playFootstep(material: 'grass' | 'stone' | 'wood' | 'sand' = 'grass') {
+  public playFootstep(material: 'grass' | 'stone' | 'wood' | 'sand' | 'glass' = 'grass') {
     if (this.isMuted) return;
 
     const now = performance.now();
@@ -435,7 +459,9 @@ class SoundSynthesizer {
         ? 'step_wood'
         : material === 'sand'
           ? 'step_sand'
-          : 'step_stone';
+          : material === 'glass'
+            ? 'step_glass'
+            : 'step_stone';
 
     this.playAssetGroup(group, 0.15, 0.94, 1.06);
   }
