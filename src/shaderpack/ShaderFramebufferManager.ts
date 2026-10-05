@@ -39,7 +39,27 @@ export class ShaderFramebufferManager {
   }
 
   public get depthTexture(): THREE.DepthTexture | null {
+    // Depth is generated once by the G-buffer and remains immutable while
+    // deferred/composite passes ping-pong the color attachments.
     return this.primary?.depthTexture ?? null;
+  }
+
+  public get attachmentCountValue(): number {
+    return this.attachmentCount;
+  }
+
+  public prepareWriteTarget(): void {
+    if (!this.pingPongEnabled || !this.primary || !this.secondary) return;
+    const read = this.readTarget;
+    const write = this.writeTarget;
+    if (!read || !write) return;
+
+    this.renderer.initRenderTarget(read);
+    this.renderer.initRenderTarget(write);
+
+    for (let index = 0; index < this.attachmentCount; index += 1) {
+      this.renderer.copyTextureToTexture(read.textures[index], write.textures[index]);
+    }
   }
 
   public resize(width: number, height: number, colorAttachments = 3, config: ShaderFramebufferConfig = {}): void {
