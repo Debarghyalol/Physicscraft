@@ -393,15 +393,12 @@ export class ShaderFullscreenPass {
   private buildDrawBufferList(outputBuffers: number[]): number[] {
     const gl = this.gl;
     // WebGL2 drawBuffers[i] corresponds to fragment output location i.
-    // The translator remaps that output location to the physical attachment,
-    // so RENDERTARGETS: 4 becomes:
-    // [NONE, NONE, NONE, NONE, COLOR_ATTACHMENT4].
-    const highest = Math.max(...outputBuffers);
-    const list: number[] = [];
-    for (let slot = 0; slot <= highest; slot += 1) {
-      list.push(outputBuffers.includes(slot) ? gl.COLOR_ATTACHMENT0 + slot : gl.NONE);
-    }
-    return list;
+    // Iris maps logical shader output 0, 1, ... to the physical attachments
+    // named by RENDERTARGETS/DRAWBUFFERS. Therefore RENDERTARGETS: 4 becomes
+    // [COLOR_ATTACHMENT4], not [NONE, NONE, NONE, NONE, COLOR_ATTACHMENT4].
+    // The previous sparse list expected the shader to write location 4, while
+    // the Iris-compatible translator writes location 0.
+    return outputBuffers.map((attachment) => gl.COLOR_ATTACHMENT0 + attachment);
   }
 
   private resolveOutputBuffers(definition: ShaderPassDefinition): number[] {
