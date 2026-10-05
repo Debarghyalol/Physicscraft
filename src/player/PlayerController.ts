@@ -52,6 +52,8 @@ export class PlayerController {
   private readonly terminalVelocity: number = 78.4;
 
   // Creative-style flight (toggle by double-tapping jump)
+  /** Disc played when a jukebox is used (set from the inventory by the viewport). */
+  public selectedDisc: MusicDiscId = '13';
   public isFlying: boolean = false;
   public onFlyingChange?: (flying: boolean) => void;
   // Vanilla creative flight: ~10.89 blocks/s horizontally (flying acceleration 0.049 with
