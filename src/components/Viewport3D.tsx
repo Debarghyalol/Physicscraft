@@ -638,7 +638,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           lightDir
         );
 
-).test(name))
+        const shaderWorldTime = Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000;
+        const drawingBuffer = renderer.getDrawingBufferSize(new THREE.Vector2());
+        const shaderWidth = Math.max(1, Math.floor(drawingBuffer.x));
+        const shaderHeight = Math.max(1, Math.floor(drawingBuffer.y));
+
+        const orderedPasses = (prefix: 'prepare' | 'deferred' | 'composite') =>
+          shaderRuntime
+            .getProgramNames()
+            .filter((name) => new RegExp('^' + prefix + '(?:\\\\d+)?$').test(name))
             .sort((a, b) => {
               const ai = a === prefix ? 0 : Number(a.slice(prefix.length));
               const bi = b === prefix ? 0 : Number(b.slice(prefix.length));
