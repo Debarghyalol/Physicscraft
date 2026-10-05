@@ -10,6 +10,7 @@ export interface PlayerControlsOverlayProps {
   onActionMine: (coords?: { x: number; y: number }) => void;
   onActionPlace: (coords?: { x: number; y: number }) => void;
   onToggleViewMode: () => void;
+  onToggleInventory?: () => void;
   isFlying?: boolean;
   viewMode: CameraViewMode;
   selectedVoxel: VoxelType;
@@ -148,6 +149,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onActionMine,
   onActionPlace,
   onToggleViewMode,
+  onToggleInventory,
   selectedVoxel,
   onSelectVoxel,
   onTogglePhysicsMaker,
@@ -684,6 +686,26 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           ▲
         </button>
       </div>
+
+      {/* Mobile inventory button */}
+      {isMobile && onToggleInventory && (
+        <button
+          type="button"
+          className="ui-touch-interactive mcpe-action-btn absolute top-3 right-3 z-40 w-12 h-12 flex items-center justify-center text-white text-xl font-bold shadow-2xl"
+          onTouchStart={(e) => {
+            e.stopPropagation();
+            onToggleInventory();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleInventory();
+          }}
+          aria-label="Open inventory"
+          title="Inventory"
+        >
+          🎒
+        </button>
+      )}
 
       {/* AUTHENTIC MINECRAFT 9-SLOT HOTBAR (Uses genuine hotbar.png and hotbar_selection.png) */}
       <div
