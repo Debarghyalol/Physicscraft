@@ -265,8 +265,10 @@ export class ShaderFullscreenPass {
         const magFilter = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER);
         const wrapS = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S);
         const wrapT = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T);
-        const widthValue = gl.getTexLevelParameter(gl.TEXTURE_2D, 0, gl.TEXTURE_WIDTH);
-        const heightValue = gl.getTexLevelParameter(gl.TEXTURE_2D, 0, gl.TEXTURE_HEIGHT);
+        // WebGL2 does not expose gl.getTexLevelParameter(). Texture
+        // dimensions are therefore not queryable through the WebGL API.
+        // Three.js owns the texture metadata; querying this nonexistent API
+        // was itself throwing "getTexLevelParameter is not a function".
         const textureError = gl.getError();
         if (textureError !== gl.NO_ERROR) {
           console.error('[ShaderPipeline] Invalid sampler texture before draw:', name, textureError, {
@@ -275,17 +277,16 @@ export class ShaderFullscreenPass {
             magFilter,
             wrapS,
             wrapT,
-            width: widthValue,
-            height: heightValue,
           });
           return false;
         }
-        if (widthValue <= 0 || heightValue <= 0) {
-          console.error('[ShaderPipeline] Incomplete sampler texture before draw:', name, {
+        if (!gl.isTexture(boundTexture)) {
+          console.error('[ShaderPipeline] Invalid WebGL texture before draw:', name, {
             unit,
-            width: widthValue,
-            height: heightValue,
             minFilter,
+            magFilter,
+            wrapS,
+            wrapT,
           });
           return false;
         }
