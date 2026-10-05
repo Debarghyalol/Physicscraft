@@ -10,15 +10,26 @@ class SoundSynthesizer {
   private isUnlocked: boolean = false;
   private soundPools: Map<string, HTMLAudioElement[]> = new Map();
 
-  private getSoundUrl(path: string): string {
-    const base = import.meta.env.BASE_URL || '/';
-    return base.replace(/\/$/, '') + '/' + path;
-  }
+  // Static URL imports keep these OGG files in Vite's production asset graph.
+  // This is important because the sound files live outside /public.
+  private readonly soundAssets: Record<string, string[]> = {
+    grass: [
+      new URL('../../sounds/dig/grass1.ogg', import.meta.url).href,
+      new URL('../../sounds/dig/grass2.ogg', import.meta.url).href,
+      new URL('../../sounds/dig/grass3.ogg', import.meta.url).href,
+      new URL('../../sounds/dig/grass4.ogg', import.meta.url).href,
+    ],
+    stone: [
+      new URL('../../sounds/dig/stone1.ogg', import.meta.url).href,
+      new URL('../../sounds/dig/stone2.ogg', import.meta.url).href,
+      new URL('../../sounds/dig/stone3.ogg', import.meta.url).href,
+      new URL('../../sounds/dig/stone4.ogg', import.meta.url).href,
+    ],
+  };
 
-  private playAsset(path: string, volume: number = 1.0, playbackRate: number = 1.0): boolean {
-    if (this.isMuted || typeof window === 'undefined') return false;
+  private playAsset(url: string, volume: number = 1.0, playbackRate: number = 1.0): void {
+    if (this.isMuted || typeof window === 'undefined') return;
 
-    const url = this.getSoundUrl(path);
     let pool = this.soundPools.get(url);
     if (!pool) {
       pool = [];
@@ -36,7 +47,12 @@ class SoundSynthesizer {
     audio.playbackRate = playbackRate;
     audio.currentTime = 0;
     void audio.play().catch(() => {});
-    return true;
+  }
+
+  private playMaterialSound(material: 'grass' | 'stone', volume: number, minRate: number, maxRate: number): void {
+    const variants = this.soundAssets[material];
+    const url = variants[Math.floor(Math.random() * variants.length)];
+    this.playAsset(url, volume, minRate + Math.random() * (maxRate - minRate));
   }
 
   constructor() {
@@ -321,35 +337,8 @@ class SoundSynthesizer {
     if (now - last < 70) return;
     this.lastSoundTimes.set('block-break', now);
 
-    const variants = type === 'grass'
-      ? ['grass1.ogg', 'grass2.ogg', 'grass3.ogg', 'grass4.ogg']
-      : ['stone1.ogg', 'stone2.ogg', 'stone3.ogg', 'stone4.ogg'];
-    const variant = variants[Math.floor(Math.random() * variants.length)];
-
-    if (this.playAsset('sounds/dig/' + variant, 0.72, 0.96 + Math.random() * 0.08)) {
-      this.triggerHaptic(20);
-      return;
-    }
-
-    this.initCtx();
-    if (!this.ctx) return;
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(type === 'grass' ? 600 : 380, audioTime);
-    filter.Q.setValueAtTime(2.0, audioTime);
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(140 + Math.random() * 40, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(30, audioTime + 0.08);
-    gain.gain.setValueAtTime(0.5, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.09);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.ctx.destination);
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.1);
+    const material = type === 'grass' ? 'grass' : 'stone';
+    this.playMaterialSound(material, 0.72, 0.96, 1.04);
     this.triggerHaptic(20);
   }
 
@@ -384,11 +373,7 @@ class SoundSynthesizer {
     if (now - last < 260) return;
     this.lastSoundTimes.set('step', now);
 
-    const variants = material === 'grass'
-      ? ['grass1.ogg', 'grass2.ogg', 'grass3.ogg', 'grass4.ogg']
-      : ['stone1.ogg', 'stone2.ogg', 'stone3.ogg', 'stone4.ogg'];
-    const variant = variants[Math.floor(Math.random() * variants.length)];
-    this.playAsset('sounds/dig/' + variant, 0.32, 0.94 + Math.random() * 0.12);
+    this.playMaterialSound(material === 'grass' ? 'grass' : 'stone', 0.32, 0.94, 1.06);
   }
 
   public playJump() {
