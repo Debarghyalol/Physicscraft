@@ -272,7 +272,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
 
       // Real shader-pack pipeline, currently at:
-      //   gbuffers_terrain -> colortex0/1/2 + depthtex0 -> final -> screen
+      //   gbuffers_terrain -> colortex0..7 + depthtex0 -> deferred -> final -> screen
       // Keep the vanilla renderer as a safe fallback until the next pass is
       // available or a shader stage fails on the current GPU.
       const renderStart = performance.now();
