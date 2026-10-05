@@ -58,13 +58,28 @@ export class ShaderFinalPass {
     this.renderer.render(scene, camera);
     this.renderer.setRenderTarget(null);
 
-    const textureHandle = this.getTextureHandle(this.sceneTarget.texture);
+    return this.renderTexture(this.sceneTarget.texture, width, height);
+  }
+
+  /**
+   * Execute the pack's final program against an already-produced colortex0.
+   * This is the bridge used once the real G-buffer exists.
+   */
+  public renderTexture(texture: THREE.Texture, width: number, height: number): boolean {
+    const definition = this.runtime.getDefinition('final');
+    const program = this.runtime.getProgram('final');
+    if (!definition || !program) return false;
+
+    this.resize(width, height);
+    this.ensureGeometry(program);
+
+    const textureHandle = this.getTextureHandle(texture);
     if (!textureHandle) {
       console.warn('[ShaderPipeline] Unable to obtain WebGL texture for colortex0');
       return false;
     }
 
-    this.drawFinal(program, textureHandle, this.sceneTarget.width, this.sceneTarget.height);
+    this.drawFinal(program, textureHandle, Math.max(1, Math.floor(width)), Math.max(1, Math.floor(height)));
     this.renderer.resetState();
     return true;
   }
