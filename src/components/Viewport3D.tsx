@@ -57,6 +57,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const fpsRef = useRef(60);
   const [isFlying, setIsFlying] = useState(false);
   const lastPresetRef = useRef<string | null>(null);
+  const [shaderDiagnostics, setShaderDiagnostics] = useState<string[]>([]);
   const [debugSample, setDebugSample] = useState<DebugFrameSample>({
     frameMs: 0, physicsMs: 0, renderMs: 0, streamingMs: 0, generationMs: 0,
     chunks: 0, meshes: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, jsHeapMb: null, playerPos: null,
@@ -145,6 +146,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const active = shaderPacks.getActive();
       if (!active) {
         shaderRuntime.dispose();
+        setShaderDiagnostics([]);
         if (graphicsRef.current.debugMode) {
           console.info('[ShaderPipeline] No shader pack active; using vanilla renderer');
         }
@@ -154,12 +156,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       try {
         await shaderRuntime.load(active.id, 'world0');
         if (generation !== shaderLoadGeneration || isDisposed) return;
+        setShaderDiagnostics([]);
         if (graphicsRef.current.debugMode) {
           console.info('[ShaderPipeline] Program catalog:', shaderRuntime.getProgramNames());
         }
       } catch (error) {
         if (generation !== shaderLoadGeneration || isDisposed) return;
-        console.error('[ShaderPipeline] Failed to load shader runtime:', error);
+        const diagnostics = shaderRuntime.getDiagnostics();
+        setShaderDiagnostics(diagnostics.length > 0 ? diagnostics : [
+          error instanceof Error ? (error.stack || error.message) : String(error),
+        ]);
+        console.error(
+          '[ShaderPipeline] Failed to load shader runtime:',
+          error instanceof Error ? (error.stack || error.message) : String(error)
+        );
         shaderRuntime.dispose();
       }
     };
@@ -239,7 +249,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         streamingMs = streamingEnd - streamingStart;
         envManager.setUndergroundLighting(isUnderground);
 
-        // Day/night cycle: sun, moon, stars, clouds, sky colour and world light tint
+        // Day/night cycle: sun, moon, stars, clouds and world light tint
         envManager.update(delta, playerPos);
         const skyDim = 1 - envManager.minecraftSky.getDaylight();
         engine.voxelWorld.setSkyDim(skyDim);
@@ -381,7 +391,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
   }, []);
 
-  // Mouse click handler on PC (pointer lock + Left/Right click)
   const handleMouseDown = (e: React.MouseEvent) => {
     const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     if (isMobile) return;
@@ -392,14 +401,24 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     }
 
     if (e.button === 0) {
-      // Left Click: Mine at screen coords (or center aim if locked)
       handleActionMine({ x: e.clientX, y: e.clientY });
     } else if (e.button === 2) {
-      // Right Click: Place Block at screen coords (or center aim if locked)
       e.preventDefault();
       handleActionPlace({ x: e.clientX, y: e.clientY });
     }
   };
+
+  const copyShaderErrors = useCallback(async () => {
+    const text = shaderDiagnostics.length > 0
+      ? shaderDiagnostics.join('\n\n')
+      : '[ShaderPipeline] No shader runtime errors captured.';
+    try {
+      await navigator.clipboard.writeText(text);
+      console.info('[ShaderPipeline] Diagnostics copied to clipboard');
+    } catch (error) {
+      console.error('[ShaderPipeline] Clipboard copy failed:', error);
+    }
+  }, [shaderDiagnostics]);
 
   return (
     <div
@@ -407,7 +426,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       onContextMenu={(e) => e.preventDefault()}
       onMouseDown={handleMouseDown}
     >
-      {/* 3D WebGL Canvas */}
       <div ref={containerRef} className="w-full h-full cursor-crosshair" />
 
       <InventoryOverlay
@@ -419,11 +437,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onSelectDisc={handleSelectDisc}
       />
 
-      {/* Cinematic Viewport Frame Mode Overlay (Brackets + HUD) */}
       <ViewportFrameOverlay enabled={graphics.viewportFrameMode} fps={currentFps} />
-      <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} />
+      <DebugOverlay
+        enabled={graphics.debugMode}
+        sample={debugSample}
+        history={debugHistoryRef.current}
+        shaderDiagnostics={shaderDiagnostics}
+        onCopyShaderErrors={copyShaderErrors}
+      />
 
-      {/* MCPE Touch Controls Overlay (Direct touch coordinate mining & placing) */}
       <PlayerControlsOverlay
         onInputUpdate={handleInputUpdate}
         onLookDelta={handleLookDelta}
