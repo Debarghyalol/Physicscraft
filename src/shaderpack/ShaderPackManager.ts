@@ -51,6 +51,7 @@ type Listener = () => void;
 class ShaderPackManagerImpl {
   private packs: StoredPack[] = [];
   private listeners = new Set<Listener>();
+  private lastCompileReports: ProgramReport[] = [];
   public ready = false;
 
   async init() {
@@ -203,7 +204,14 @@ class ShaderPackManagerImpl {
         }
       }
     }
+    this.lastCompileReports = reports;
     return reports;
+  }
+
+  getCompileDiagnostics(): string[] {
+    return this.lastCompileReports
+      .filter((report) => !report.ok)
+      .map((report) => `[ShaderPipeline] ${report.name} (${report.stage})\n${report.log}`);
   }
 }
 
