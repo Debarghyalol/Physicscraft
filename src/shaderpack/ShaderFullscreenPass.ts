@@ -150,11 +150,20 @@ export class ShaderFullscreenPass {
         return false;
       }
 
-      // Stage 3: Three.js configures the MRT draw-buffer state when it binds
-      // the WebGLRenderTarget. Do not overwrite that state here: mobile WebGL2
-      // drivers can reject a redundant drawBuffers() call even though the
-      // framebuffer itself is complete. Fragment output locations are already
-      // remapped by GlslTranslator to the physical attachment indices.
+      // Stage 3: Three.js enables every color attachment on an MRT target by
+      // default. WebGL 2 requires every enabled draw buffer to have a compatible
+      // fragment output; a fullscreen pass such as RENDERTARGETS: 4 only writes
+      // location 4, so leaving attachments 0..3 and 5..7 enabled makes drawArrays
+      // generate INVALID_OPERATION (1282). Keep only the physical outputs active.
+      gl.drawBuffers(this.buildDrawBufferList(outputBuffers));
+      const drawBuffersError = gl.getError();
+      if (drawBuffersError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after drawBuffers:', name, drawBuffersError, {
+          ...diagnosticContext(),
+          drawBufferList: this.buildDrawBufferList(outputBuffers),
+        });
+        return false;
+      }
 
       // Nostalgia uses logical colortex0..15. This renderer currently has
       // eight physical MRT attachments; explicitly bind the unsupported higher
