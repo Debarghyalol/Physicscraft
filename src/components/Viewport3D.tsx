@@ -272,7 +272,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       }
 
       // Real shader-pack pipeline, currently at:
-      //   gbuffers_terrain -> colortex0..7 + depthtex0 -> deferred -> final -> screen
+      //   gbuffers_terrain -> ping-pong colortex0..7 + depthtex0 -> deferred chain -> final -> screen
       // Keep the vanilla renderer as a safe fallback until the next pass is
       // available or a shader stage fails on the current GPU.
       const renderStart = performance.now();
@@ -291,13 +291,25 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           lightDir
         );
 
-        shaderFullscreenPass.render(
-          'deferred',
-          renderer.domElement.width,
-          renderer.domElement.height,
-          frameCount,
-          Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000,
-        );
+        const shaderWorldTime = Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000;
+        const deferredPasses = shaderRuntime
+          .getProgramNames()
+          .filter((name) => /^deferred(?:\\d+)?$/.test(name))
+          .sort((a, b) => {
+            const ai = a === 'deferred' ? 0 : Number(a.slice('deferred'.length));
+            const bi = b === 'deferred' ? 0 : Number(b.slice('deferred'.length));
+            return ai - bi;
+          });
+
+        for (const passName of deferredPasses) {
+          shaderFullscreenPass.render(
+            passName,
+            renderer.domElement.width,
+            renderer.domElement.height,
+            frameCount,
+            shaderWorldTime,
+          );
+        }
 
         const gbufferColor = shaderGBufferPass.colorTexture;
         if (gbufferColor) {
