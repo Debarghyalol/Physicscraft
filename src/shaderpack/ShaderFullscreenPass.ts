@@ -161,36 +161,60 @@ export class ShaderFullscreenPass {
       // logical slots to a neutral texture instead of leaving their sampler
       // uniforms at the default texture unit (which accidentally aliases
       // colortex0 and can corrupt later passes).
+      const assertTextureCall = (stage: string): boolean => {
+        const error = gl.getError();
+        if (error === gl.NO_ERROR) return true;
+        console.error('[ShaderPipeline] GL error during texture/uniform binding:', name, error, {
+          stage,
+          textureUnitsUsed: textureUnit,
+          maxCombinedTextureImageUnits: gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS),
+          maxTextureImageUnits: gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS),
+        });
+        return false;
+      };
+
       for (let index = 0; index < 16; index += 1) {
         const location = gl.getUniformLocation(program, 'colortex' + index);
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
+        if (!assertTextureCall('activeTexture colortex' + index)) return false;
         const texture = index < textureHandles.length
           ? textureHandles[index]
           : this.getTextureHandle(this.neutralTexture);
         gl.bindTexture(gl.TEXTURE_2D, texture ?? this.getTextureHandle(this.neutralTexture));
-        gl.uniform1i(location, textureUnit++);
+        if (!assertTextureCall('bindTexture colortex' + index)) return false;
+        gl.uniform1i(location, textureUnit);
+        if (!assertTextureCall('uniform1i colortex' + index)) return false;
+        textureUnit++;
       }
 
       for (let index = 0; index < 8; index += 1) {
         const location = gl.getUniformLocation(program, 'depthtex' + index);
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
+        if (!assertTextureCall('activeTexture depthtex' + index)) return false;
         gl.bindTexture(gl.TEXTURE_2D, index === 0 && depthHandle ? depthHandle : this.getTextureHandle(this.neutralTexture));
-        gl.uniform1i(location, textureUnit++);
+        if (!assertTextureCall('bindTexture depthtex' + index)) return false;
+        gl.uniform1i(location, textureUnit);
+        if (!assertTextureCall('uniform1i depthtex' + index)) return false;
+        textureUnit++;
       }
 
       for (const sampler of ['shadowtex0', 'shadowtex1', 'shadowcolor0', 'shadowcolor1', 'noisetex', 'normals', 'specular']) {
         const location = gl.getUniformLocation(program, sampler);
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
+        if (!assertTextureCall('activeTexture ' + sampler)) return false;
         const texture =
           sampler === 'noisetex' ? this.runtime.getTexture('noisetex') :
           (sampler === 'shadowtex0' || sampler === 'shadowtex1' || sampler === 'shadowcolor0' || sampler === 'shadowcolor1')
             ? shadows?.texture ?? null
             : null;
         gl.bindTexture(gl.TEXTURE_2D, texture ? this.getTextureHandle(texture) : this.getTextureHandle(this.neutralTexture));
-        gl.uniform1i(location, textureUnit++);
+        if (!assertTextureCall('bindTexture ' + sampler)) return false;
+        gl.uniform1i(location, textureUnit);
+        if (!assertTextureCall('uniform1i ' + sampler)) return false;
+        textureUnit++;
       }
 
       if (shadows) {
