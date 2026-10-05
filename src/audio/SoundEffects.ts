@@ -8,6 +8,36 @@ class SoundSynthesizer {
   private isMuted: boolean = false;
   private lastSoundTimes: Map<string, number> = new Map();
   private isUnlocked: boolean = false;
+  private soundPools: Map<string, HTMLAudioElement[]> = new Map();
+
+  private getSoundUrl(path: string): string {
+    const base = import.meta.env.BASE_URL || '/';
+    return base.replace(/\/$/, '') + '/' + path;
+  }
+
+  private playAsset(path: string, volume: number = 1.0, playbackRate: number = 1.0): boolean {
+    if (this.isMuted || typeof window === 'undefined') return false;
+
+    const url = this.getSoundUrl(path);
+    let pool = this.soundPools.get(url);
+    if (!pool) {
+      pool = [];
+      this.soundPools.set(url, pool);
+    }
+
+    let audio = pool.find((candidate) => candidate.paused || candidate.ended);
+    if (!audio) {
+      audio = new Audio(url);
+      audio.preload = 'auto';
+      pool.push(audio);
+    }
+
+    audio.volume = Math.min(Math.max(volume, 0), 1);
+    audio.playbackRate = playbackRate;
+    audio.currentTime = 0;
+    void audio.play().catch(() => {});
+    return true;
+  }
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -285,29 +315,39 @@ class SoundSynthesizer {
 
   public playBlockBreak(type: string = 'stone') {
     if (this.isMuted) return;
+
+    const now = performance.now();
+    const last = this.lastSoundTimes.get('block-break') || 0;
+    if (now - last < 70) return;
+    this.lastSoundTimes.set('block-break', now);
+
+    const variants = type === 'grass'
+      ? ['grass1.ogg', 'grass2.ogg', 'grass3.ogg', 'grass4.ogg']
+      : ['stone1.ogg', 'stone2.ogg', 'stone3.ogg', 'stone4.ogg'];
+    const variant = variants[Math.floor(Math.random() * variants.length)];
+
+    if (this.playAsset('sounds/dig/' + variant, 0.72, 0.96 + Math.random() * 0.08)) {
+      this.triggerHaptic(20);
+      return;
+    }
+
     this.initCtx();
     if (!this.ctx) return;
-
     const audioTime = this.ctx.currentTime;
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     const filter = this.ctx.createBiquadFilter();
-
     filter.type = 'bandpass';
     filter.frequency.setValueAtTime(type === 'grass' ? 600 : 380, audioTime);
     filter.Q.setValueAtTime(2.0, audioTime);
-
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(140 + Math.random() * 40, audioTime);
     osc.frequency.exponentialRampToValueAtTime(30, audioTime + 0.08);
-
     gain.gain.setValueAtTime(0.5, audioTime);
     gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.09);
-
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(this.ctx.destination);
-
     osc.start(audioTime);
     osc.stop(audioTime + 0.1);
     this.triggerHaptic(20);
@@ -344,25 +384,11 @@ class SoundSynthesizer {
     if (now - last < 260) return;
     this.lastSoundTimes.set('step', now);
 
-    this.initCtx();
-    if (!this.ctx) return;
-
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(material === 'grass' ? 140 : 180, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(45, audioTime + 0.05);
-
-    gain.gain.setValueAtTime(0.18, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.06);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.07);
+    const variants = material === 'grass'
+      ? ['grass1.ogg', 'grass2.ogg', 'grass3.ogg', 'grass4.ogg']
+      : ['stone1.ogg', 'stone2.ogg', 'stone3.ogg', 'stone4.ogg'];
+    const variant = variants[Math.floor(Math.random() * variants.length)];
+    this.playAsset('sounds/dig/' + variant, 0.32, 0.94 + Math.random() * 0.12);
   }
 
   public playJump() {
