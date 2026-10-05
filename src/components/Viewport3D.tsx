@@ -378,14 +378,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         }
       }
 
-      if (!shaderRendered) {
-        // A failed shader frame can leave WebGL state (FBO/draw buffers/viewport)
-        // different from the state expected by Three.js' normal renderer.
-        // Explicitly restore the default framebuffer before the vanilla path.
-        renderer.setRenderTarget(null);
-        renderer.resetState();
-        renderer.render(scene, camera);
-      }
+      if (!shaderRendered) renderer.render(scene, camera);
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
         const info = renderer.info;
