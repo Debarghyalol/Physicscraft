@@ -160,7 +160,7 @@ export class ShaderFullscreenPass {
       // location 0 writes there. Three.js' WebGLRenderTarget instead attaches
       // colortex4 to COLOR_ATTACHMENT4, so simply calling drawBuffers() on the
       // Three.js FBO is not equivalent to Iris. Build the same pass-local FBO.
-      const passFramebufferError = this.configurePassFramebuffer(writeTarget, outputBuffers, highOutputs.length > 0);
+      const passFramebufferError = this.configurePassFramebuffer(writeTarget, outputBuffers);
       if (passFramebufferError !== gl.NO_ERROR) {
         console.error('[ShaderPipeline] GL error after pass framebuffer setup:', name, passFramebufferError, {
           ...diagnosticContext(),
@@ -427,7 +427,6 @@ export class ShaderFullscreenPass {
   private configurePassFramebuffer(
     writeTarget: THREE.WebGLRenderTarget,
     outputBuffers: number[],
-    extraTarget: boolean,
   ): number {
     const gl = this.gl;
     if (!this.passFramebuffer) {
@@ -453,7 +452,6 @@ export class ShaderFullscreenPass {
           textureIndex,
           outputIndex,
           availableTextures: textures.length,
-          extraTarget,
         });
         return gl.INVALID_OPERATION;
       }
@@ -468,13 +466,10 @@ export class ShaderFullscreenPass {
       );
     }
 
-    if (!extraTarget && writeTarget.depthTexture) {
-      const depthHandle = this.getTextureHandle(writeTarget.depthTexture);
-      if (!depthHandle) return gl.INVALID_OPERATION;
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthHandle, 0);
-    } else {
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, null, 0);
-    }
+    // Iris composite/deferred pass FBOs are color-only. The depth texture is
+    // sampled by depthtex0 but is not attached to this pass framebuffer;
+    // attaching it would create a feedback loop on alternating ping-pong frames.
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, null, 0);
 
     return gl.getError();
   }
