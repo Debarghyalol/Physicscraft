@@ -315,6 +315,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         );
 
         const shaderWorldTime = Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000;
+        const shadowCamera = envManager.getShadowCamera();
+        const shadowModelView = shadowCamera.matrixWorldInverse.clone();
+        const shadowModelViewInverse = shadowCamera.matrixWorld.clone();
+        const shadowProjection = shadowCamera.projectionMatrix.clone();
+        const shadowProjectionInverse = shadowProjection.clone().invert();
+        const shadowResources = {
+          texture: envManager.getShadowMap(),
+          modelView: shadowModelView,
+          modelViewInverse: shadowModelViewInverse,
+          projection: shadowProjection,
+          projectionInverse: shadowProjectionInverse,
+        };
         const drawingBuffer = renderer.getDrawingBufferSize(new THREE.Vector2());
         const shaderWidth = Math.max(1, Math.floor(drawingBuffer.x));
         const shaderHeight = Math.max(1, Math.floor(drawingBuffer.y));
@@ -666,6 +678,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             shaderHeight,
             frameCount,
             shaderWorldTime,
+            shadowResources,
           );
         }
 
