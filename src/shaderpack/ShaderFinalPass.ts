@@ -161,7 +161,9 @@ export class ShaderFinalPass {
     if (aspectRatio) gl.uniform1f(aspectRatio, width / height);
     if (hideGUI) gl.uniform1i(hideGUI, 0);
 
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    // The default framebuffer uses BACK; COLOR_ATTACHMENT0 is only valid
+    // for user-created framebuffers with attached color textures.
+    gl.drawBuffers([gl.BACK]);
 
     gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
