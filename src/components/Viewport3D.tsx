@@ -121,8 +121,31 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const shaderFinalPass = new ShaderFinalPass(renderer, shaderRuntime);
     const shaderGBufferPass = new ShaderGBufferPass(renderer, shaderRuntime);
     const shaderFullscreenPass = new ShaderFullscreenPass(renderer, shaderRuntime, shaderGBufferPass.framebufferManager);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
+    renderer.setPixelRatio(pixelRatio);
+
+    // Keep the canvas's CSS box and its WebGL drawing buffer in sync. On
+    // mobile browsers the canvas can otherwise be displayed larger than the
+    // drawing buffer, leaving the shader viewport anchored to the
+    // bottom-left and exposing the page/clear color around it.
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+
+    const resizeRenderer = () => {
+      const rect = container.getBoundingClientRect();
+      const width = Math.max(1, Math.floor(rect.width));
+      const height = Math.max(1, Math.floor(rect.height));
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+
+      const drawingBuffer = renderer.getDrawingBufferSize(new THREE.Vector2());
+      shaderGBufferPass.resize(drawingBuffer.x, drawingBuffer.y);
+      shaderFinalPass.resize(drawingBuffer.x, drawingBuffer.y);
+    };
+
+    resizeRenderer();
     renderer.shadowMap.enabled = graphics.shadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -352,18 +375,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     animate();
 
     // 6. Resize handling
-    const handleResize = () => {
-      if (!container) return;
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
-      shaderGBufferPass.resize(renderer.domElement.width, renderer.domElement.height);
-      shaderFinalPass.resize(renderer.domElement.width, renderer.domElement.height);
-    };
-
-    window.addEventListener('resize', handleResize);
+    const resizeObserver = new ResizeObserver(resizeRenderer);
+    resizeObserver.observe(container);
+    window.addEventListener('resize', resizeRenderer);
 
     return () => {
       isDisposed = true;
@@ -374,7 +388,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       shaderFinalPass.dispose();
       shaderRuntime.dispose();
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', resizeRenderer);
       envManager.dispose();
       engine.dispose();
       renderer.dispose();
