@@ -47,11 +47,6 @@ export default function App() {
     }
   }, [gameState]);
 
-  // Keep both effects and music on the same mute switch.
-  useEffect(() => {
-    musicEngine.setMuted(isMuted);
-  }, [isMuted]);
-
   // Minecraft UI button click sound for every real <button> in the web UI.
   useEffect(() => {
     const handleButtonClick = (event: MouseEvent) => {
@@ -146,6 +141,7 @@ export default function App() {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
     soundManager.setMuted(nextMuted);
+    musicEngine.setMuted(nextMuted);
   };
 
   // Change Gravity
