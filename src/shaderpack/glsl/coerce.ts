@@ -373,7 +373,10 @@ class Coercer {
         let init = this.parseAssign();
         init = this.coerce(init, fullType);
         const text = this.emitExpr(init);
-        if (!global && !isConst && init.k === 'call' && isArray(init.name ?? null) && init.args!.length > 0) {
+        if (isUniformLike) {
+          // `uniform float x = 1.0;` is desktop-only; the engine supplies the value at runtime.
+          this.warnings.push(`dropped initializer of ${quals.join(' ')} ${name}`);
+        } else if (!global && !isConst && init.k === 'call' && isArray(init.name ?? null) && init.args!.length > 0) {
           // Some mobile drivers give an array constructor temporary no precision (error 50032),
           // so fill local arrays element by element instead.
           const n = init.args!.length;
