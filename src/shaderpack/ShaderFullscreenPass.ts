@@ -46,7 +46,16 @@ export class ShaderFullscreenPass {
     if (!definition || !program || !readTarget || !writeTarget) return false;
 
     this.ensureGeometry(program);
-    const outputBuffers = this.resolveOutputBuffers(definition);
+    const logicalOutputs = definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0];
+    const highOutputs = logicalOutputs.filter((index) => this.framebuffers.logicalToExtraAttachment(index) >= 0);
+    const mainOutputs = logicalOutputs.filter((index) => this.framebuffers.logicalToExtraAttachment(index) < 0);
+    if (highOutputs.length > 0 && mainOutputs.length > 0) {
+      console.warn('[ShaderPipeline] Mixed main/extra render targets are not supported:', name, logicalOutputs);
+      return false;
+    }
+    const outputBuffers = highOutputs.length > 0
+      ? highOutputs.map((index) => this.framebuffers.logicalToExtraAttachment(index))
+      : this.resolveOutputBuffers(definition);
     if (outputBuffers.length === 0) return false;
 
     // Never sample from a color attachment that is simultaneously attached
@@ -59,12 +68,15 @@ export class ShaderFullscreenPass {
         .map((index) => this.framebuffers.logicalToPhysicalAttachment(index))
         .filter((index) => !outputSet.has(index))
     );
-    this.framebuffers.prepareWriteTarget(copyPhysicalAttachments);
+    if (highOutputs.length === 0) this.framebuffers.prepareWriteTarget(copyPhysicalAttachments);
 
     const previousTarget = this.renderer.getRenderTarget();
+    const readTarget = highOutputs.length > 0 ? this.framebuffers.extraReadTarget : this.framebuffers.readTarget;
+    const writeTarget = highOutputs.length > 0 ? this.framebuffers.extraWriteTarget : this.framebuffers.writeTarget;
+    if (!readTarget || !writeTarget) return false;
     const gl = this.gl;
     const textureHandles = Array.from({ length: 16 }, (_, logicalIndex) =>
-      this.getTextureHandle(this.framebuffers.getTexture(logicalIndex, 'read') ?? this.neutralTexture)
+      this.getTextureHandle(this.framebuffers.getTexture(logicalIndex, highOutputs.length > 0 ? 'read' : 'read') ?? this.neutralTexture)
     );
     const depthTexture = this.framebuffers.depthTexture;
     const depthHandle = depthTexture ? this.getTextureHandle(depthTexture) : null;
@@ -130,7 +142,8 @@ export class ShaderFullscreenPass {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
 
-      this.framebuffers.swap();
+      if (highOutputs.length > 0) this.framebuffers.swapExtra();
+      else this.framebuffers.swap();
 
       for (let unit = 0; unit < textureUnit; unit += 1) {
         gl.activeTexture(gl.TEXTURE0 + unit);
