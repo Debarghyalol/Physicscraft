@@ -106,31 +106,61 @@ export class ShaderFullscreenPass {
     let textureUnit = 0;
 
     try {
+      // Stage 1: Three.js binds the framebuffer and (for MRT targets) sets
+      // its own drawBuffers list for every attachment of the target.
       this.renderer.setRenderTarget(writeTarget);
-      if (highOutputs.length > 0) {
-        const framebufferStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        if (framebufferStatus !== gl.FRAMEBUFFER_COMPLETE) {
-          console.error('[ShaderPipeline] Incomplete extra framebuffer:', name, framebufferStatus, {
-            logicalOutputs,
-            outputBuffers,
-          });
-          return false;
-        }
+      const setTargetError = gl.getError();
+      const diagnosticContext = () => ({
+        logicalOutputs,
+        outputBuffers,
+        highOutputs,
+        targetAttachments: writeTarget.textures.length,
+        targetSize: [writeTarget.width, writeTarget.height],
+        hasDepthTexture: !!writeTarget.depthTexture,
+        maxDrawBuffers: gl.getParameter(gl.MAX_DRAW_BUFFERS),
+        maxColorAttachments: gl.getParameter(gl.MAX_COLOR_ATTACHMENTS),
+        boundFramebuffer: gl.getParameter(gl.FRAMEBUFFER_BINDING) ? 'FBO' : 'default',
+      });
+      if (setTargetError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after setRenderTarget:', name, setTargetError, diagnosticContext());
+        return false;
       }
+
+      // Stage 2: framebuffer completeness, checked for every pass.
+      const framebufferStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (framebufferStatus !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error('[ShaderPipeline] Incomplete framebuffer after setRenderTarget:', name, framebufferStatus, diagnosticContext());
+        return false;
+      }
+      const statusError = gl.getError();
+      if (statusError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after checkFramebufferStatus:', name, statusError, diagnosticContext());
+        return false;
+      }
+
       gl.viewport(0, 0, Math.max(1, Math.floor(width)), Math.max(1, Math.floor(height)));
       gl.useProgram(program);
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.CULL_FACE);
       gl.disable(gl.BLEND);
       gl.disable(gl.SCISSOR_TEST);
-      gl.drawBuffers(outputBuffers.map((index) => gl.COLOR_ATTACHMENT0 + index));
+      const stateError = gl.getError();
+      if (stateError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after useProgram/state setup:', name, stateError, diagnosticContext());
+        return false;
+      }
+
+      // Stage 3: WebGL2 requires entry i of the draw-buffer list to be either
+      // gl.NONE or gl.COLOR_ATTACHMENTi for a framebuffer object. Passing
+      // [COLOR_ATTACHMENT4] (entry 0 -> attachment 4) is INVALID_OPERATION, so
+      // build a position-indexed list: NONE everywhere except the outputs.
+      const drawBufferList = this.buildDrawBufferList(outputBuffers);
+      gl.drawBuffers(drawBufferList);
       const drawBuffersError = gl.getError();
       if (drawBuffersError !== gl.NO_ERROR) {
         console.error('[ShaderPipeline] GL error after drawBuffers:', name, drawBuffersError, {
-          logicalOutputs,
-          outputBuffers,
-          maxDrawBuffers: gl.getParameter(gl.MAX_DRAW_BUFFERS),
-          maxColorAttachments: gl.getParameter(gl.MAX_COLOR_ATTACHMENTS),
+          ...diagnosticContext(),
+          drawBufferList: drawBufferList.map((value) => (value === gl.NONE ? 'NONE' : `COLOR_ATTACHMENT${value - gl.COLOR_ATTACHMENT0}`)),
         });
         return false;
       }
@@ -266,6 +296,16 @@ export class ShaderFullscreenPass {
     this.vertexBuffer = null;
     this.texcoordBuffer = null;
     this.geometryProgram = null;
+  }
+
+  private buildDrawBufferList(outputBuffers: number[]): number[] {
+    const gl = this.gl;
+    const highest = Math.max(...outputBuffers);
+    const list: number[] = [];
+    for (let slot = 0; slot <= highest; slot += 1) {
+      list.push(outputBuffers.includes(slot) ? gl.COLOR_ATTACHMENT0 + slot : gl.NONE);
+    }
+    return list;
   }
 
   private resolveOutputBuffers(definition: ShaderPassDefinition): number[] {
