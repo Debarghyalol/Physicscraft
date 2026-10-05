@@ -56,6 +56,10 @@ export default function App() {
       const button = target.closest('button');
       if (!(button instanceof HTMLButtonElement) || button.disabled) return;
 
+      // In-world mobile/PC controls are gameplay input, not UI navigation.
+      // Do not play the menu UI click sound for D-pad, jump, perspective or hotbar controls.
+      if (button.closest('.ui-touch-interactive')) return;
+
       soundManager.playUiClick();
     };
 
