@@ -461,29 +461,6 @@ class SoundSynthesizer {
     // Keep this method as a no-op so callers cannot reintroduce a procedural jump sound.
   }
 
-() {
-    if (this.isMuted) return;
-    this.initCtx();
-    if (!this.ctx) return;
-
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(120, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(260, audioTime + 0.1);
-
-    gain.gain.setValueAtTime(0.25, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.11);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.12);
-    this.triggerHaptic(15);
-  }
 
   public playPop(isLift: boolean = true) {
     if (this.isMuted) return;
