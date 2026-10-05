@@ -378,6 +378,13 @@ export class ShaderFullscreenPass {
     const w = Math.max(1, Math.floor(width));
     const h = Math.max(1, Math.floor(height));
 
+    const check = (name: string, operation: string): boolean => {
+      const error = gl.getError();
+      if (error === gl.NO_ERROR) return true;
+      console.error('[ShaderPipeline] GL error in common uniform:', name, error, { operation });
+      return false;
+    };
+
     for (const [name, x, y] of [
       ['viewSize', w, h],
       ['pixelSize', 1 / w, 1 / h],
@@ -385,7 +392,9 @@ export class ShaderFullscreenPass {
       ['eyeBrightness', 240, 240],
     ] as Array<[string, number, number]>) {
       const location = gl.getUniformLocation(program, name);
-      if (location) gl.uniform2f(location, x, y);
+      if (!location) continue;
+      gl.uniform2f(location, x, y);
+      if (!check(name, 'uniform2f')) return;
     }
 
     for (const [name, value] of [
@@ -395,17 +404,28 @@ export class ShaderFullscreenPass {
       ['wetness', 0],
     ] as Array<[string, number]>) {
       const location = gl.getUniformLocation(program, name);
-      if (location) gl.uniform1f(location, value);
+      if (!location) continue;
+      gl.uniform1f(location, value);
+      if (!check(name, 'uniform1f')) return;
     }
 
     const frame = gl.getUniformLocation(program, 'frameCounter');
-    if (frame) gl.uniform1i(frame, frameCounter);
+    if (frame) {
+      gl.uniform1i(frame, frameCounter);
+      if (!check('frameCounter', 'uniform1i')) return;
+    }
 
     const taaOffset = gl.getUniformLocation(program, 'taaOffset');
-    if (taaOffset) gl.uniform2f(taaOffset, 0, 0);
+    if (taaOffset) {
+      gl.uniform2f(taaOffset, 0, 0);
+      if (!check('taaOffset', 'uniform2f')) return;
+    }
 
     const hideGUI = gl.getUniformLocation(program, 'hideGUI');
-    if (hideGUI) gl.uniform1i(hideGUI, 0);
+    if (hideGUI) {
+      gl.uniform1i(hideGUI, 0);
+      if (!check('hideGUI', 'uniform1i')) return;
+    }
   }
 
   private getTextureHandle(texture: THREE.Texture): WebGLTexture | null {
