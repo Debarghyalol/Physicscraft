@@ -49,7 +49,7 @@ export class ShaderGBufferPass {
   }
 
   public resize(width: number, height: number): void {
-    this.framebuffers.resize(width, height, 3);
+    this.framebuffers.resize(width, height, 8);
   }
 
   public render(
