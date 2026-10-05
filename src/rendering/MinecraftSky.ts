@@ -281,19 +281,20 @@ export class MinecraftSky {
     (this.sunMesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
 
     // Moon phases: vanilla sheet is 4 columns x 2 rows (phase 0..7, row-major)
-    const sheet = await resourcePacks.getTexture(['environment/celestial/moon']);
+    const moonPaths = [
+      'environment/celestial/moon/full_moon',
+      'environment/celestial/moon/waning_gibbous',
+      'environment/celestial/moon/third_quarter',
+      'environment/celestial/moon/waning_crescent',
+      'environment/celestial/moon/new_moon',
+      'environment/celestial/moon/waxing_crescent',
+      'environment/celestial/moon/first_quarter',
+      'environment/celestial/moon/waxing_gibbous',
+    ];
+    const packMoons = await Promise.all(moonPaths.map((path) => resourcePacks.getTexture([path])));
     for (const t of this.moonTextures) if (!this.defaultMoons.includes(t)) t.dispose();
-    if (sheet) {
-      const w = sheet.width / 4;
-      const h = sheet.height === sheet.width / 2 ? sheet.height / 2 : w;
-      this.moonTextures = [];
-      for (let ph = 0; ph < 8; ph++) {
-        const c = document.createElement('canvas');
-        c.width = w;
-        c.height = h;
-        c.getContext('2d')!.drawImage(sheet, (ph % 4) * w, Math.floor(ph / 4) * h, w, h, 0, 0, w, h);
-        this.moonTextures.push(mkTex(c));
-      }
+    if (packMoons.every(Boolean)) {
+      this.moonTextures = packMoons.map((canvas) => mkTex(canvas!));
     } else {
       this.moonTextures = this.defaultMoons;
     }
