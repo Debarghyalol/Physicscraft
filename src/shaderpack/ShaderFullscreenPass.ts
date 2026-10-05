@@ -52,7 +52,7 @@ export class ShaderFullscreenPass {
     // Never sample from a color attachment that is simultaneously attached
     // for drawing. Copy the complete read set into the write set first, then
     // swap only after the pass has finished.
-    this.framebuffers.prepareWriteTarget();
+    this.framebuffers.prepareWriteTarget(new Set(outputBuffers));
 
     const previousTarget = this.renderer.getRenderTarget();
     const gl = this.gl;
@@ -71,11 +71,19 @@ export class ShaderFullscreenPass {
       gl.disable(gl.SCISSOR_TEST);
       gl.drawBuffers(outputBuffers.map((index) => gl.COLOR_ATTACHMENT0 + index));
 
-      for (let index = 0; index < textureHandles.length; index += 1) {
+      // Nostalgia uses logical colortex0..15. This renderer currently has
+      // eight physical MRT attachments; explicitly bind the unsupported higher
+      // logical slots to a neutral texture instead of leaving their sampler
+      // uniforms at the default texture unit (which accidentally aliases
+      // colortex0 and can corrupt later passes).
+      for (let index = 0; index < 16; index += 1) {
         const location = gl.getUniformLocation(program, 'colortex' + index);
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
-        gl.bindTexture(gl.TEXTURE_2D, textureHandles[index] ?? this.getTextureHandle(this.neutralTexture));
+        const texture = index < textureHandles.length
+          ? textureHandles[index]
+          : this.getTextureHandle(this.neutralTexture);
+        gl.bindTexture(gl.TEXTURE_2D, texture ?? this.getTextureHandle(this.neutralTexture));
         gl.uniform1i(location, textureUnit++);
       }
 
