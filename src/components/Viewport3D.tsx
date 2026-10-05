@@ -21,6 +21,7 @@ import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
 import { ShaderPackRuntime } from '../shaderpack/ShaderPackRuntime';
 import { ShaderFinalPass } from '../shaderpack/ShaderFinalPass';
+import { ShaderGBufferPass } from '../shaderpack/ShaderGBufferPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -117,6 +118,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     const shaderRuntime = new ShaderPackRuntime(renderer, { debug: graphicsRef.current.debugMode });
     const shaderFinalPass = new ShaderFinalPass(renderer, shaderRuntime);
+    const shaderGBufferPass = new ShaderGBufferPass(renderer, shaderRuntime);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = graphics.shadows;
@@ -268,15 +270,36 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.player.model.setLightTint(steveLight);
       }
 
-      // Render through the active shader pack when its real final pass is available.
-      // Otherwise retain the normal Three.js renderer as a safe fallback.
+      // Real shader-pack pipeline, currently at:
+      //   gbuffers_terrain -> colortex0/1/2 + depthtex0 -> final -> screen
+      // Keep the vanilla renderer as a safe fallback until the next pass is
+      // available or a shader stage fails on the current GPU.
       const renderStart = performance.now();
-      const shaderRendered = shaderRuntime.isLoaded && shaderFinalPass.render(
-        scene,
-        camera,
-        renderer.domElement.width,
-        renderer.domElement.height
-      );
+      let shaderRendered = false;
+
+      if (shaderRuntime.isLoaded && engine.voxelWorld) {
+        const lightDir = envManager.minecraftSky.getSunDirection();
+        shaderGBufferPass.render(
+          scene,
+          camera,
+          engine.voxelWorld,
+          renderer.domElement.width,
+          renderer.domElement.height,
+          frameCount,
+          Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000,
+          lightDir
+        );
+
+        const gbufferColor = shaderGBufferPass.colorTexture;
+        if (gbufferColor) {
+          shaderRendered = shaderFinalPass.renderTexture(
+            gbufferColor,
+            renderer.domElement.width,
+            renderer.domElement.height
+          );
+        }
+      }
+
       if (!shaderRendered) renderer.render(scene, camera);
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
@@ -315,6 +338,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
+      shaderGBufferPass.resize(renderer.domElement.width, renderer.domElement.height);
+      shaderFinalPass.resize(renderer.domElement.width, renderer.domElement.height);
     };
 
     window.addEventListener('resize', handleResize);
@@ -323,6 +348,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       isDisposed = true;
       unsubscribePacks?.();
       unsubscribeShaders();
+      shaderGBufferPass.dispose();
+      shaderFinalPass.dispose();
       shaderRuntime.dispose();
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
