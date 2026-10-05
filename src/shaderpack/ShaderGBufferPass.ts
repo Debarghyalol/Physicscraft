@@ -45,7 +45,7 @@ export class ShaderGBufferPass {
   }
 
   public get colorTexture(): THREE.Texture | null {
-    return this.framebuffers.getTexture(0);
+    return this.framebuffers.getTexture(0, 'read');
   }
 
   public get depthTexture(): THREE.DepthTexture | null {
@@ -53,7 +53,7 @@ export class ShaderGBufferPass {
   }
 
   public resize(width: number, height: number): void {
-    this.framebuffers.resize(width, height, 8);
+    this.framebuffers.resize(width, height, 8, { pingPong: true, depth: true });
   }
 
   public render(
