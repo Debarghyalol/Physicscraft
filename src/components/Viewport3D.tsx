@@ -18,6 +18,8 @@ import { GraphicsSettings } from './SettingsModal';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
+import { shaderPacks } from '../shaderpack/ShaderPackManager';
+import { ShaderPackRuntime } from '../shaderpack/ShaderPackRuntime';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -111,6 +113,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     // 2. WebGL Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const shaderRuntime = new ShaderPackRuntime(renderer, { debug: graphicsRef.current.debugMode });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = graphics.shadows;
@@ -132,6 +135,38 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     let isDisposed = false;
     const steveLight = new THREE.Color();
+
+    // Shader-pack runtime stage 1: compile/link the imported pack programs and
+    // retain them for the later framebuffer/pass stages. Rendering remains on
+    // the existing Three.js path until the G-buffer runtime is enabled.
+    let shaderLoadGeneration = 0;
+    const reloadShaderRuntime = async () => {
+      const generation = ++shaderLoadGeneration;
+      const active = shaderPacks.getActive();
+      if (!active) {
+        shaderRuntime.dispose();
+        if (graphicsRef.current.debugMode) {
+          console.info('[ShaderPipeline] No shader pack active; using vanilla renderer');
+        }
+        return;
+      }
+
+      try {
+        await shaderRuntime.load(active.id, 'world0');
+        if (generation !== shaderLoadGeneration || isDisposed) return;
+        if (graphicsRef.current.debugMode) {
+          console.info('[ShaderPipeline] Program catalog:', shaderRuntime.getProgramNames());
+        }
+      } catch (error) {
+        if (generation !== shaderLoadGeneration || isDisposed) return;
+        console.error('[ShaderPipeline] Failed to load shader runtime:', error);
+        shaderRuntime.dispose();
+      }
+    };
+    const unsubscribeShaders = shaderPacks.subscribe(() => {
+      void reloadShaderRuntime();
+    });
+    void reloadShaderRuntime();
     let unsubscribePacks: (() => void) | null = null;
     engine.initialize().then(() => {
       if (isDisposed) return;
@@ -263,6 +298,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return () => {
       isDisposed = true;
       unsubscribePacks?.();
+      unsubscribeShaders();
+      shaderRuntime.dispose();
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
       envManager.dispose();
