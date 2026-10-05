@@ -246,26 +246,20 @@ export function translateProgram(input: TranslateInput): TranslateResult {
     re.lastIndex = 0;
   }
 
-  // WebGL2 maps fragment output location N to drawBuffers[N].
-  // Iris/OptiFine's RENDERTARGETS list instead names physical attachments.
-  // Rewrite explicit output locations so a shader writing location 0 to
-  // RENDERTARGETS: 4 actually writes COLOR_ATTACHMENT4.
-  if (!isVertex && drawBuffers && drawBuffers.length > 0) {
-    const logicalToPhysical = (index: number): number => {
-      if (index === 8) return 0;
-      if (index === 10) return 1;
-      if (index === 11) return 2;
-      if (index === 15) return 3;
-      return index;
-    };
+  // Iris does NOT use shader-declared fragment-output locations as physical
+  // render-target indices. Its LayoutTransformer normalizes fragment outputs
+  // to consecutive locations (0, 1, 2, ...) in declaration order. The
+  // RENDERTARGETS/DRAWBUFFERS directive then maps those logical output slots
+  // to physical colortex attachments.
+  //
+  // This also fixes shader packs that contain multiple explicit output
+  // declarations with conflicting source locations. Iris normalizes those
+  // declarations before linking instead of allowing the conflict through.
+  if (!isVertex) {
+    let nextOutputLocation = 0;
     src = src.replace(
-      /layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*out\b/g,
-      (_match, locationText: string) => {
-        const location = Number(locationText);
-        const physical = drawBuffers[location];
-        if (!Number.isFinite(physical)) return _match;
-        return `layout(location = ${logicalToPhysical(physical)}) out`;
-      },
+      /layout\s*\([^)]*\)\s*out\b/g,
+      () => `layout(location = ${nextOutputLocation++}) out`,
     );
   }
 
