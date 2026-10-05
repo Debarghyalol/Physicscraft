@@ -204,7 +204,7 @@ export class ShaderFullscreenPass {
 
   private getSampledColorAttachments(fragmentSource: string): number[] {
     const indices = new Set<number>();
-    const pattern = /uniform\\s+sampler2D\\s+colortex(\\d+)\\b/g;
+    const pattern = /uniform\s+sampler2D\s+colortex(\d+)\b/g;
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(fragmentSource)) !== null) {
       indices.add(Number(match[1]));
