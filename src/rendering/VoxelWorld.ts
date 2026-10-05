@@ -1371,7 +1371,7 @@ export class VoxelWorld {
                 mb.normal[o * 3] = FACE_NORMALS[f][0];
                 mb.normal[o * 3 + 1] = FACE_NORMALS[f][1];
                 mb.normal[o * 3 + 2] = FACE_NORMALS[f][2];
-                const shade = SHADE_LINEAR[f * 4 + aoLevel];
+                const shade = SHADE_LINEAR[f * 4 + aoLevel;
                 mb.col[o * 3] = shade;
                 mb.col[o * 3 + 1] = shade;
                 mb.col[o * 3 + 2] = shade;
@@ -1418,8 +1418,8 @@ export class VoxelWorld {
     if (!mesh) {
       mesh = new THREE.Mesh(geometry, trans ? this.transparentMaterial : this.material);
       mesh.matrixAutoUpdate = false;
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       mesh.frustumCulled = true;
       if (trans) mesh.renderOrder = 1;
       mesh.userData = { isVoxelChunk: !trans, isVoxelChunkTrans: trans, cx: col.cx, cz: col.cz, sy };

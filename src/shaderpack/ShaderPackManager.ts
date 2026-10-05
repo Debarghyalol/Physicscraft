@@ -172,6 +172,24 @@ class ShaderPackManagerImpl {
     return this.readFiles(p.blob);
   }
 
+
+  /** Load a binary asset from the active shader-pack archive (PNG, raw texture, etc.). */
+  async loadAsset(id: string, relativePath: string): Promise<Blob | null> {
+    const p = this.packs.find((x) => x.id === id);
+    if (!p) throw new Error('pack not found');
+    const zip = await JSZip.loadAsync(p.blob);
+    let root: string | null = null;
+    zip.forEach((path) => {
+      const m = /^(.*?)shaders\\/.exec(path);
+      if (m && (root === null || m[1].length < root.length)) root = m[1];
+    });
+    if (root === null) throw new Error('Not a shader pack: no "shaders/" folder found');
+    const entry = zip.file(`${root}shaders/${relativePath.replace(/^\\/+/, '')}`);
+    if (!entry) return null;
+    const bytes = await entry.async('uint8array');
+    return new Blob([bytes]);
+  }
+
   /**
    * Translate and compile every program of one dimension with the given GL context and
    * report which ones the GPU driver accepts. Used by the "Check compatibility" button.

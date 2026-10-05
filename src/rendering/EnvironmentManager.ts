@@ -103,6 +103,14 @@ export class EnvironmentManager {
     this.applySettings(this.currentSettings);
   }
 
+  public getShadowMap(): THREE.Texture | null {
+    return this.sunLight.shadow.map?.texture ?? null;
+  }
+
+  public getShadowCamera(): THREE.Camera {
+    return this.sunLight.shadow.camera;
+  }
+
   public setPreset(preset: SkyPreset) {
     const config = SKY_PRESETS[preset] || SKY_PRESETS.daylight;
     this.applySettings(config);

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import { ShaderPackRuntime } from './ShaderPackRuntime';
+import { ShaderFramebufferManager } from './ShaderFramebufferManager';
 import { VoxelWorld } from '../rendering/VoxelWorld';
 
 /**
@@ -18,7 +19,7 @@ export class ShaderGBufferPass {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly runtime: ShaderPackRuntime;
 
-  private target: THREE.WebGLRenderTarget | null = null;
+  private readonly framebuffers: ShaderFramebufferManager;
   private material: THREE.RawShaderMaterial | null = null;
   private materialKey = '';
 
@@ -29,6 +30,7 @@ export class ShaderGBufferPass {
   constructor(renderer: THREE.WebGLRenderer, runtime: ShaderPackRuntime) {
     this.renderer = renderer;
     this.runtime = runtime;
+    this.framebuffers = new ShaderFramebufferManager(renderer);
 
     this.flatNormalTexture = this.makeTexture(new Uint8Array([128, 128, 255, 255]));
     this.blackTexture = this.makeTexture(new Uint8Array([0, 0, 0, 255]));
@@ -38,46 +40,20 @@ export class ShaderGBufferPass {
     this.noiseTexture = this.makeTexture(new Uint8Array([127, 127, 127, 255]));
   }
 
+  public get framebufferManager(): ShaderFramebufferManager {
+    return this.framebuffers;
+  }
+
   public get colorTexture(): THREE.Texture | null {
-    return this.target?.textures[0] ?? null;
+    return this.framebuffers.getTexture(0, 'read');
   }
 
   public get depthTexture(): THREE.DepthTexture | null {
-    return this.target?.depthTexture ?? null;
+    return this.framebuffers.depthTexture;
   }
 
   public resize(width: number, height: number): void {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-
-    if (!this.target) {
-      const depth = new THREE.DepthTexture(w, h);
-      depth.name = 'ShaderPackDepthtex0';
-      depth.type = THREE.UnsignedIntType;
-      depth.format = THREE.DepthFormat;
-
-      this.target = new THREE.WebGLRenderTarget(w, h, {
-        count: 3,
-        depthBuffer: true,
-        stencilBuffer: false,
-        depthTexture: depth,
-        generateMipmaps: false,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
-        wrapS: THREE.ClampToEdgeWrapping,
-        wrapT: THREE.ClampToEdgeWrapping,
-      });
-
-      for (const texture of this.target.textures) {
-        texture.name = `ShaderPackColortex${this.target.textures.indexOf(texture)}`;
-        texture.colorSpace = THREE.NoColorSpace;
-      }
-      return;
-    }
-
-    if (this.target.width !== w || this.target.height !== h) {
-      this.target.setSize(w, h);
-    }
+    this.framebuffers.resize(width, height, 8, { pingPong: true, depth: true });
   }
 
   public render(
@@ -94,8 +70,6 @@ export class ShaderGBufferPass {
     if (!definition) return false;
 
     this.resize(width, height);
-    if (!this.target) return false;
-
     this.ensureMaterial(definition, voxelWorld);
 
     const uniforms = this.material!.uniforms;
@@ -149,7 +123,7 @@ export class ShaderGBufferPass {
 
     try {
       scene.overrideMaterial = this.material;
-      this.renderer.setRenderTarget(this.target);
+      this.renderer.setRenderTarget(this.framebuffers.target);
       this.renderer.clear(true, true, true);
       this.renderer.render(scene, camera);
     } finally {
@@ -165,8 +139,7 @@ export class ShaderGBufferPass {
   public dispose(): void {
     this.material?.dispose();
     this.material = null;
-    this.target?.dispose();
-    this.target = null;
+    this.framebuffers.dispose();
     this.flatNormalTexture.dispose();
     this.blackTexture.dispose();
     this.noiseTexture.dispose();

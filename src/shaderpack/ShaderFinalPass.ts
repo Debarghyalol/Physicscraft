@@ -79,7 +79,11 @@ export class ShaderFinalPass {
       return false;
     }
 
-    this.drawFinal(program, textureHandle, Math.max(1, Math.floor(width)), Math.max(1, Math.floor(height)));
+    // Always use the actual WebGL drawing buffer dimensions for the default framebuffer.
+    // The logical CSS size can differ from the physical buffer on mobile/high-DPI displays.
+    const drawingBufferWidth = Math.max(1, this.gl.drawingBufferWidth);
+    const drawingBufferHeight = Math.max(1, this.gl.drawingBufferHeight);
+    this.drawFinal(program, textureHandle, drawingBufferWidth, drawingBufferHeight);
     this.renderer.resetState();
     return true;
   }
@@ -153,7 +157,7 @@ export class ShaderFinalPass {
     const gl = this.gl;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, width, height);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.useProgram(program);
 
     gl.disable(gl.DEPTH_TEST);
@@ -171,9 +175,11 @@ export class ShaderFinalPass {
     const hideGUI = gl.getUniformLocation(program, 'hideGUI');
 
     if (colortex0) gl.uniform1i(colortex0, 0);
-    if (viewSize) gl.uniform2f(viewSize, width, height);
-    if (pixelSize) gl.uniform2f(pixelSize, 1 / width, 1 / height);
-    if (aspectRatio) gl.uniform1f(aspectRatio, width / height);
+    const actualWidth = Math.max(1, gl.drawingBufferWidth);
+    const actualHeight = Math.max(1, gl.drawingBufferHeight);
+    if (viewSize) gl.uniform2f(viewSize, actualWidth, actualHeight);
+    if (pixelSize) gl.uniform2f(pixelSize, 1 / actualWidth, 1 / actualHeight);
+    if (aspectRatio) gl.uniform1f(aspectRatio, actualWidth / actualHeight);
     if (hideGUI) gl.uniform1i(hideGUI, 0);
 
     // The default framebuffer uses BACK; COLOR_ATTACHMENT0 is only valid
