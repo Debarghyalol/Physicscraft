@@ -1371,7 +1371,7 @@ export class VoxelWorld {
                 mb.normal[o * 3] = FACE_NORMALS[f][0];
                 mb.normal[o * 3 + 1] = FACE_NORMALS[f][1];
                 mb.normal[o * 3 + 2] = FACE_NORMALS[f][2];
-                const shade = SHADE_LINEAR[f * 4 + aoLevel;
+                const shade = SHADE_LINEAR[f * 4 + aoLevel];
                 mb.col[o * 3] = shade;
                 mb.col[o * 3 + 1] = shade;
                 mb.col[o * 3 + 2] = shade;
