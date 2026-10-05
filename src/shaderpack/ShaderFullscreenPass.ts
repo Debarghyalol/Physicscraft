@@ -56,7 +56,9 @@ export class ShaderFullscreenPass {
 
     const previousTarget = this.renderer.getRenderTarget();
     const gl = this.gl;
-    const textureHandles = readTarget.textures.map((texture) => this.getTextureHandle(texture));
+    const textureHandles = Array.from({ length: 16 }, (_, logicalIndex) =>
+      this.getTextureHandle(this.framebuffers.getTexture(logicalIndex, 'read') ?? this.neutralTexture)
+    );
     const depthTexture = this.framebuffers.depthTexture;
     const depthHandle = depthTexture ? this.getTextureHandle(depthTexture) : null;
     let textureUnit = 0;
@@ -195,8 +197,19 @@ export class ShaderFullscreenPass {
 
   private resolveOutputBuffers(definition: ShaderPassDefinition): number[] {
     const count = this.framebuffers.attachmentCountValue;
-    return (definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0])
+    const logical = definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0];
+    return [...new Set(logical.map((index) => this.framebuffers.logicalToPhysicalAttachment(index)))]
       .filter((index) => index >= 0 && index < count);
+  }
+
+  private getSampledColorAttachments(fragmentSource: string): number[] {
+    const indices = new Set<number>();
+    const pattern = /uniform\\s+sampler2D\\s+colortex(\\d+)\\b/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(fragmentSource)) !== null) {
+      indices.add(Number(match[1]));
+    }
+    return [...indices];
   }
 
   private setMatrixUniform(program: WebGLProgram, name: string, value: THREE.Matrix4): void {
