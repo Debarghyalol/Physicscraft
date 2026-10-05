@@ -52,7 +52,14 @@ export class ShaderFullscreenPass {
     // Never sample from a color attachment that is simultaneously attached
     // for drawing. Copy the complete read set into the write set first, then
     // swap only after the pass has finished.
-    this.framebuffers.prepareWriteTarget(new Set(outputBuffers));
+    const sampledLogicalAttachments = this.getSampledColorAttachments(definition.fragmentSource);
+    const outputSet = new Set(outputBuffers);
+    const copyPhysicalAttachments = new Set(
+      sampledLogicalAttachments
+        .map((index) => this.framebuffers.logicalToPhysicalAttachment(index))
+        .filter((index) => !outputSet.has(index))
+    );
+    this.framebuffers.prepareWriteTarget(copyPhysicalAttachments);
 
     const previousTarget = this.renderer.getRenderTarget();
     const gl = this.gl;
