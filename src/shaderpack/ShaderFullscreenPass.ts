@@ -399,7 +399,6 @@ export class ShaderFullscreenPass {
 
     for (const [name, value] of [
       ['aspectRatio', w / h],
-      ['worldTime', worldTime],
       ['rainStrength', 0],
       ['wetness', 0],
     ] as Array<[string, number]>) {
@@ -407,6 +406,15 @@ export class ShaderFullscreenPass {
       if (!location) continue;
       gl.uniform1f(location, value);
       if (!check(name, 'uniform1f')) return;
+    }
+
+    // Nostalgia declares worldTime as an integer in its prepare/composite
+    // programs. Using uniform1f on an integer uniform generates GL_INVALID_OPERATION
+    // (1282) on WebGL2.
+    const worldTimeLocation = gl.getUniformLocation(program, 'worldTime');
+    if (worldTimeLocation) {
+      gl.uniform1i(worldTimeLocation, Math.floor(worldTime));
+      if (!check('worldTime', 'uniform1i')) return;
     }
 
     const frame = gl.getUniformLocation(program, 'frameCounter');
