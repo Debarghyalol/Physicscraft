@@ -334,7 +334,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const orderedPasses = (prefix: 'prepare' | 'deferred' | 'composite') =>
           shaderRuntime
             .getProgramNames()
-            .filter((name) => new RegExp('^' + prefix + '(?:\\d+)?
+            .filter((name) => new RegExp('^' + prefix + '(?:\\d+)?$').test(name))
             .sort((a, b) => {
               const ai = a === prefix ? 0 : Number(a.slice(prefix.length));
               const bi = b === prefix ? 0 : Number(b.slice(prefix.length));
