@@ -94,6 +94,10 @@ export class ShaderFullscreenPass {
       return false;
     }
     const gl = this.gl;
+
+    // Remove stale errors so diagnostics below identify this pass only.
+    while (gl.getError() !== gl.NO_ERROR) {}
+
     const textureHandles = Array.from({ length: 16 }, (_, logicalIndex) =>
       this.getTextureHandle(this.framebuffers.getTexture(logicalIndex, highOutputs.length > 0 ? 'read' : 'read') ?? this.neutralTexture)
     );
@@ -120,6 +124,16 @@ export class ShaderFullscreenPass {
       gl.disable(gl.BLEND);
       gl.disable(gl.SCISSOR_TEST);
       gl.drawBuffers(outputBuffers.map((index) => gl.COLOR_ATTACHMENT0 + index));
+      const drawBuffersError = gl.getError();
+      if (drawBuffersError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after drawBuffers:', name, drawBuffersError, {
+          logicalOutputs,
+          outputBuffers,
+          maxDrawBuffers: gl.getParameter(gl.MAX_DRAW_BUFFERS),
+          maxColorAttachments: gl.getParameter(gl.MAX_COLOR_ATTACHMENTS),
+        });
+        return false;
+      }
 
       // Nostalgia uses logical colortex0..15. This renderer currently has
       // eight physical MRT attachments; explicitly bind the unsupported higher
