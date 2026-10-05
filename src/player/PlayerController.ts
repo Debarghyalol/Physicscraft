@@ -204,7 +204,12 @@ export class PlayerController {
     const yResult = this.moveAlongAxis(nextX, nextY, nextZ, dy, 1);
     nextY = yResult.position;
     if (yResult.collided) {
-      if (newVy < 0) this.isGrounded = true;
+      if (newVy < 0) {
+        this.isGrounded = true;
+        if (startVy < -5) {
+          soundManager.playLanding(-startVy);
+        }
+      }
       newVy = 0;
     } else if (!this.isFlying) {
       this.isGrounded = this.checkGrounded(nextX, nextY, nextZ);
@@ -221,7 +226,7 @@ export class PlayerController {
 
     // Footsteps sound
     if (this.currentSpeed > 1.2 && this.isGrounded && !this.isFlying) {
-      soundManager.playFootstep('grass');
+      soundManager.playFootstep(this.getSoundMaterial(this.getGroundVoxelType()));
     }
 
     // 4. Sync 3D Player Model
@@ -265,6 +270,28 @@ export class PlayerController {
 
   private isSolidBlock(x: number, y: number, z: number): boolean {
     return this.voxelWorld.getVoxel(x, y, z) !== VoxelType.AIR;
+  }
+
+  private getSoundMaterial(voxelType: VoxelType): 'grass' | 'stone' | 'wood' | 'sand' {
+    switch (voxelType) {
+      case VoxelType.WOOD:
+        return 'wood';
+      case VoxelType.SAND:
+        return 'sand';
+      case VoxelType.GRASS:
+      case VoxelType.DIRT:
+      case VoxelType.LEAVES:
+        return 'grass';
+      case VoxelType.STONE:
+      case VoxelType.BEDROCK:
+      case VoxelType.GLASS:
+      case VoxelType.COBBLESTONE:
+      case VoxelType.GOLD:
+      case VoxelType.GLOWSTONE:
+      case VoxelType.TNT:
+      default:
+        return 'stone';
+    }
   }
 
   private moveAlongAxis(
@@ -360,6 +387,25 @@ export class PlayerController {
     }
 
     return { position: resolved, collided };
+  }
+
+  private getGroundVoxelType(): VoxelType {
+    const hw = PlayerController.PLAYER_HALF_WIDTH - 0.03;
+    const by = Math.floor(this.position.y - PlayerController.PLAYER_HALF_HEIGHT - 0.01);
+
+    const minX = Math.floor(this.position.x - hw);
+    const maxX = Math.floor(this.position.x + hw);
+    const minZ = Math.floor(this.position.z - hw);
+    const maxZ = Math.floor(this.position.z + hw);
+
+    for (let bx = minX; bx <= maxX; bx++) {
+      for (let bz = minZ; bz <= maxZ; bz++) {
+        const voxel = this.voxelWorld.getVoxel(bx, by, bz);
+        if (voxel !== VoxelType.AIR) return voxel;
+      }
+    }
+
+    return VoxelType.GRASS;
   }
 
   private checkGrounded(x: number, y: number, z: number): boolean {
@@ -487,7 +533,7 @@ export class PlayerController {
     if (hit && hit.voxelType !== VoxelType.BEDROCK) {
       this.voxelWorld.setVoxel(hit.blockX, hit.blockY, hit.blockZ, VoxelType.AIR);
       this.onBlockBroken?.(hit.blockX, hit.blockY, hit.blockZ, hit.voxelType);
-      soundManager.playBlockBreak(hit.voxelType === VoxelType.GRASS ? 'grass' : 'stone');
+      soundManager.playBlockBreak(this.getSoundMaterial(hit.voxelType));
       return true;
     }
     return false;
@@ -539,7 +585,7 @@ export class PlayerController {
       }
 
       this.voxelWorld.setVoxel(placeX, placeY, placeZ, this.selectedVoxel);
-      soundManager.playBlockPlace(this.selectedVoxel === VoxelType.GRASS ? 'grass' : 'stone');
+      soundManager.playBlockPlace(this.getSoundMaterial(this.selectedVoxel));
       return true;
     }
     return false;
