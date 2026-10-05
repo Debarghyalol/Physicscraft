@@ -692,10 +692,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         <button
           type="button"
           className="ui-touch-interactive mcpe-action-btn absolute top-3 right-3 z-40 w-12 h-12 flex items-center justify-center text-white text-xl font-bold shadow-2xl"
-          onTouchStart={(e) => {
-            e.stopPropagation();
-            onToggleInventory();
-          }}
           onClick={(e) => {
             e.stopPropagation();
             onToggleInventory();
