@@ -62,6 +62,9 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, his
     <div className="absolute inset-0 z-40 pointer-events-none select-none text-white font-mono text-[11px] leading-[15px] drop-shadow-[1px_1px_1px_rgba(0,0,0,0.95)]">
       <div className="absolute top-12 left-2 max-w-[390px]">
         <div className="text-white/90 mb-0.5">Physicscraft Debug (F3)</div>
+        <button type="button" className="pointer-events-auto inline-block mt-1 mb-2 rounded border border-white/30 bg-black/80 px-2 py-1 text-[10px] text-white hover:bg-white/15" onClick={() => onCopyShaderErrors?.()}>
+          Copy Shader Errors{shaderDiagnostics.length > 0 ? ` (${shaderDiagnostics.length})` : ''}
+        </button>
         <Metric
           label="XYZ"
           value={sample.playerPos
@@ -80,11 +83,6 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, his
         <Metric label="Geometries" value={sample.geometries} />
         <Metric label="Textures" value={sample.textures} />
         <Metric label="JS heap" value={sample.jsHeapMb == null ? 'unavailable' : fmt(sample.jsHeapMb) + ' MB'} />
-        {onCopyShaderErrors && (
-          <button type="button" className="pointer-events-auto mt-2 rounded border border-white/30 bg-black/70 px-2 py-1 text-[10px] text-white hover:bg-white/15" onClick={onCopyShaderErrors}>
-            Copy Shader Errors
-          </button>
-        )}
       </div>
 
       <div className="absolute top-2 right-2 text-right max-w-[210px]">
