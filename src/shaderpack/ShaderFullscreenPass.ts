@@ -300,12 +300,16 @@ export class ShaderFullscreenPass {
 
   private buildDrawBufferList(outputBuffers: number[]): number[] {
     const gl = this.gl;
-    // outputBuffers contains physical attachments for fragment output
-    // locations 0..N-1. Do not pad the array to the highest attachment:
-    // for RENDERTARGETS: 4, layout(location = 0) must map to
-    // COLOR_ATTACHMENT4, i.e. [COLOR_ATTACHMENT4], not
+    // WebGL2 drawBuffers[i] corresponds to fragment output location i.
+    // The translator remaps that output location to the physical attachment,
+    // so RENDERTARGETS: 4 becomes:
     // [NONE, NONE, NONE, NONE, COLOR_ATTACHMENT4].
-    return outputBuffers.map((slot) => gl.COLOR_ATTACHMENT0 + slot);
+    const highest = Math.max(...outputBuffers);
+    const list: number[] = [];
+    for (let slot = 0; slot <= highest; slot += 1) {
+      list.push(outputBuffers.includes(slot) ? gl.COLOR_ATTACHMENT0 + slot : gl.NONE);
+    }
+    return list;
   }
 
   private resolveOutputBuffers(definition: ShaderPassDefinition): number[] {
