@@ -208,7 +208,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         envManager.update(delta, playerPos);
         const skyDim = 1 - envManager.minecraftSky.getDaylight();
         engine.voxelWorld.setSkyDim(skyDim);
-        engine.voxelWorld.setLightTint(envManager.getWarmTint());
+        // Keep voxel base colors neutral. Moonlight tint is applied only to the sky-light
+        // channel in VoxelWorld's shader; tinting the whole material made surfaces look bright.
         // Steve is lit by the flood-fill light at his position (caves are dark, glowstone lights him up)
         engine.voxelWorld.getLightColorAt(playerPos.x, playerPos.y + 1.0, playerPos.z, skyDim, steveLight);
         steveLight.multiply(envManager.getWarmTint());
@@ -393,6 +394,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onActionMine={handleActionMine}
         onActionPlace={handleActionPlace}
         onToggleViewMode={onToggleViewMode}
+        onToggleInventory={() => setInventoryOpen((open) => !open)}
         isFlying={isFlying}
         viewMode={viewMode}
         selectedVoxel={selectedVoxel}
