@@ -29,12 +29,13 @@ export class ShaderPackRuntime {
   private gl: WebGL2RenderingContext;
   private programs = new Map<string, WebGLProgram>();
   private definitions = new Map<string, ShaderPassDefinition>();
+  private diagnostics: string[] = [];
   private debug: boolean;
   private packId: string | null = null;
   private dimension: string | null = null;
 
   constructor(renderer: THREE.WebGLRenderer, options: ShaderRuntimeOptions = {}) {
-    this.gl = renderer.getContext();
+    this.gl = renderer.getContext() as WebGL2RenderingContext;
     this.debug = !!options.debug;
   }
 
@@ -54,6 +55,10 @@ export class ShaderPackRuntime {
     return this.programs.get(name);
   }
 
+  public getDiagnostics(): string[] {
+    return [...this.diagnostics];
+  }
+
   /**
    * Load one shader-pack dimension and create persistent WebGL programs.
    *
@@ -62,6 +67,7 @@ export class ShaderPackRuntime {
    */
   public async load(packId: string, dimension: string): Promise<void> {
     this.dispose();
+    this.diagnostics = [];
 
     const { files } = await shaderPacks.loadFiles(packId);
     const entries = this.discoverPrograms(files, dimension);
@@ -69,7 +75,8 @@ export class ShaderPackRuntime {
     this.log(`Loading ${packId} / ${dimension}: ${entries.size} programs`);
 
     for (const [name, entry] of [...entries].sort(([a], [b]) => a.localeCompare(b))) {
-      const vertex = translateProgram({
+      try {
+        const vertex = translateProgram({
         files,
         entry: entry.vsh!,
         stage: 'vertex',
@@ -80,10 +87,10 @@ export class ShaderPackRuntime {
         stage: 'fragment',
       });
 
-      const program = this.createProgram(name, vertex.source, fragment.source);
-      const drawBuffers = fragment.drawBuffers ?? vertex.drawBuffers;
+        const program = this.createProgram(name, vertex.source, fragment.source);
+        const drawBuffers = fragment.drawBuffers ?? vertex.drawBuffers;
 
-      this.definitions.set(name, {
+        this.definitions.set(name, {
         name,
         vertexEntry: entry.vsh!,
         fragmentEntry: entry.fsh!,
@@ -93,13 +100,16 @@ export class ShaderPackRuntime {
         vertexBuiltins: vertex.usedBuiltins,
         fragmentBuiltins: fragment.usedBuiltins,
         warnings: [...vertex.warnings, ...fragment.warnings],
-      });
-      this.programs.set(name, program);
+        });
+        this.programs.set(name, program);
 
-      if (this.debug) {
-        this.log(
-          `PASS ${name}: program=${program} outputs=${drawBuffers?.join(',') ?? 'default'}`
-        );
+        if (this.debug) {
+          this.log(`PASS ${name}: program=${program} outputs=${drawBuffers?.join(',') ?? 'default'}`);
+        }
+      } catch (error) {
+        const message = this.errorToString(error);
+        this.diagnostics.push(`[ShaderPipeline] PASS ${name} failed\n${message}`);
+        throw error;
       }
     }
 
@@ -183,6 +193,12 @@ export class ShaderPackRuntime {
     this.definitions.clear();
     this.packId = null;
     this.dimension = null;
+  }
+
+  private errorToString(error: unknown): string {
+    if (error instanceof Error) return error.stack || error.message;
+    if (typeof error === 'string') return error;
+    try { return JSON.stringify(error, null, 2); } catch { return String(error); }
   }
 
   private log(message: string): void {
