@@ -248,6 +248,49 @@ export class ShaderFullscreenPass {
         return false;
       }
 
+      // WebGL validates sampler completeness at draw time. Validate every
+      // texture unit actually used by this program before drawArrays so a mobile
+      // driver cannot collapse the real cause into a generic 1282.
+      for (let unit = 0; unit < textureUnit; unit += 1) {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        const boundTexture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+        if (!boundTexture) {
+          console.error('[ShaderPipeline] Missing 2D texture on sampler unit:', name, {
+            unit,
+            textureUnitsUsed: textureUnit,
+          });
+          return false;
+        }
+        const minFilter = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER);
+        const magFilter = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER);
+        const wrapS = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S);
+        const wrapT = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T);
+        const widthValue = gl.getTexLevelParameter(gl.TEXTURE_2D, 0, gl.TEXTURE_WIDTH);
+        const heightValue = gl.getTexLevelParameter(gl.TEXTURE_2D, 0, gl.TEXTURE_HEIGHT);
+        const textureError = gl.getError();
+        if (textureError !== gl.NO_ERROR) {
+          console.error('[ShaderPipeline] Invalid sampler texture before draw:', name, textureError, {
+            unit,
+            minFilter,
+            magFilter,
+            wrapS,
+            wrapT,
+            width: widthValue,
+            height: heightValue,
+          });
+          return false;
+        }
+        if (widthValue <= 0 || heightValue <= 0) {
+          console.error('[ShaderPipeline] Incomplete sampler texture before draw:', name, {
+            unit,
+            width: widthValue,
+            height: heightValue,
+            minFilter,
+          });
+          return false;
+        }
+      }
+
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       const drawError = gl.getError();
       gl.bindVertexArray(null);
