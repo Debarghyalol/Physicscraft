@@ -281,16 +281,17 @@ export class PlayerController {
       case VoxelType.DIRT:
       case VoxelType.LEAVES:
         return 'grass';
+      case VoxelType.GLASS:
+        return 'glass';
       case VoxelType.STONE:
       case VoxelType.BEDROCK:
-      case VoxelType.GLASS:
-      case VoxelType.GLOWSTONE:
-        return 'glass';
       case VoxelType.COBBLESTONE:
+      case VoxelType.GLOWSTONE:
       case VoxelType.GOLD:
       case VoxelType.TNT:
       default:
         return 'stone';
+
     }
   }
 
