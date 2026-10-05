@@ -24,7 +24,9 @@ OPACITY[VoxelType.LEAVES] = 1;
 const EMISSION = new Uint8Array(256);
 EMISSION[VoxelType.GLOWSTONE] = 15;
 /** Sky light removed at midnight (vanilla: up to 11; a bit less here so nights stay playable). */
-const SKY_DIM_LEVELS = 8;
+// Vanilla's effective night sky light is 4: 15 - 11 = 4.
+// The stored flood-fill sky light remains 15; this is the visual/gameplay subtraction.
+const SKY_DIM_LEVELS = 11;
 
 const DIR_X = [1, -1, 0, 0, 0, 0];
 const DIR_Y = [0, 0, 1, -1, 0, 0];
@@ -481,6 +483,14 @@ export class VoxelWorld {
       c.fillRect(ox + 11, oy + 10, 2, 2);
     });
 
+    // 14,0: Jukebox fallback texture (custom resource packs override this)
+    drawTile(14, 0, (c, ox, oy) => {
+      c.fillStyle = '#6b4b2b'; c.fillRect(ox, oy, 16, 16);
+      c.fillStyle = '#8a6337'; c.fillRect(ox, oy, 16, 3);
+      c.fillStyle = '#3d2a18'; c.fillRect(ox + 3, oy + 5, 10, 7);
+      c.fillStyle = '#b58a52'; c.fillRect(ox + 4, oy + 6, 8, 5);
+    });
+
     // 13,0: Glowstone
     drawTile(13, 0, (c, ox, oy) => {
       c.fillStyle = '#b8863a';
@@ -531,6 +541,8 @@ export class VoxelWorld {
           `#include <common>
           uniform float uSkyDim;
           varying vec2 vLight;
+          // Vanilla's non-linear light curve. At sky light 15 this is 1.0;
+          // at the effective midnight sky light 4 it is much dimmer.
           float mcLight(float l) { float f = 1.0 - l; return (1.0 - f) / (f * 3.0 + 1.0); }`
         )
         .replace(
@@ -538,8 +550,13 @@ export class VoxelWorld {
           `#include <color_fragment>
           {
             float skyL = max(vLight.x - uSkyDim * (${(SKY_DIM_LEVELS / 15).toFixed(5)}), 0.0);
-            vec3 skyCol = mix(vec3(1.0), vec3(0.62, 0.72, 1.0), uSkyDim);
-            vec3 lc = max(vec3(mcLight(skyL)) * skyCol, vec3(mcLight(vLight.y)) * vec3(1.0, 0.82, 0.6));
+            // Minecraft's moonlit sky light is visibly blue while daytime sky light is white.
+            vec3 skyCol = mix(vec3(1.0), vec3(0.52, 0.68, 1.0), smoothstep(0.05, 1.0, uSkyDim));
+            // Moonlight tint affects only actual sky light. Block light remains warm/neutral,
+            // so caves do not inherit a fake blue ambient fill.
+            vec3 skyLight = vec3(mcLight(skyL)) * skyCol;
+            vec3 blockLight = vec3(mcLight(vLight.y)) * vec3(1.0, 0.82, 0.6);
+            vec3 lc = max(skyLight, blockLight);
             lc = max(lc, vec3(0.03, 0.032, 0.045));
             diffuseColor.rgb *= pow(lc, vec3(2.2));
           }`
@@ -610,6 +627,7 @@ export class VoxelWorld {
       [11, ['block/gold_block'], null],
       [12, ['block/glass'], null],
       [13, ['block/glowstone'], null],
+      [14, ['block/jukebox'], null],
     ];
 
     const loaded = await Promise.all(
@@ -716,6 +734,8 @@ export class VoxelWorld {
         return [12, 0];
       case VoxelType.GLOWSTONE:
         return [13, 0];
+      case VoxelType.JUKEBOX:
+        return [14, 0];
       default:
         return [0, 0];
     }
@@ -1684,12 +1704,13 @@ export class VoxelWorld {
     const b = Math.max(0, this.getLightCh(1, fx, fy, fz));
     const curve = (l: number) => {
       const f = 1 - l;
-      return (1 - f) / (f * 3 + 1);
+      return 1 - f / (f * 3 + 1);
     };
     const sky = curve(Math.max(s / 15 - skyDim * (SKY_DIM_LEVELS / 15), 0));
     const blk = curve(b / 15);
-    let r = Math.max(sky * (1 - 0.4 * skyDim), blk);
-    let g = Math.max(sky * (1 - 0.3 * skyDim), blk * 0.82);
+    const moonTint = THREE.MathUtils.smoothstep(skyDim, 0.05, 1.0);
+    let r = Math.max(sky * THREE.MathUtils.lerp(1.0, 0.52, moonTint), blk);
+    let g = Math.max(sky * THREE.MathUtils.lerp(1.0, 0.68, moonTint), blk * 0.82);
     let bl = Math.max(sky, blk * 0.6);
     const floor = 0.03;
     r = Math.pow(Math.max(r, floor), 2.2);

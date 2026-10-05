@@ -11,6 +11,8 @@ import {
 } from '../types/physics';
 import { EnvironmentManager } from '../rendering/EnvironmentManager';
 import { PlayerControlsOverlay } from './PlayerControlsOverlay';
+import { InventoryOverlay } from './InventoryOverlay';
+import { MusicDiscId } from '../audio/MusicEngine';
 import { PlayerInput } from '../player/PlayerController';
 import { GraphicsSettings } from './SettingsModal';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
@@ -47,6 +49,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   // Camera & Player State (Starts in FIRST PERSON as requested)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const [selectedVoxel, setSelectedVoxel] = useState<VoxelType>(VoxelType.STONE);
+  const [selectedDisc, setSelectedDisc] = useState<MusicDiscId>('13');
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [currentFps, setCurrentFps] = useState(60);
   const fpsRef = useRef(60);
   const [isFlying, setIsFlying] = useState(false);
@@ -204,7 +208,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         envManager.update(delta, playerPos);
         const skyDim = 1 - envManager.minecraftSky.getDaylight();
         engine.voxelWorld.setSkyDim(skyDim);
-        engine.voxelWorld.setLightTint(envManager.getWarmTint());
+        // Keep voxel base colors neutral. Moonlight tint is applied only to the sky-light
+        // channel in VoxelWorld's shader; tinting the whole material made surfaces look bright.
         // Steve is lit by the flood-fill light at his position (caves are dark, glowstone lights him up)
         engine.voxelWorld.getLightColorAt(playerPos.x, playerPos.y + 1.0, playerPos.z, skyDim, steveLight);
         steveLight.multiply(envManager.getWarmTint());
@@ -269,6 +274,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     };
   }, [onEngineReady, onUpdateStats]);
 
+  useEffect(() => {
+    const handleInventoryKey = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.key.toLowerCase() === 'e') {
+        event.preventDefault();
+        setInventoryOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', handleInventoryKey);
+    return () => window.removeEventListener('keydown', handleInventoryKey);
+  }, []);
+
   // Handle Input from Joystick / Keyboard
   const handleInputUpdate = useCallback((input: PlayerInput) => {
     playerInputRef.current = input;
@@ -300,10 +317,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     (coords?: { x: number; y: number }) => {
       if (engineRef.current?.player) {
         engineRef.current.player.selectedVoxel = selectedVoxel;
+        engineRef.current.player.selectedDisc = selectedDisc;
         engineRef.current.player.placeBlock(coords);
       }
     },
-    [selectedVoxel]
+    [selectedVoxel, selectedDisc]
   );
 
   // Action: Select Voxel
@@ -312,6 +330,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     if (engineRef.current?.player) {
       engineRef.current.player.selectedVoxel = v;
     }
+  }, []);
+
+  const handleSelectDisc = useCallback((disc: MusicDiscId) => {
+    setSelectedDisc(disc);
+    if (engineRef.current?.player) engineRef.current.player.selectedDisc = disc;
   }, []);
 
   // Update touch aim coordinates on player
@@ -350,6 +373,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       {/* 3D WebGL Canvas */}
       <div ref={containerRef} className="w-full h-full cursor-crosshair" />
 
+      <InventoryOverlay
+        open={inventoryOpen}
+        onClose={() => setInventoryOpen(false)}
+        selectedVoxel={selectedVoxel}
+        onSelectVoxel={handleSelectVoxel}
+        selectedDisc={selectedDisc}
+        onSelectDisc={handleSelectDisc}
+      />
+
       {/* Cinematic Viewport Frame Mode Overlay (Brackets + HUD) */}
       <ViewportFrameOverlay enabled={graphics.viewportFrameMode} fps={currentFps} />
       <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} />
@@ -362,6 +394,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onActionMine={handleActionMine}
         onActionPlace={handleActionPlace}
         onToggleViewMode={onToggleViewMode}
+        onToggleInventory={() => setInventoryOpen((open) => !open)}
         isFlying={isFlying}
         viewMode={viewMode}
         selectedVoxel={selectedVoxel}

@@ -319,6 +319,13 @@ class ResourcePackManagerImpl {
     set('--rp-hotbar', hotbar);
     set('--rp-hotbar-selection', selection);
 
+    // Inventory GUI: prefer a classic inventory.png when a custom pack provides one;
+    // otherwise use modern 26.2 sprite assets (slot / slot_frame).
+    const inv = await this.getTexture(['gui/container/inventory']);
+    const invSlot = await this.getTexture(['gui/sprites/container/slot', 'gui/sprites/widget/slot_frame']);
+    set('--rp-inventory-container', inv ? inv.toDataURL() : null);
+    set('--rp-inventory-slot', invSlot ? invSlot.toDataURL() : null);
+
     const bg = await this.getTexture(['gui/options_background', 'block/dirt']);
     set('--rp-options-bg', bg ? bg.toDataURL() : null);
   }

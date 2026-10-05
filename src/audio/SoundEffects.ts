@@ -8,6 +8,150 @@ class SoundSynthesizer {
   private isMuted: boolean = false;
   private lastSoundTimes: Map<string, number> = new Map();
   private isUnlocked: boolean = false;
+  private soundPools: Map<string, HTMLAudioElement[]> = new Map();
+  private busyAudio: Set<HTMLAudioElement> = new Set();
+
+  // Keep the Minecraft asset hierarchy intact: dig/* is used for block break/place,
+  // while step/* is used for footsteps. UI button clicks use random/click_stereo.
+  private readonly soundAssets: Record<string, string[]> = {
+    dig_grass: Object.values(import.meta.glob('../../sounds/dig/grass*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    dig_stone: Object.values(import.meta.glob('../../sounds/dig/stone*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    dig_wood: Object.values(import.meta.glob('../../sounds/dig/wood*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    dig_glass: Object.values(import.meta.glob('../../sounds/random/glass*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+
+    dig_sand: Object.values(import.meta.glob('../../sounds/dig/sand*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+
+    // Modern Minecraft block.place events. Placement must not reuse glass break/shatter audio.
+    place_grass: Object.values(import.meta.glob('../../sounds/block/grass/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_stone: Object.values(import.meta.glob('../../sounds/block/stone/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_wood: Object.values(import.meta.glob('../../sounds/block/wood/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_sand: Object.values(import.meta.glob('../../sounds/block/sand/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_glass: Object.values(import.meta.glob('../../sounds/block/glass/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+
+    step_grass: Object.values(import.meta.glob('../../sounds/step/grass*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_stone: Object.values(import.meta.glob('../../sounds/step/stone*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_wood: Object.values(import.meta.glob('../../sounds/step/wood*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_glass: Object.values(import.meta.glob('../../sounds/random/glass*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_sand: Object.values(import.meta.glob('../../sounds/step/sand*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+
+    ui_button: Object.values(import.meta.glob('../../sounds/random/click_stereo.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    fall_small: Object.values(import.meta.glob('../../sounds/damage/fallsmall.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    fall_big: Object.values(import.meta.glob('../../sounds/damage/fallbig.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+  };
+
+  private playAsset(url: string, volume: number = 1.0, playbackRate: number = 1.0): void {
+    if (this.isMuted || typeof window === 'undefined') return;
+
+    let pool = this.soundPools.get(url);
+    if (!pool) {
+      pool = [];
+      this.soundPools.set(url, pool);
+    }
+
+    // `paused` can still be true for a short time after play() is called. Track
+    // pending playback explicitly so rapid block placement cannot reuse and restart
+    // the same element before the browser has actually started it.
+    let audio = pool.find((candidate) => !this.busyAudio.has(candidate) && (candidate.paused || candidate.ended));
+    if (!audio) {
+      audio = new Audio(url);
+      audio.preload = 'auto';
+      pool.push(audio);
+      audio.addEventListener('ended', () => this.busyAudio.delete(audio!), { once: false });
+      audio.addEventListener('error', () => this.busyAudio.delete(audio!), { once: false });
+    }
+
+    this.busyAudio.add(audio);
+    audio.volume = Math.min(Math.max(volume, 0), 1);
+    audio.playbackRate = playbackRate;
+    audio.currentTime = 0;
+    void audio.play().catch(() => {
+      this.busyAudio.delete(audio!);
+    });
+  }
+
+  private playAssetGroup(
+    group: keyof typeof this.soundAssets,
+    volume: number,
+    minRate: number,
+    maxRate: number
+  ): void {
+    const variants = this.soundAssets[group];
+    if (!variants.length) return;
+    const url = variants[Math.floor(Math.random() * variants.length)];
+    this.playAsset(url, volume, minRate + Math.random() * (maxRate - minRate));
+  }
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -283,111 +427,94 @@ class SoundSynthesizer {
     this.triggerHaptic([70, 30, 90]);
   }
 
-  public playBlockBreak(type: string = 'stone') {
+  public playBlockBreak(type: 'grass' | 'stone' | 'wood' | 'sand' | 'glass' = 'stone') {
     if (this.isMuted) return;
-    this.initCtx();
-    if (!this.ctx) return;
 
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    const filter = this.ctx.createBiquadFilter();
+    const now = performance.now();
+    const last = this.lastSoundTimes.get('block-break') || 0;
+    if (now - last < 70) return;
+    this.lastSoundTimes.set('block-break', now);
 
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(type === 'grass' ? 600 : 380, audioTime);
-    filter.Q.setValueAtTime(2.0, audioTime);
+    const group = type === 'grass'
+      ? 'dig_grass'
+      : type === 'wood'
+        ? 'dig_wood'
+        : type === 'sand'
+          ? 'dig_sand'
+          : type === 'glass'
+            ? 'dig_glass'
+            : 'dig_stone';
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(140 + Math.random() * 40, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(30, audioTime + 0.08);
-
-    gain.gain.setValueAtTime(0.5, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.09);
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.1);
+    this.playAssetGroup(group, 0.72, 0.96, 1.04);
     this.triggerHaptic(20);
   }
 
-  public playBlockPlace(type: string = 'stone') {
+  public playBlockPlace(type: 'grass' | 'stone' | 'wood' | 'sand' | 'glass' = 'stone') {
     if (this.isMuted) return;
-    this.initCtx();
-    if (!this.ctx) return;
 
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    const now = performance.now();
+    const last = this.lastSoundTimes.get('block-place') || 0;
+    if (now - last < 70) return;
+    this.lastSoundTimes.set('block-place', now);
 
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(type === 'grass' ? 260 : 180, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(80, audioTime + 0.06);
+    // Minecraft has a distinct block.place event. Do not play the break/dig sound here.
+    const group = type === 'grass'
+      ? 'place_grass'
+      : type === 'wood'
+        ? 'place_wood'
+        : type === 'sand'
+          ? 'place_sand'
+          : type === 'glass'
+            ? 'place_glass'
+            : 'place_stone';
 
-    gain.gain.setValueAtTime(0.45, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.07);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.08);
+    this.playAssetGroup(group, 0.8, 0.96, 1.04);
     this.triggerHaptic(15);
   }
 
-  public playFootstep(material: string = 'grass') {
+
+  public playFootstep(material: 'grass' | 'stone' | 'wood' | 'sand' | 'glass' = 'grass') {
     if (this.isMuted) return;
+
     const now = performance.now();
     const last = this.lastSoundTimes.get('step') || 0;
     if (now - last < 260) return;
     this.lastSoundTimes.set('step', now);
 
-    this.initCtx();
-    if (!this.ctx) return;
+    const group = material === 'grass'
+      ? 'step_grass'
+      : material === 'wood'
+        ? 'step_wood'
+        : material === 'sand'
+          ? 'step_sand'
+          : material === 'glass'
+            ? 'step_glass'
+            : 'step_stone';
 
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    this.playAssetGroup(group, 0.15, 0.94, 1.06);
+  }
 
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(material === 'grass' ? 140 : 180, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(45, audioTime + 0.05);
+  public playUiClick() {
+    if (this.isMuted) return;
+    this.playAssetGroup('ui_button', 0.35, 0.98, 1.02);
+  }
 
-    gain.gain.setValueAtTime(0.18, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.06);
+  public playLanding(fallSpeed: number) {
+    if (this.isMuted || fallSpeed < 5) return;
 
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.07);
+    if (fallSpeed >= 12) {
+      this.playAsset(this.soundAssets.fall_big[0], 0.55, 0.95 + Math.random() * 0.08);
+    } else {
+      this.playAsset(this.soundAssets.fall_small[0], 0.5, 0.96 + Math.random() * 0.08);
+    }
+    this.triggerHaptic(Math.min(35, Math.round(fallSpeed * 1.5)));
   }
 
   public playJump() {
-    if (this.isMuted) return;
-    this.initCtx();
-    if (!this.ctx) return;
-
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(120, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(260, audioTime + 0.1);
-
-    gain.gain.setValueAtTime(0.25, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.11);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.12);
-    this.triggerHaptic(15);
+    // Minecraft Java 1.21.x has no entity.player.jump sound event.
+    // Keep this method as a no-op so callers cannot reintroduce a procedural jump sound.
   }
+
 
   public playPop(isLift: boolean = true) {
     if (this.isMuted) return;
