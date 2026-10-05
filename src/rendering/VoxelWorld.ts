@@ -24,7 +24,9 @@ OPACITY[VoxelType.LEAVES] = 1;
 const EMISSION = new Uint8Array(256);
 EMISSION[VoxelType.GLOWSTONE] = 15;
 /** Sky light removed at midnight (vanilla: up to 11; a bit less here so nights stay playable). */
-const SKY_DIM_LEVELS = 8;
+// Vanilla's effective night sky light is 4: 15 - 11 = 4.
+// The stored flood-fill sky light remains 15; this is the visual/gameplay subtraction.
+const SKY_DIM_LEVELS = 11;
 
 const DIR_X = [1, -1, 0, 0, 0, 0];
 const DIR_Y = [0, 0, 1, -1, 0, 0];
@@ -531,14 +533,17 @@ export class VoxelWorld {
           `#include <common>
           uniform float uSkyDim;
           varying vec2 vLight;
-          float mcLight(float l) { float f = 1.0 - l; return (1.0 - f) / (f * 3.0 + 1.0); }`
+          // Vanilla's non-linear light curve: 1 - f / (3f + 1), not f's inverse.
+          // The previous expression made high light levels dramatically too dark.
+          float mcLight(float l) { float f = 1.0 - l; return 1.0 - f / (f * 3.0 + 1.0); }`
         )
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>
           {
             float skyL = max(vLight.x - uSkyDim * (${(SKY_DIM_LEVELS / 15).toFixed(5)}), 0.0);
-            vec3 skyCol = mix(vec3(1.0), vec3(0.62, 0.72, 1.0), uSkyDim);
+            // Minecraft's moonlit sky light is visibly blue while daytime sky light is white.
+            vec3 skyCol = mix(vec3(1.0), vec3(0.52, 0.68, 1.0), smoothstep(0.05, 1.0, uSkyDim));
             vec3 lc = max(vec3(mcLight(skyL)) * skyCol, vec3(mcLight(vLight.y)) * vec3(1.0, 0.82, 0.6));
             lc = max(lc, vec3(0.03, 0.032, 0.045));
             diffuseColor.rgb *= pow(lc, vec3(2.2));
@@ -1684,12 +1689,13 @@ export class VoxelWorld {
     const b = Math.max(0, this.getLightCh(1, fx, fy, fz));
     const curve = (l: number) => {
       const f = 1 - l;
-      return (1 - f) / (f * 3 + 1);
+      return 1 - f / (f * 3 + 1);
     };
     const sky = curve(Math.max(s / 15 - skyDim * (SKY_DIM_LEVELS / 15), 0));
     const blk = curve(b / 15);
-    let r = Math.max(sky * (1 - 0.4 * skyDim), blk);
-    let g = Math.max(sky * (1 - 0.3 * skyDim), blk * 0.82);
+    const moonTint = THREE.MathUtils.smoothstep(skyDim, 0.05, 1.0);
+    let r = Math.max(sky * THREE.MathUtils.lerp(1.0, 0.52, moonTint), blk);
+    let g = Math.max(sky * THREE.MathUtils.lerp(1.0, 0.68, moonTint), blk * 0.82);
     let bl = Math.max(sky, blk * 0.6);
     const floor = 0.03;
     r = Math.pow(Math.max(r, floor), 2.2);
