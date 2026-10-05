@@ -108,14 +108,30 @@ export class ShaderPackRuntime {
         }
       } catch (error) {
         const message = this.errorToString(error);
-        this.diagnostics.push(`[ShaderPipeline] PASS ${name} failed\n${message}`);
-        throw error;
+        const diagnostic = `[ShaderPipeline] PASS ${name} failed\n${message}`;
+        this.diagnostics.push(diagnostic);
+        console.error(diagnostic);
+        // Keep loading the remaining passes so one broken program does not
+        // hide the diagnostics from every other shader in the pack.
       }
     }
 
-    this.packId = packId;
-    this.dimension = dimension;
-    this.log(`Loaded ${this.getProgramNames().length} executable programs`);
+    const loadedCount = this.getProgramNames().length;
+    const failedCount = this.diagnostics.length;
+
+    // A partially working pack is still useful for diagnostics and for later
+    // pipeline stages, so retain successfully compiled programs even when
+    // other passes failed.
+    if (loadedCount > 0) {
+      this.packId = packId;
+      this.dimension = dimension;
+    }
+
+    this.log(`Loaded ${loadedCount}/${entries.size} executable programs${failedCount > 0 ? `; ${failedCount} failed` : ''}`);
+
+    if (loadedCount === 0 && failedCount > 0) {
+      throw new Error(`No shader programs compiled successfully; ${failedCount} pass(es) failed`);
+    }
   }
 
   private discoverPrograms(

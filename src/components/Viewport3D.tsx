@@ -156,9 +156,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       try {
         await shaderRuntime.load(active.id, 'world0');
         if (generation !== shaderLoadGeneration || isDisposed) return;
-        setShaderDiagnostics([]);
+        const diagnostics = shaderRuntime.getDiagnostics();
+        setShaderDiagnostics(diagnostics);
         if (graphicsRef.current.debugMode) {
           console.info('[ShaderPipeline] Program catalog:', shaderRuntime.getProgramNames());
+          if (diagnostics.length > 0) {
+            console.warn(`[ShaderPipeline] ${diagnostics.length} pass(es) failed; successful programs remain loaded`);
+          }
         }
       } catch (error) {
         if (generation !== shaderLoadGeneration || isDisposed) return;
@@ -429,7 +433,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} shaderDiagnostics={shaderDiagnostics} onCopyShaderErrors={() => {
         const diagnostics = [...shaderDiagnostics, ...shaderPacks.getCompileDiagnostics()];
         const uniqueDiagnostics = [...new Set(diagnostics)];
-        const text = uniqueDiagnostics.join('\\n\\n') || '[ShaderPipeline] No shader runtime or compatibility errors captured.';
+        const text = uniqueDiagnostics.join('\\n\\n') || '[ShaderPipeline] No shader diagnostics captured.';
         void navigator.clipboard.writeText(text).then(() => console.info('[ShaderPipeline] Diagnostics copied to clipboard'));
       }} />
 
