@@ -48,7 +48,7 @@ export class ShaderFramebufferManager {
     return this.attachmentCount;
   }
 
-  public prepareWriteTarget(preserveIndices?: ReadonlySet<number>): void {
+  public prepareWriteTarget(copyIndices?: ReadonlySet<number>): void {
     if (!this.pingPongEnabled || !this.primary || !this.secondary) return;
     const read = this.readTarget;
     const write = this.writeTarget;
@@ -57,13 +57,16 @@ export class ShaderFramebufferManager {
     this.renderer.initRenderTarget(read);
     this.renderer.initRenderTarget(write);
 
-    for (let index = 0; index < this.attachmentCount; index += 1) {
-      // Attachments written by the current pass do not need to be copied: the
-      // fullscreen shader reads the old value from `read`, then overwrites the
-      // corresponding attachment on `write`. Only untouched attachments need
-      // their previous contents preserved.
-      if (preserveIndices?.has(index)) continue;
-      this.renderer.copyTextureToTexture(read.textures[index], write.textures[index]);
+    if (copyIndices) {
+      for (const index of copyIndices) {
+        if (index >= 0 && index < this.attachmentCount) {
+          this.renderer.copyTextureToTexture(read.textures[index], write.textures[index]);
+        }
+      }
+    } else {
+      for (let index = 0; index < this.attachmentCount; index += 1) {
+        this.renderer.copyTextureToTexture(read.textures[index], write.textures[index]);
+      }
     }
   }
 
