@@ -303,7 +303,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       if (shaderRuntime.isLoaded && engine.voxelWorld) {
         const lightDir = envManager.minecraftSky.getSunDirection();
-        shaderGBufferPass.render(
+        const gbufferRendered = shaderGBufferPass.render(
           scene,
           camera,
           engine.voxelWorld,
@@ -314,6 +314,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           lightDir
         );
 
+        // Never feed an uninitialized/cleared G-buffer into the rest of the
+        // shader chain. A missing terrain stage must fall back to the normal
+        // renderer instead of producing a solid clear-color screen.
         const shaderWorldTime = Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000;
         const shadowCamera = envManager.getShadowCamera();
         const shadowModelView = shadowCamera.matrixWorldInverse.clone();
@@ -343,28 +346,35 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
         // OptiFine/Iris executes the fullscreen stages in this order after the
         // terrain G-buffer: prepare -> deferred -> composite -> final.
-        for (const passName of [
-          ...orderedPasses('prepare'),
-          ...orderedPasses('deferred'),
-          ...orderedPasses('composite'),
-        ]) {
-          shaderFullscreenPass.render(
-            passName,
-            shaderWidth,
-            shaderHeight,
-            frameCount,
-            shaderWorldTime,
-            shadowResources,
-          );
-        }
+        if (gbufferRendered) {
+          let pipelineOk = true;
+          for (const passName of [
+            ...orderedPasses('prepare'),
+            ...orderedPasses('deferred'),
+            ...orderedPasses('composite'),
+          ]) {
+            if (!shaderFullscreenPass.render(
+              passName,
+              shaderWidth,
+              shaderHeight,
+              frameCount,
+              shaderWorldTime,
+              shadowResources,
+            )) {
+              console.warn('[ShaderPipeline] Pass failed at runtime:', passName);
+              pipelineOk = false;
+              break;
+            }
+          }
 
-        const gbufferColor = shaderGBufferPass.colorTexture;
-        if (gbufferColor) {
-          shaderRendered = shaderFinalPass.renderTexture(
-            gbufferColor,
-            shaderWidth,
-            shaderHeight
-          );
+          const gbufferColor = shaderGBufferPass.colorTexture;
+          if (pipelineOk && gbufferColor) {
+            shaderRendered = shaderFinalPass.renderTexture(
+              gbufferColor,
+              shaderWidth,
+              shaderHeight
+            );
+          }
         }
       }
 
