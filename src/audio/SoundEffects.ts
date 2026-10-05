@@ -41,6 +41,33 @@ class SoundSynthesizer {
       import: 'default',
     })) as string[],
 
+    // Modern Minecraft block.place events. Placement must not reuse glass break/shatter audio.
+    place_grass: Object.values(import.meta.glob('../../sounds/block/grass/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_stone: Object.values(import.meta.glob('../../sounds/block/stone/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_wood: Object.values(import.meta.glob('../../sounds/block/wood/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_sand: Object.values(import.meta.glob('../../sounds/block/sand/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    place_glass: Object.values(import.meta.glob('../../sounds/block/glass/place*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+
     step_grass: Object.values(import.meta.glob('../../sounds/step/grass*.ogg', {
       eager: true,
       query: '?url',
@@ -121,6 +148,7 @@ class SoundSynthesizer {
     maxRate: number
   ): void {
     const variants = this.soundAssets[group];
+    if (!variants.length) return;
     const url = variants[Math.floor(Math.random() * variants.length)];
     this.playAsset(url, volume, minRate + Math.random() * (maxRate - minRate));
   }
@@ -429,16 +457,16 @@ class SoundSynthesizer {
     if (now - last < 70) return;
     this.lastSoundTimes.set('block-place', now);
 
-    // Vanilla Java block.place reuses the material's dig/* sounds.
+    // Minecraft has a distinct block.place event. Do not play the break/dig sound here.
     const group = type === 'grass'
-      ? 'dig_grass'
+      ? 'place_grass'
       : type === 'wood'
-        ? 'dig_wood'
+        ? 'place_wood'
         : type === 'sand'
-          ? 'dig_sand'
+          ? 'place_sand'
           : type === 'glass'
-            ? 'dig_glass'
-            : 'dig_stone';
+            ? 'place_glass'
+            : 'place_stone';
 
     this.playAssetGroup(group, 0.8, 0.96, 1.04);
     this.triggerHaptic(15);
