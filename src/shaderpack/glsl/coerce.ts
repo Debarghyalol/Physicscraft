@@ -348,6 +348,7 @@ class Coercer {
     const isConst = quals.includes('const');
     const isUniformLike = quals.some((q) => q === 'uniform' || q === 'in' || q === 'out' || q === 'attribute' || q === 'varying');
     const parts: string[] = [];
+    const post: string[] = [];
     for (;;) {
       const name = this.next();
       let arr = '';
@@ -372,7 +373,14 @@ class Coercer {
         let init = this.parseAssign();
         init = this.coerce(init, fullType);
         const text = this.emitExpr(init);
-        if (global && !isConst && !isUniformLike && !this.isConstExpr(init)) {
+        if (!global && !isConst && init.k === 'call' && isArray(init.name ?? null) && init.args!.length > 0) {
+          // Some mobile drivers give an array constructor temporary no precision (error 50032),
+          // so fill local arrays element by element instead.
+          const n = init.args!.length;
+          if (arr === '[]') decl = `${name}[${n}]`;
+          else if (isArray(typeName) && /\[\]$/.test(typeName)) typeName = typeName.replace(/\[\]$/, `[${n}]`);
+          init.args!.forEach((a, i) => post.push(`${name}[${i}] = ${this.emitExpr(a)};`));
+        } else if (global && !isConst && !isUniformLike && !this.isConstExpr(init)) {
           // Non-constant global initializer: declare now, assign at the top of main().
           this.hoisted.push(`${name} = ${text};`);
         } else {
@@ -384,7 +392,7 @@ class Coercer {
       if (!this.eat(',')) break;
     }
     this.expect(';');
-    this.emit(`${qualStr}${typeName} ${parts.join(', ')};\n`);
+    this.emit(`${qualStr}${typeName} ${parts.join(', ')};\n${post.length ? post.join('\n') + '\n' : ''}`);
   }
 
   /** Explicit `highp` on numeric declarations: some mobile drivers refuse arrays without it. */
