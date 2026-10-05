@@ -207,17 +207,24 @@ export class ShaderFramebufferManager {
       depthTexture.format = THREE.DepthFormat;
     }
 
+    // Three.js r186 expects the depth texture to be attached after the
+    // WebGLRenderTarget has been constructed. Passing it through the
+    // constructor options hits the depthTexture setter before the target
+    // is fully initialized and can throw "reading 'renderTarget'".
     const target = new THREE.WebGLRenderTarget(width, height, {
       count,
       depthBuffer: depth,
       stencilBuffer: false,
-      depthTexture,
       generateMipmaps: false,
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
       wrapS: THREE.ClampToEdgeWrapping,
       wrapT: THREE.ClampToEdgeWrapping,
     });
+
+    if (depthTexture) {
+      target.depthTexture = depthTexture;
+    }
 
     target.texture.name = `ShaderPackColortex0-${label}`;
     for (let i = 0; i < target.textures.length; i += 1) {
