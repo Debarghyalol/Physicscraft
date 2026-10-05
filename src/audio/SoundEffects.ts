@@ -420,29 +420,6 @@ class SoundSynthesizer {
     this.triggerHaptic(15);
   }
 
-(type: string = 'stone') {
-    if (this.isMuted) return;
-    this.initCtx();
-    if (!this.ctx) return;
-
-    const audioTime = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(type === 'grass' ? 260 : 180, audioTime);
-    osc.frequency.exponentialRampToValueAtTime(80, audioTime + 0.06);
-
-    gain.gain.setValueAtTime(0.45, audioTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioTime + 0.07);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start(audioTime);
-    osc.stop(audioTime + 0.08);
-    this.triggerHaptic(15);
-  }
 
   public playFootstep(material: 'grass' | 'stone' | 'wood' | 'sand' = 'grass') {
     if (this.isMuted) return;
