@@ -33,21 +33,28 @@ export class ShaderFullscreenPass {
   public render(name: string, width: number, height: number, frameCounter: number, worldTime: number): boolean {
     const definition = this.runtime.getDefinition(name);
     const program = this.runtime.getProgram(name);
-    const target = this.framebuffers.target;
-    if (!definition || !program || !target) return false;
+    const readTarget = this.framebuffers.readTarget;
+    const writeTarget = this.framebuffers.writeTarget;
+    if (!definition || !program || !readTarget || !writeTarget) return false;
 
     this.ensureGeometry(program);
     const outputBuffers = this.resolveOutputBuffers(definition);
     if (outputBuffers.length === 0) return false;
 
+    // Never sample from a color attachment that is simultaneously attached
+    // for drawing. Copy the complete read set into the write set first, then
+    // swap only after the pass has finished.
+    this.framebuffers.prepareWriteTarget();
+
     const previousTarget = this.renderer.getRenderTarget();
     const gl = this.gl;
-    const textureHandles = target.textures.map((texture) => this.getTextureHandle(texture));
-    const depthHandle = target.depthTexture ? this.getTextureHandle(target.depthTexture) : null;
+    const textureHandles = readTarget.textures.map((texture) => this.getTextureHandle(texture));
+    const depthTexture = this.framebuffers.depthTexture;
+    const depthHandle = depthTexture ? this.getTextureHandle(depthTexture) : null;
     let textureUnit = 0;
 
     try {
-      this.renderer.setRenderTarget(target);
+      this.renderer.setRenderTarget(writeTarget);
       gl.viewport(0, 0, Math.max(1, Math.floor(width)), Math.max(1, Math.floor(height)));
       gl.useProgram(program);
       gl.disable(gl.DEPTH_TEST);
@@ -85,6 +92,8 @@ export class ShaderFullscreenPass {
       gl.bindVertexArray(this.vao);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
+
+      this.framebuffers.swap();
 
       for (let unit = 0; unit < textureUnit; unit += 1) {
         gl.activeTexture(gl.TEXTURE0 + unit);
@@ -157,7 +166,9 @@ export class ShaderFullscreenPass {
   }
 
   private resolveOutputBuffers(definition: ShaderPassDefinition): number[] {
-    return definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0];
+    const count = this.framebuffers.attachmentCountValue;
+    return (definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0])
+      .filter((index) => index >= 0 && index < count);
   }
 
   private setCommonUniforms(program: WebGLProgram, width: number, height: number, frameCounter: number, worldTime: number): void {
