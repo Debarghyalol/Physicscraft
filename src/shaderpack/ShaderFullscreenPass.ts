@@ -202,16 +202,40 @@ export class ShaderFullscreenPass {
 
       this.setCommonUniforms(program, width, height, frameCounter, worldTime);
 
+      const uniformError = gl.getError();
+      if (uniformError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after uniform setup:', name, uniformError, {
+          ...diagnosticContext(),
+          textureUnitsUsed: textureUnit,
+        });
+        return false;
+      }
+
+      if (!this.vao) {
+        console.error('[ShaderPipeline] Missing fullscreen VAO:', name);
+        return false;
+      }
+
       gl.bindVertexArray(this.vao);
+      const vaoError = gl.getError();
+      if (vaoError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after bindVertexArray:', name, vaoError);
+        gl.bindVertexArray(null);
+        return false;
+      }
+
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      const drawError = gl.getError();
       gl.bindVertexArray(null);
 
-      const glError = gl.getError();
-      if (glError !== gl.NO_ERROR) {
-        console.error('[ShaderPipeline] GL error after pass:', name, glError, {
+      if (drawError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after drawArrays:', name, drawError, {
+          ...diagnosticContext(),
           logicalOutputs,
           outputBuffers,
           highOutputs,
+          programLinked: gl.getProgramParameter(program, gl.LINK_STATUS),
+          vao: !!this.vao,
         });
         return false;
       }
