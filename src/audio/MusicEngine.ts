@@ -111,10 +111,10 @@ class MusicEngine {
   }
 
   private startMode(mode: MusicMode) {
-    this.mode = mode;
+    if (this.mode === mode && this.audio && !this.audio.paused) return;
 
+    this.mode = mode;
     if (this.muted) return;
-    if (this.audio && !this.audio.paused && this.mode === mode) return;
 
     const track = this.pickTrack(mode);
     if (track) this.startTrack(track);
