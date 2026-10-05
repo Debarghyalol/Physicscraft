@@ -3,6 +3,14 @@ import * as THREE from 'three';
 import { ShaderPackRuntime, ShaderPassDefinition } from './ShaderPackRuntime';
 import { ShaderFramebufferManager } from './ShaderFramebufferManager';
 
+export interface ShaderShadowResources {
+  texture: THREE.Texture | null;
+  modelView: THREE.Matrix4;
+  modelViewInverse: THREE.Matrix4;
+  projection: THREE.Matrix4;
+  projectionInverse: THREE.Matrix4;
+}
+
 export class ShaderFullscreenPass {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly runtime: ShaderPackRuntime;
@@ -30,7 +38,7 @@ export class ShaderFullscreenPass {
     this.neutralTexture.needsUpdate = true;
   }
 
-  public render(name: string, width: number, height: number, frameCounter: number, worldTime: number): boolean {
+  public render(name: string, width: number, height: number, frameCounter: number, worldTime: number, shadows: ShaderShadowResources | null = null): boolean {
     const definition = this.runtime.getDefinition(name);
     const program = this.runtime.getProgram(name);
     const readTarget = this.framebuffers.readTarget;
@@ -83,9 +91,20 @@ export class ShaderFullscreenPass {
         const location = gl.getUniformLocation(program, sampler);
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
-        const texture = sampler === 'noisetex' ? this.runtime.getTexture('noisetex') : null;
+        const texture =
+          sampler === 'noisetex' ? this.runtime.getTexture('noisetex') :
+          (sampler === 'shadowtex0' || sampler === 'shadowtex1' || sampler === 'shadowcolor0' || sampler === 'shadowcolor1')
+            ? shadows?.texture ?? null
+            : null;
         gl.bindTexture(gl.TEXTURE_2D, texture ? this.getTextureHandle(texture) : this.getTextureHandle(this.neutralTexture));
         gl.uniform1i(location, textureUnit++);
+      }
+
+      if (shadows) {
+        this.setMatrixUniform(program, 'shadowModelView', shadows.modelView);
+        this.setMatrixUniform(program, 'shadowModelViewInverse', shadows.modelViewInverse);
+        this.setMatrixUniform(program, 'shadowProjection', shadows.projection);
+        this.setMatrixUniform(program, 'shadowProjectionInverse', shadows.projectionInverse);
       }
 
       this.setCommonUniforms(program, width, height, frameCounter, worldTime);
@@ -170,6 +189,11 @@ export class ShaderFullscreenPass {
     const count = this.framebuffers.attachmentCountValue;
     return (definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0])
       .filter((index) => index >= 0 && index < count);
+  }
+
+  private setMatrixUniform(program: WebGLProgram, name: string, value: THREE.Matrix4): void {
+    const location = this.gl.getUniformLocation(program, name);
+    if (location) this.gl.uniformMatrix4fv(location, false, value.elements);
   }
 
   private setCommonUniforms(program: WebGLProgram, width: number, height: number, frameCounter: number, worldTime: number): void {
