@@ -104,7 +104,7 @@ export class MinecraftSky {
     };
 
     // 1. Sun (vanilla: additive, drawn at distance with fog disabled)
-    this.sunTexture = prep(loader.load('/textures/environment/sun.png'));
+    this.sunTexture = prep(loader.load('/textures/environment/celestial/sun.png'));
     this.sunMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(72, 72),
       new THREE.MeshBasicMaterial({
@@ -124,14 +124,14 @@ export class MinecraftSky {
 
     // 2. Moon + 8 phases (literal paths so the asset bundler can resolve them)
     const moonPaths = [
-      '/textures/environment/moon_phase_0.png',
-      '/textures/environment/moon_phase_1.png',
-      '/textures/environment/moon_phase_2.png',
-      '/textures/environment/moon_phase_3.png',
-      '/textures/environment/moon_phase_4.png',
-      '/textures/environment/moon_phase_5.png',
-      '/textures/environment/moon_phase_6.png',
-      '/textures/environment/moon_phase_7.png',
+      '/textures/environment/celestial/moon/full_moon.png',
+      '/textures/environment/celestial/moon/waning_gibbous.png',
+      '/textures/environment/celestial/moon/third_quarter.png',
+      '/textures/environment/celestial/moon/waning_crescent.png',
+      '/textures/environment/celestial/moon/new_moon.png',
+      '/textures/environment/celestial/moon/waxing_crescent.png',
+      '/textures/environment/celestial/moon/first_quarter.png',
+      '/textures/environment/celestial/moon/waxing_gibbous.png',
     ];
     this.moonTextures = moonPaths.map((p) => prep(loader.load(p)));
     this.moonMesh = new THREE.Mesh(
@@ -273,7 +273,7 @@ export class MinecraftSky {
     };
 
     // Sun
-    const sun = await resourcePacks.getTexture(['environment/sun']);
+    const sun = await resourcePacks.getTexture(['environment/celestial/sun']);
     const oldSun = this.sunTexture;
     this.sunTexture = sun ? mkTex(sun) : this.defaultSun;
     if (oldSun !== this.defaultSun && oldSun !== this.sunTexture) oldSun.dispose();
@@ -281,7 +281,7 @@ export class MinecraftSky {
     (this.sunMesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
 
     // Moon phases: vanilla sheet is 4 columns x 2 rows (phase 0..7, row-major)
-    const sheet = await resourcePacks.getTexture(['environment/moon_phases']);
+    const sheet = await resourcePacks.getTexture(['environment/celestial/moon']);
     for (const t of this.moonTextures) if (!this.defaultMoons.includes(t)) t.dispose();
     if (sheet) {
       const w = sheet.width / 4;
