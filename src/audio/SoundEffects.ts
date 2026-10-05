@@ -10,21 +10,22 @@ class SoundSynthesizer {
   private isUnlocked: boolean = false;
   private soundPools: Map<string, HTMLAudioElement[]> = new Map();
 
-  // Static URL imports keep these OGG files in Vite's production asset graph.
-  // This is important because the sound files live outside /public.
+  // Keep the Minecraft asset hierarchy intact: dig/* is used for block break/place,
+  // while step/* is used for footsteps. UI button clicks use random/click_stereo.
   private readonly soundAssets: Record<string, string[]> = {
-    grass: [
-      new URL('../../sounds/dig/grass1.ogg', import.meta.url).href,
-      new URL('../../sounds/dig/grass2.ogg', import.meta.url).href,
-      new URL('../../sounds/dig/grass3.ogg', import.meta.url).href,
-      new URL('../../sounds/dig/grass4.ogg', import.meta.url).href,
-    ],
-    stone: [
-      new URL('../../sounds/dig/stone1.ogg', import.meta.url).href,
-      new URL('../../sounds/dig/stone2.ogg', import.meta.url).href,
-      new URL('../../sounds/dig/stone3.ogg', import.meta.url).href,
-      new URL('../../sounds/dig/stone4.ogg', import.meta.url).href,
-    ],
+    dig_grass: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/grass${i + 1}.ogg`, import.meta.url).href),
+    dig_stone: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/stone${i + 1}.ogg`, import.meta.url).href),
+    dig_wood: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/wood${i + 1}.ogg`, import.meta.url).href),
+    dig_sand: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/sand${i + 1}.ogg`, import.meta.url).href),
+
+    step_grass: Array.from({ length: 6 }, (_, i) => new URL(`../../sounds/step/grass${i + 1}.ogg`, import.meta.url).href),
+    step_stone: Array.from({ length: 6 }, (_, i) => new URL(`../../sounds/step/stone${i + 1}.ogg`, import.meta.url).href),
+    step_wood: Array.from({ length: 6 }, (_, i) => new URL(`../../sounds/step/wood${i + 1}.ogg`, import.meta.url).href),
+    step_sand: Array.from({ length: 5 }, (_, i) => new URL(`../../sounds/step/sand${i + 1}.ogg`, import.meta.url).href),
+
+    ui_button: [new URL('../../sounds/random/click_stereo.ogg', import.meta.url).href],
+    fall_small: [new URL('../../sounds/damage/fallsmall.ogg', import.meta.url).href],
+    fall_big: [new URL('../../sounds/damage/fallbig.ogg', import.meta.url).href],
   };
 
   private playAsset(url: string, volume: number = 1.0, playbackRate: number = 1.0): void {
@@ -49,8 +50,13 @@ class SoundSynthesizer {
     void audio.play().catch(() => {});
   }
 
-  private playMaterialSound(material: 'grass' | 'stone', volume: number, minRate: number, maxRate: number): void {
-    const variants = this.soundAssets[material];
+  private playAssetGroup(
+    group: keyof typeof this.soundAssets,
+    volume: number,
+    minRate: number,
+    maxRate: number
+  ): void {
+    const variants = this.soundAssets[group];
     const url = variants[Math.floor(Math.random() * variants.length)];
     this.playAsset(url, volume, minRate + Math.random() * (maxRate - minRate));
   }
@@ -329,7 +335,7 @@ class SoundSynthesizer {
     this.triggerHaptic([70, 30, 90]);
   }
 
-  public playBlockBreak(type: string = 'stone') {
+  public playBlockBreak(type: 'grass' | 'stone' | 'wood' | 'sand' = 'stone') {
     if (this.isMuted) return;
 
     const now = performance.now();
@@ -337,12 +343,40 @@ class SoundSynthesizer {
     if (now - last < 70) return;
     this.lastSoundTimes.set('block-break', now);
 
-    const material = type === 'grass' ? 'grass' : 'stone';
-    this.playMaterialSound(material, 0.72, 0.96, 1.04);
+    const group = type === 'grass'
+      ? 'dig_grass'
+      : type === 'wood'
+        ? 'dig_wood'
+        : type === 'sand'
+          ? 'dig_sand'
+          : 'dig_stone';
+
+    this.playAssetGroup(group, 0.72, 0.96, 1.04);
     this.triggerHaptic(20);
   }
 
-  public playBlockPlace(type: string = 'stone') {
+  public playBlockPlace(type: 'grass' | 'stone' | 'wood' | 'sand' = 'stone') {
+    if (this.isMuted) return;
+
+    const now = performance.now();
+    const last = this.lastSoundTimes.get('block-place') || 0;
+    if (now - last < 70) return;
+    this.lastSoundTimes.set('block-place', now);
+
+    // Vanilla Java block.place reuses the material's dig/* sounds.
+    const group = type === 'grass'
+      ? 'dig_grass'
+      : type === 'wood'
+        ? 'dig_wood'
+        : type === 'sand'
+          ? 'dig_sand'
+          : 'dig_stone';
+
+    this.playAssetGroup(group, 0.8, 0.96, 1.04);
+    this.triggerHaptic(15);
+  }
+
+(type: string = 'stone') {
     if (this.isMuted) return;
     this.initCtx();
     if (!this.ctx) return;
@@ -366,17 +400,47 @@ class SoundSynthesizer {
     this.triggerHaptic(15);
   }
 
-  public playFootstep(material: string = 'grass') {
+  public playFootstep(material: 'grass' | 'stone' | 'wood' | 'sand' = 'grass') {
     if (this.isMuted) return;
+
     const now = performance.now();
     const last = this.lastSoundTimes.get('step') || 0;
     if (now - last < 260) return;
     this.lastSoundTimes.set('step', now);
 
-    this.playMaterialSound(material === 'grass' ? 'grass' : 'stone', 0.32, 0.94, 1.06);
+    const group = material === 'grass'
+      ? 'step_grass'
+      : material === 'wood'
+        ? 'step_wood'
+        : material === 'sand'
+          ? 'step_sand'
+          : 'step_stone';
+
+    this.playAssetGroup(group, 0.15, 0.94, 1.06);
+  }
+
+  public playUiClick() {
+    if (this.isMuted) return;
+    this.playAssetGroup('ui_button', 0.35, 0.98, 1.02);
+  }
+
+  public playLanding(fallSpeed: number) {
+    if (this.isMuted || fallSpeed < 5) return;
+
+    if (fallSpeed >= 12) {
+      this.playAsset(this.soundAssets.fall_big[0], 0.55, 0.95 + Math.random() * 0.08);
+    } else {
+      this.playAsset(this.soundAssets.fall_small[0], 0.5, 0.96 + Math.random() * 0.08);
+    }
+    this.triggerHaptic(Math.min(35, Math.round(fallSpeed * 1.5)));
   }
 
   public playJump() {
+    // Minecraft Java 1.21.x has no entity.player.jump sound event.
+    // Keep this method as a no-op so callers cannot reintroduce a procedural jump sound.
+  }
+
+() {
     if (this.isMuted) return;
     this.initCtx();
     if (!this.ctx) return;
