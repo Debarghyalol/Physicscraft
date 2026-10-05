@@ -21,6 +21,9 @@ export class ShaderFramebufferManager {
   private attachmentCount = 0;
   private pingPongEnabled = false;
   private readIndex = 0;
+  private extraPrimary: THREE.WebGLRenderTarget | null = null;
+  private extraSecondary: THREE.WebGLRenderTarget | null = null;
+  private extraReadIndex = 0;
 
   constructor(renderer: THREE.WebGLRenderer) {
     this.renderer = renderer;
@@ -36,6 +39,18 @@ export class ShaderFramebufferManager {
 
   public get writeTarget(): THREE.WebGLRenderTarget | null {
     return this.pingPongEnabled ? (this.readIndex === 0 ? this.secondary : this.primary) : this.primary;
+  }
+
+  public get extraReadTarget(): THREE.WebGLRenderTarget | null {
+    return this.extraReadIndex === 0 ? this.extraPrimary : this.extraSecondary;
+  }
+
+  public get extraWriteTarget(): THREE.WebGLRenderTarget | null {
+    return this.extraReadIndex === 0 ? this.extraSecondary : this.extraPrimary;
+  }
+
+  public get extraTexture(): THREE.Texture | null {
+    return null;
   }
 
   public get depthTexture(): THREE.DepthTexture | null {
@@ -88,6 +103,9 @@ export class ShaderFramebufferManager {
 
       this.primary = this.createTarget(w, h, count, depth, 'Primary');
       this.secondary = pingPong ? this.createTarget(w, h, count, depth, 'Secondary') : null;
+      this.extraPrimary = pingPong ? this.createTarget(w, h, 4, false, 'ExtraPrimary') : null;
+      this.extraSecondary = pingPong ? this.createTarget(w, h, 4, false, 'ExtraSecondary') : null;
+      this.extraReadIndex = 0;
       this.attachmentCount = count;
       this.pingPongEnabled = pingPong;
       this.readIndex = 0;
@@ -97,10 +115,17 @@ export class ShaderFramebufferManager {
     if (this.primary.width !== w || this.primary.height !== h) {
       this.primary.setSize(w, h);
       this.secondary?.setSize(w, h);
+      this.extraPrimary?.setSize(w, h);
+      this.extraSecondary?.setSize(w, h);
     }
   }
 
   public getTexture(index: number, target: 'read' | 'write' | 'primary' = 'primary'): THREE.Texture | null {
+    const extraSlot = this.logicalToExtraAttachment(index);
+    if (extraSlot >= 0) {
+      const selectedExtra = target === 'read' ? this.extraReadTarget : target === 'write' ? this.extraWriteTarget : this.extraPrimary;
+      return selectedExtra?.textures[extraSlot] ?? null;
+    }
     const physicalIndex = this.logicalToPhysicalAttachment(index);
     const selected =
       target === 'read' ? this.readTarget :
@@ -108,6 +133,18 @@ export class ShaderFramebufferManager {
       this.primary;
 
     return selected?.textures[physicalIndex] ?? null;
+  }
+
+  public logicalToExtraAttachment(index: number): number {
+    if (index === 8) return 0;
+    if (index === 10) return 1;
+    if (index === 11) return 2;
+    if (index === 15) return 3;
+    return -1;
+  }
+
+  public swapExtra(): void {
+    this.extraReadIndex = this.extraReadIndex === 0 ? 1 : 0;
   }
 
   public logicalToPhysicalAttachment(index: number): number {
@@ -153,6 +190,7 @@ export class ShaderFramebufferManager {
     this.attachmentCount = 0;
     this.pingPongEnabled = false;
     this.readIndex = 0;
+    this.extraReadIndex = 0;
   }
 
   private createTarget(
@@ -193,7 +231,11 @@ export class ShaderFramebufferManager {
   private disposeTargets(): void {
     this.primary?.dispose();
     this.secondary?.dispose();
+    this.extraPrimary?.dispose();
+    this.extraSecondary?.dispose();
     this.primary = null;
     this.secondary = null;
+    this.extraPrimary = null;
+    this.extraSecondary = null;
   }
 }
