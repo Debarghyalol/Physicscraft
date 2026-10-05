@@ -98,12 +98,23 @@ export class ShaderFramebufferManager {
   }
 
   public getTexture(index: number, target: 'read' | 'write' | 'primary' = 'primary'): THREE.Texture | null {
+    const physicalIndex = this.logicalToPhysicalAttachment(index);
     const selected =
       target === 'read' ? this.readTarget :
       target === 'write' ? this.writeTarget :
       this.primary;
 
-    return selected?.textures[index] ?? null;
+    return selected?.textures[physicalIndex] ?? null;
+  }
+
+  public logicalToPhysicalAttachment(index: number): number {
+    // Nostalgia uses a few logical buffers above WebGL's usual 8 color
+    // attachments. This pack never reads colortex6, so it can safely act as
+    // the storage slot for the transient colortex8/10 data; colortex11 uses
+    // slot 7. The mapping is stable across the deferred/composite chain.
+    if (index === 8 || index === 10) return 6;
+    if (index === 11) return 7;
+    return index;
   }
 
   public getColorTextures(target: 'read' | 'write' | 'primary' = 'primary'): THREE.Texture[] {
