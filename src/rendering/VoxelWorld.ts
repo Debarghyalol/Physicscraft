@@ -89,6 +89,7 @@ class MeshBuilder {
   uv: Float32Array;
   col: Float32Array;
   lit: Float32Array;
+  normal: Float32Array;
   idx: Uint32Array;
   cap: number; // capacity in faces
   vc = 0;
@@ -100,6 +101,7 @@ class MeshBuilder {
     this.uv = new Float32Array(cap * 8);
     this.col = new Float32Array(cap * 12);
     this.lit = new Float32Array(cap * 8);
+    this.normal = new Float32Array(cap * 12);
     this.idx = new Uint32Array(cap * 6);
   }
 
@@ -122,6 +124,7 @@ class MeshBuilder {
     this.uv = grow(this.uv, cap * 8);
     this.col = grow(this.col, cap * 12);
     this.lit = grow(this.lit, cap * 8);
+    this.normal = grow(this.normal, cap * 12);
     this.idx = grow(this.idx, cap * 6);
     this.cap = cap;
   }
@@ -130,8 +133,22 @@ class MeshBuilder {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos.slice(0, this.vc * 3), 3));
     g.setAttribute('uv', new THREE.BufferAttribute(this.uv.slice(0, this.vc * 2), 2));
-    g.setAttribute('color', new THREE.BufferAttribute(this.col.slice(0, this.vc * 3), 3));
-    g.setAttribute('aLight', new THREE.BufferAttribute(this.lit.slice(0, this.vc * 2), 2));
+    const color = new THREE.BufferAttribute(this.col.slice(0, this.vc * 3), 3);
+    const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+    const light = new THREE.BufferAttribute(this.lit.slice(0, this.vc * 2), 2);
+    const normal = new THREE.BufferAttribute(this.normal.slice(0, this.vc * 3), 3);
+    g.setAttribute('color', color);
+    g.setAttribute('aLight', light);
+    g.setAttribute('normal', normal);
+
+    // Shader-pack aliases. The Nostalgia terrain program uses Minecraft's
+    // legacy attribute names; keep the vanilla renderer's attributes intact
+    // and expose the same underlying buffers under the translated names.
+    g.setAttribute('iris_Vertex', g.getAttribute('position'));
+    g.setAttribute('iris_MultiTexCoord0', uv);
+    g.setAttribute('iris_MultiTexCoord1', light);
+    g.setAttribute('iris_Normal', normal);
+    g.setAttribute('iris_Color', color);
     const ind = this.idx.subarray(0, this.ic);
     g.setIndex(new THREE.BufferAttribute(this.vc <= 65535 ? Uint16Array.from(ind) : ind.slice(), 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), 14);
@@ -240,6 +257,11 @@ export class VoxelWorld {
   private atlasTexture!: THREE.CanvasTexture;
   private baseAtlasCanvas!: HTMLCanvasElement;
   public shaderUniforms: Record<string, { value: any }> | null = null;
+
+  /** Texture atlas used by voxel meshes; shader-pack G-buffers sample this as gcolor. */
+  public getAtlasTexture(): THREE.Texture {
+    return this.atlasTexture;
+  }
   private lightUniforms = { uSkyDim: { value: 0 } };
   public currentUnderground: number = 0.0;
 
@@ -1346,7 +1368,10 @@ export class VoxelWorld {
                 mb.pos[o * 3] = wx0 + lx + inf.px;
                 mb.pos[o * 3 + 1] = wy + inf.py;
                 mb.pos[o * 3 + 2] = wz0 + lz + inf.pz;
-                const shade = SHADE_LINEAR[f * 4 + aoLevel];
+                mb.normal[o * 3] = FACE_NORMALS[f][0];
+                mb.normal[o * 3 + 1] = FACE_NORMALS[f][1];
+                mb.normal[o * 3 + 2] = FACE_NORMALS[f][2];
+                const shade = SHADE_LINEAR[f * 4 + aoLevel;
                 mb.col[o * 3] = shade;
                 mb.col[o * 3 + 1] = shade;
                 mb.col[o * 3 + 2] = shade;
