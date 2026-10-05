@@ -83,7 +83,8 @@ export class ShaderFullscreenPass {
         const location = gl.getUniformLocation(program, sampler);
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
-        gl.bindTexture(gl.TEXTURE_2D, this.getTextureHandle(this.neutralTexture));
+        const texture = sampler === 'noisetex' ? this.runtime.getTexture('noisetex') : null;
+        gl.bindTexture(gl.TEXTURE_2D, texture ? this.getTextureHandle(texture) : this.getTextureHandle(this.neutralTexture));
         gl.uniform1i(location, textureUnit++);
       }
 
