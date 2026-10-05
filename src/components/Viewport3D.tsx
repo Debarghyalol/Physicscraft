@@ -646,7 +646,228 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const orderedPasses = (prefix: 'prepare' | 'deferred' | 'composite') =>
           shaderRuntime
             .getProgramNames()
-            .filter((name) => new RegExp('^' + prefix + '(?:\\\\d+)?$').test(name))
+            .filter((name) => new RegExp('^' + prefix + '(?:\\d+)?.test(name))
+            .sort((a, b) => {
+              const ai = a === prefix ? 0 : Number(a.slice(prefix.length));
+              const bi = b === prefix ? 0 : Number(b.slice(prefix.length));
+              return ai - bi;
+            });
+
+        // OptiFine/Iris executes the fullscreen stages in this order after the
+        // terrain G-buffer: prepare -> deferred -> composite -> final.
+        for (const passName of [
+          ...orderedPasses('prepare'),
+          ...orderedPasses('deferred'),
+          ...orderedPasses('composite'),
+        ]) {
+          shaderFullscreenPass.render(
+            passName,
+            shaderWidth,
+            shaderHeight,
+            frameCount,
+            shaderWorldTime,
+          );
+        }
+
+        const gbufferColor = shaderGBufferPass.colorTexture;
+        if (gbufferColor) {
+          shaderRendered = shaderFinalPass.renderTexture(
+            gbufferColor,
+            shaderWidth,
+            shaderHeight
+          );
+        }
+      }
+
+      if (!shaderRendered) renderer.render(scene, camera);
+      const renderEnd = performance.now();
+      if (graphicsRef.current.debugMode) {
+        const info = renderer.info;
+        const memory = memoryInfo();
+        const meshes = scene.children.reduce((count, object) => count + (object instanceof THREE.Mesh ? 1 : 0), 0);
+        const sample: DebugFrameSample = {
+          frameMs: renderEnd - frameStart,
+          physicsMs: physicsEnd - physicsStart,
+          renderMs: renderEnd - renderStart,
+          streamingMs,
+          generationMs: engine.voxelWorld.consumeDebugGenerationTime(),
+          chunks: engine.voxelWorld.chunks.size,
+          meshes,
+          drawCalls: info.render.calls,
+          triangles: info.render.triangles,
+          geometries: info.memory.geometries,
+          textures: info.memory.textures,
+          jsHeapMb: memory,
+          playerPos: engine.player ? engine.player.getPosition() : null,
+        };
+        debugHistoryRef.current = debugHistoryRef.current.length >= 120
+          ? [...debugHistoryRef.current.slice(1), sample]
+          : [...debugHistoryRef.current, sample];
+        setDebugSample(sample);
+      }
+    };
+
+    animate();
+
+    // 6. Resize handling
+    const resizeObserver = new ResizeObserver(resizeRenderer);
+    resizeObserver.observe(container);
+    window.addEventListener('resize', resizeRenderer);
+
+    return () => {
+      isDisposed = true;
+      unsubscribePacks?.();
+      unsubscribeShaders();
+      shaderGBufferPass.dispose();
+      shaderFullscreenPass.dispose();
+      shaderFinalPass.dispose();
+      shaderRuntime.dispose();
+      cancelAnimationFrame(animationFrameId);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', resizeRenderer);
+      envManager.dispose();
+      engine.dispose();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    };
+  }, [onEngineReady, onUpdateStats]);
+
+  useEffect(() => {
+    const handleInventoryKey = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.key.toLowerCase() === 'e') {
+        event.preventDefault();
+        setInventoryOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', handleInventoryKey);
+    return () => window.removeEventListener('keydown', handleInventoryKey);
+  }, []);
+
+  // Handle Input from Joystick / Keyboard
+  const handleInputUpdate = useCallback((input: PlayerInput) => {
+    playerInputRef.current = input;
+  }, []);
+
+  // Handle Look Delta from mouse or touch
+  const handleLookDelta = useCallback(
+    (deltaYaw: number, deltaPitch: number) => {
+      if (engineRef.current?.player) {
+        const pitchMultiplier = invertPitch ? -1 : 1;
+        engineRef.current.player.addLookInput(
+          deltaYaw * (lookSensitivity / 0.0042),
+          deltaPitch * (lookSensitivity / 0.0042) * pitchMultiplier
+        );
+      }
+    },
+    [invertPitch, lookSensitivity]
+  );
+
+  // Action: Mine target block (accepts exact screen touch coordinates!)
+  const handleActionMine = useCallback((coords?: { x: number; y: number }) => {
+    if (engineRef.current?.player) {
+      engineRef.current.player.breakTargetedBlock(coords);
+    }
+  }, []);
+
+  // Action: Place block (accepts exact screen touch coordinates!)
+  const handleActionPlace = useCallback(
+    (coords?: { x: number; y: number }) => {
+      if (engineRef.current?.player) {
+        engineRef.current.player.selectedVoxel = selectedVoxel;
+        engineRef.current.player.selectedDisc = selectedDisc;
+        engineRef.current.player.placeBlock(coords);
+      }
+    },
+    [selectedVoxel, selectedDisc]
+  );
+
+  // Action: Select Voxel
+  const handleSelectVoxel = useCallback((v: VoxelType) => {
+    setSelectedVoxel(v);
+    if (engineRef.current?.player) {
+      engineRef.current.player.selectedVoxel = v;
+    }
+  }, []);
+
+  const handleSelectDisc = useCallback((disc: MusicDiscId) => {
+    setSelectedDisc(disc);
+    if (engineRef.current?.player) engineRef.current.player.selectedDisc = disc;
+  }, []);
+
+  // Update touch aim coordinates on player
+  const handleAimTouchCoords = useCallback((coords: { x: number; y: number } | null) => {
+    if (engineRef.current?.player) {
+      engineRef.current.player.setAimTouchCoords(coords);
+    }
+  }, []);
+
+  // Mouse click handler on PC (pointer lock + Left/Right click)
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (isMobile) return;
+
+    if (document.pointerLockElement === null) {
+      containerRef.current?.requestPointerLock();
+      return;
+    }
+
+    if (e.button === 0) {
+      // Left Click: Mine at screen coords (or center aim if locked)
+      handleActionMine({ x: e.clientX, y: e.clientY });
+    } else if (e.button === 2) {
+      // Right Click: Place Block at screen coords (or center aim if locked)
+      e.preventDefault();
+      handleActionPlace({ x: e.clientX, y: e.clientY });
+    }
+  };
+
+  return (
+    <div
+      className="relative w-full h-full overflow-hidden select-none touch-none"
+      onContextMenu={(e) => e.preventDefault()}
+      onMouseDown={handleMouseDown}
+    >
+      {/* 3D WebGL Canvas */}
+      <div ref={containerRef} className="w-full h-full cursor-crosshair" />
+
+      <InventoryOverlay
+        open={inventoryOpen}
+        onClose={() => setInventoryOpen(false)}
+        selectedVoxel={selectedVoxel}
+        onSelectVoxel={handleSelectVoxel}
+        selectedDisc={selectedDisc}
+        onSelectDisc={handleSelectDisc}
+      />
+
+      {/* Cinematic Viewport Frame Mode Overlay (Brackets + HUD) */}
+      <ViewportFrameOverlay enabled={graphics.viewportFrameMode} fps={currentFps} />
+      <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} shaderDiagnostics={shaderDiagnostics} onCopyShaderErrors={() => {
+        const diagnostics = [...shaderDiagnostics, ...shaderPacks.getCompileDiagnostics()];
+        const uniqueDiagnostics = [...new Set(diagnostics)];
+        const text = uniqueDiagnostics.join('\\n\\n') || '[ShaderPipeline] No shader diagnostics captured.';
+        void navigator.clipboard.writeText(text).then(() => console.info('[ShaderPipeline] Diagnostics copied to clipboard'));
+      }} />
+
+      {/* MCPE Touch Controls Overlay (Direct touch coordinate mining & placing) */}
+      <PlayerControlsOverlay
+        onInputUpdate={handleInputUpdate}
+        onLookDelta={handleLookDelta}
+        onAimTouchCoords={handleAimTouchCoords}
+        onActionMine={handleActionMine}
+        onActionPlace={handleActionPlace}
+        onToggleViewMode={onToggleViewMode}
+        onToggleInventory={() => setInventoryOpen((open) => !open)}
+        isFlying={isFlying}
+        viewMode={viewMode}
+        selectedVoxel={selectedVoxel}
+        onSelectVoxel={handleSelectVoxel}
+      />
+    </div>
+  );
+};).test(name))
             .sort((a, b) => {
               const ai = a === prefix ? 0 : Number(a.slice(prefix.length));
               const bi = b === prefix ? 0 : Number(b.slice(prefix.length));
