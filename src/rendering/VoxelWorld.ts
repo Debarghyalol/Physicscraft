@@ -541,9 +541,9 @@ export class VoxelWorld {
           `#include <common>
           uniform float uSkyDim;
           varying vec2 vLight;
-          // Vanilla's non-linear light curve: 1 - f / (3f + 1), not f's inverse.
-          // The previous expression made high light levels dramatically too dark.
-          float mcLight(float l) { float f = 1.0 - l; return 1.0 - f / (f * 3.0 + 1.0); }`
+          // Vanilla's non-linear light curve. At sky light 15 this is 1.0;
+          // at the effective midnight sky light 4 it is much dimmer.
+          float mcLight(float l) { float f = 1.0 - l; return (1.0 - f) / (f * 3.0 + 1.0); }`
         )
         .replace(
           '#include <color_fragment>',
@@ -552,7 +552,11 @@ export class VoxelWorld {
             float skyL = max(vLight.x - uSkyDim * (${(SKY_DIM_LEVELS / 15).toFixed(5)}), 0.0);
             // Minecraft's moonlit sky light is visibly blue while daytime sky light is white.
             vec3 skyCol = mix(vec3(1.0), vec3(0.52, 0.68, 1.0), smoothstep(0.05, 1.0, uSkyDim));
-            vec3 lc = max(vec3(mcLight(skyL)) * skyCol, vec3(mcLight(vLight.y)) * vec3(1.0, 0.82, 0.6));
+            // Moonlight tint affects only actual sky light. Block light remains warm/neutral,
+            // so caves do not inherit a fake blue ambient fill.
+            vec3 skyLight = vec3(mcLight(skyL)) * skyCol;
+            vec3 blockLight = vec3(mcLight(vLight.y)) * vec3(1.0, 0.82, 0.6);
+            vec3 lc = max(skyLight, blockLight);
             lc = max(lc, vec3(0.03, 0.032, 0.045));
             diffuseColor.rgb *= pow(lc, vec3(2.2));
           }`
