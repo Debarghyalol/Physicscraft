@@ -3,6 +3,7 @@ import { PlayerModel } from './PlayerModel';
 import { VoxelWorld } from '../rendering/VoxelWorld';
 import { CameraViewMode, VoxelType } from '../types/physics';
 import { soundManager } from '../audio/SoundEffects';
+import { musicEngine, MusicDiscId } from '../audio/MusicEngine';
 
 export interface PlayerInput {
   moveForward: number; // -1 to 1
@@ -288,6 +289,7 @@ export class PlayerController {
       case VoxelType.COBBLESTONE:
       case VoxelType.GLOWSTONE:
       case VoxelType.GOLD:
+      case VoxelType.JUKEBOX:
       case VoxelType.TNT:
       default:
         return 'stone';
@@ -574,6 +576,12 @@ export class PlayerController {
     }
 
     const hit = this.voxelWorld.raycastVoxel(ray, 7.0);
+
+    // A jukebox is interacted with instead of placing a block against it.
+    if (hit?.voxelType === VoxelType.JUKEBOX) {
+      musicEngine.playDisc(this.selectedDisc);
+      return true;
+    }
 
     if (hit) {
       const placeX = hit.blockX + hit.normal.x;
