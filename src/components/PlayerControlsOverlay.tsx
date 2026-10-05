@@ -28,6 +28,7 @@ export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
   { type: VoxelType.COBBLESTONE, name: 'Cobblestone' },
   { type: VoxelType.GLASS, name: 'Glass' },
   { type: VoxelType.GLOWSTONE, name: 'Glowstone' },
+  { type: VoxelType.JUKEBOX, name: 'Jukebox' },
 ];
 
 /**
