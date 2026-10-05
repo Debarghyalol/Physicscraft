@@ -56,6 +56,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [currentFps, setCurrentFps] = useState(60);
   const fpsRef = useRef(60);
   const [isFlying, setIsFlying] = useState(false);
+  const [shaderDiagnostics, setShaderDiagnostics] = useState<string[]>([]);
   const lastPresetRef = useRef<string | null>(null);
   const [debugSample, setDebugSample] = useState<DebugFrameSample>({
     frameMs: 0, physicsMs: 0, renderMs: 0, streamingMs: 0, generationMs: 0,
@@ -145,6 +146,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       const active = shaderPacks.getActive();
       if (!active) {
         shaderRuntime.dispose();
+        setShaderDiagnostics([]);
         if (graphicsRef.current.debugMode) {
           console.info('[ShaderPipeline] No shader pack active; using vanilla renderer');
         }
@@ -154,12 +156,15 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       try {
         await shaderRuntime.load(active.id, 'world0');
         if (generation !== shaderLoadGeneration || isDisposed) return;
+        setShaderDiagnostics([]);
         if (graphicsRef.current.debugMode) {
           console.info('[ShaderPipeline] Program catalog:', shaderRuntime.getProgramNames());
         }
       } catch (error) {
         if (generation !== shaderLoadGeneration || isDisposed) return;
-        console.error('[ShaderPipeline] Failed to load shader runtime:', error);
+        const diagnostics = shaderRuntime.getDiagnostics();
+        setShaderDiagnostics(diagnostics.length > 0 ? diagnostics : [error instanceof Error ? (error.stack || error.message) : String(error)]);
+        console.error('[ShaderPipeline] Failed to load shader runtime:', error instanceof Error ? (error.stack || error.message) : String(error);
         shaderRuntime.dispose();
       }
     };
@@ -421,7 +426,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       {/* Cinematic Viewport Frame Mode Overlay (Brackets + HUD) */}
       <ViewportFrameOverlay enabled={graphics.viewportFrameMode} fps={currentFps} />
-      <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} />
+      <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} shaderDiagnostics={shaderDiagnostics} onCopyShaderErrors={() => {
+        const text = shaderDiagnostics.join('\\n\\n') || '[ShaderPipeline] No shader runtime errors captured.';
+        void navigator.clipboard.writeText(text).then(() => console.info('[ShaderPipeline] Diagnostics copied to clipboard'));
+      }} />
 
       {/* MCPE Touch Controls Overlay (Direct touch coordinate mining & placing) */}
       <PlayerControlsOverlay
