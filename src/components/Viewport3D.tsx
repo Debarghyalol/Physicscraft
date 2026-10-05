@@ -143,26 +143,31 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     let shaderLoadGeneration = 0;
     const reloadShaderRuntime = async () => {
       const generation = ++shaderLoadGeneration;
+
+      // Shader packs live in IndexedDB. Wait for the manager to finish loading
+      // persisted packs before checking the active selection; otherwise the
+      // viewport can race init() and incorrectly fall back to vanilla.
+      await shaderPacks.init();
+      if (generation !== shaderLoadGeneration || isDisposed) return;
+
       const active = shaderPacks.getActive();
       if (!active) {
         shaderRuntime.dispose();
         setShaderDiagnostics([]);
-        if (graphicsRef.current.debugMode) {
-          console.info('[ShaderPipeline] No shader pack active; using vanilla renderer');
-        }
+        console.info('[ShaderPipeline] No shader pack active; using vanilla renderer');
         return;
       }
+
+      console.info(`[ShaderPipeline] Loading active pack: ${active.name} (${active.id}) / world0`);
 
       try {
         await shaderRuntime.load(active.id, 'world0');
         if (generation !== shaderLoadGeneration || isDisposed) return;
         const diagnostics = shaderRuntime.getDiagnostics();
         setShaderDiagnostics(diagnostics);
-        if (graphicsRef.current.debugMode) {
-          console.info('[ShaderPipeline] Program catalog:', shaderRuntime.getProgramNames());
-          if (diagnostics.length > 0) {
-            console.warn(`[ShaderPipeline] ${diagnostics.length} pass(es) failed; successful programs remain loaded`);
-          }
+        console.info('[ShaderPipeline] Program catalog:', shaderRuntime.getProgramNames());
+        if (diagnostics.length > 0) {
+          console.warn(`[ShaderPipeline] ${diagnostics.length} pass(es) failed; successful programs remain loaded`);
         }
       } catch (error) {
         if (generation !== shaderLoadGeneration || isDisposed) return;
