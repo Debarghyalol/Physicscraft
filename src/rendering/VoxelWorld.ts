@@ -1418,8 +1418,8 @@ export class VoxelWorld {
     if (!mesh) {
       mesh = new THREE.Mesh(geometry, trans ? this.transparentMaterial : this.material);
       mesh.matrixAutoUpdate = false;
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       mesh.frustumCulled = true;
       if (trans) mesh.renderOrder = 1;
       mesh.userData = { isVoxelChunk: !trans, isVoxelChunkTrans: trans, cx: col.cx, cz: col.cz, sy };
