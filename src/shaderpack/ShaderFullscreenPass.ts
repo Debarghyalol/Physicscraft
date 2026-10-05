@@ -21,6 +21,10 @@ export class ShaderFullscreenPass {
   private vertexBuffer: WebGLBuffer | null = null;
   private texcoordBuffer: WebGLBuffer | null = null;
   private geometryProgram: WebGLProgram | null = null;
+  /** Iris creates a pass-specific FBO whose attachment 0 is the first logical
+   * RENDERTARGETS texture. Three.js MRT targets instead keep colortexN at
+   * COLOR_ATTACHMENTN, so we need this remapping FBO for composite passes. */
+  private passFramebuffer: WebGLFramebuffer | null = null;
   private readonly neutralTexture: THREE.DataTexture;
 
   constructor(renderer: THREE.WebGLRenderer, runtime: ShaderPackRuntime, framebuffers: ShaderFramebufferManager) {
@@ -150,11 +154,28 @@ export class ShaderFullscreenPass {
         return false;
       }
 
-      // Stage 3: Three.js enables every color attachment on an MRT target by
-      // default. WebGL 2 requires every enabled draw buffer to have a compatible
-      // fragment output; a fullscreen pass such as RENDERTARGETS: 4 only writes
-      // location 4, so leaving attachments 0..3 and 5..7 enabled makes drawArrays
-      // generate INVALID_OPERATION (1282). Keep only the physical outputs active.
+      // Stage 3: Iris does not use the logical RENDERTARGETS index as the
+      // framebuffer attachment index. For RENDERTARGETS: 4 it attaches the
+      // colortex4 texture to COLOR_ATTACHMENT0 and the normalized shader output
+      // location 0 writes there. Three.js' WebGLRenderTarget instead attaches
+      // colortex4 to COLOR_ATTACHMENT4, so simply calling drawBuffers() on the
+      // Three.js FBO is not equivalent to Iris. Build the same pass-local FBO.
+      const passFramebufferError = this.configurePassFramebuffer(writeTarget, outputBuffers, highOutputs.length > 0);
+      if (passFramebufferError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after pass framebuffer setup:', name, passFramebufferError, {
+          ...diagnosticContext(),
+          drawBufferList: this.buildDrawBufferList(outputBuffers),
+        });
+        return false;
+      }
+      const passFramebufferStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      if (passFramebufferStatus !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error('[ShaderPipeline] Incomplete Iris-compatible pass framebuffer:', name, passFramebufferStatus, {
+          ...diagnosticContext(),
+          drawBufferList: this.buildDrawBufferList(outputBuffers),
+        });
+        return false;
+      }
       gl.drawBuffers(this.buildDrawBufferList(outputBuffers));
       const drawBuffersError = gl.getError();
       if (drawBuffersError !== gl.NO_ERROR) {
@@ -334,6 +355,11 @@ export class ShaderFullscreenPass {
   }
 
   public dispose(): void {
+    const gl = this.gl;
+    if (this.passFramebuffer) {
+      gl.deleteFramebuffer(this.passFramebuffer);
+      this.passFramebuffer = null;
+    }
     this.disposeGeometry();
     this.neutralTexture.dispose();
   }
@@ -392,13 +418,65 @@ export class ShaderFullscreenPass {
 
   private buildDrawBufferList(outputBuffers: number[]): number[] {
     const gl = this.gl;
-    // WebGL2 drawBuffers[i] corresponds to fragment output location i.
-    // Iris maps logical shader output 0, 1, ... to the physical attachments
-    // named by RENDERTARGETS/DRAWBUFFERS. Therefore RENDERTARGETS: 4 becomes
-    // [COLOR_ATTACHMENT4], not [NONE, NONE, NONE, NONE, COLOR_ATTACHMENT4].
-    // The previous sparse list expected the shader to write location 4, while
-    // the Iris-compatible translator writes location 0.
-    return outputBuffers.map((attachment) => gl.COLOR_ATTACHMENT0 + attachment);
+    // drawBuffers[i] selects the attachment for fragment output location i.
+    // Iris' pass framebuffer attaches the first RENDERTARGETS texture at
+    // COLOR_ATTACHMENT0, the second at COLOR_ATTACHMENT1, and so on.
+    return outputBuffers.map((_, index) => gl.COLOR_ATTACHMENT0 + index);
+  }
+
+  private configurePassFramebuffer(
+    writeTarget: THREE.WebGLRenderTarget,
+    outputBuffers: number[],
+    extraTarget: boolean,
+  ): number {
+    const gl = this.gl;
+    if (!this.passFramebuffer) {
+      this.passFramebuffer = gl.createFramebuffer();
+      if (!this.passFramebuffer) return gl.OUT_OF_MEMORY;
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.passFramebuffer);
+
+    // Remove attachments left by the previous pass. Iris creates a fresh
+    // framebuffer for each pass, so every enabled attachment is intentional.
+    const maxAttachments = Math.min(8, Number(gl.getParameter(gl.MAX_COLOR_ATTACHMENTS)) || 8);
+    for (let i = 0; i < maxAttachments; i += 1) {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
+    }
+
+    const textures = writeTarget.textures;
+    for (let outputIndex = 0; outputIndex < outputBuffers.length; outputIndex += 1) {
+      const textureIndex = outputBuffers[outputIndex];
+      const texture = textures[textureIndex];
+      if (!texture) {
+        console.error('[ShaderPipeline] Missing pass output texture:', {
+          textureIndex,
+          outputIndex,
+          availableTextures: textures.length,
+          extraTarget,
+        });
+        return gl.INVALID_OPERATION;
+      }
+      const textureHandle = this.getTextureHandle(texture);
+      if (!textureHandle) return gl.INVALID_OPERATION;
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0 + outputIndex,
+        gl.TEXTURE_2D,
+        textureHandle,
+        0,
+      );
+    }
+
+    if (!extraTarget && writeTarget.depthTexture) {
+      const depthHandle = this.getTextureHandle(writeTarget.depthTexture);
+      if (!depthHandle) return gl.INVALID_OPERATION;
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthHandle, 0);
+    } else {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, null, 0);
+    }
+
+    return gl.getError();
   }
 
   private resolveOutputBuffers(definition: ShaderPassDefinition): number[] {
