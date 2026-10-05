@@ -43,7 +43,15 @@ export class ShaderFullscreenPass {
     const program = this.runtime.getProgram(name);
     const mainReadTarget = this.framebuffers.readTarget;
     const mainWriteTarget = this.framebuffers.writeTarget;
-    if (!definition || !program || !mainReadTarget || !mainWriteTarget) return false;
+    if (!definition || !program || !mainReadTarget || !mainWriteTarget) {
+      console.warn('[ShaderPipeline] Pass unavailable:', name, {
+        definition: !!definition,
+        program: !!program,
+        mainReadTarget: !!mainReadTarget,
+        mainWriteTarget: !!mainWriteTarget,
+      });
+      return false;
+    }
 
     this.ensureGeometry(program);
     const logicalOutputs = definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0];
@@ -56,7 +64,10 @@ export class ShaderFullscreenPass {
     const outputBuffers = highOutputs.length > 0
       ? highOutputs.map((index) => this.framebuffers.logicalToExtraAttachment(index))
       : this.resolveOutputBuffers(definition);
-    if (outputBuffers.length === 0) return false;
+    if (outputBuffers.length === 0) {
+      console.warn('[ShaderPipeline] Pass has no valid output buffers:', name, logicalOutputs);
+      return false;
+    }
 
     // Never sample from a color attachment that is simultaneously attached
     // for drawing. Copy the complete read set into the write set first, then
@@ -65,6 +76,7 @@ export class ShaderFullscreenPass {
     const outputSet = new Set(outputBuffers);
     const copyPhysicalAttachments = new Set(
       sampledLogicalAttachments
+        .filter((index) => this.framebuffers.logicalToExtraAttachment(index) < 0)
         .map((index) => this.framebuffers.logicalToPhysicalAttachment(index))
         .filter((index) => !outputSet.has(index))
     );
@@ -73,7 +85,14 @@ export class ShaderFullscreenPass {
     const previousTarget = this.renderer.getRenderTarget();
     const readTarget = highOutputs.length > 0 ? this.framebuffers.extraReadTarget : this.framebuffers.readTarget;
     const writeTarget = highOutputs.length > 0 ? this.framebuffers.extraWriteTarget : this.framebuffers.writeTarget;
-    if (!readTarget || !writeTarget) return false;
+    if (!readTarget || !writeTarget) {
+      console.warn('[ShaderPipeline] Pass target unavailable:', name, {
+        highOutputs,
+        extraRead: !!this.framebuffers.extraReadTarget,
+        extraWrite: !!this.framebuffers.extraWriteTarget,
+      });
+      return false;
+    }
     const gl = this.gl;
     const textureHandles = Array.from({ length: 16 }, (_, logicalIndex) =>
       this.getTextureHandle(this.framebuffers.getTexture(logicalIndex, highOutputs.length > 0 ? 'read' : 'read') ?? this.neutralTexture)
@@ -84,6 +103,16 @@ export class ShaderFullscreenPass {
 
     try {
       this.renderer.setRenderTarget(writeTarget);
+      if (highOutputs.length > 0) {
+        const framebufferStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (framebufferStatus !== gl.FRAMEBUFFER_COMPLETE) {
+          console.error('[ShaderPipeline] Incomplete extra framebuffer:', name, framebufferStatus, {
+            logicalOutputs,
+            outputBuffers,
+          });
+          return false;
+        }
+      }
       gl.viewport(0, 0, Math.max(1, Math.floor(width)), Math.max(1, Math.floor(height)));
       gl.useProgram(program);
       gl.disable(gl.DEPTH_TEST);
@@ -141,6 +170,16 @@ export class ShaderFullscreenPass {
       gl.bindVertexArray(this.vao);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
+
+      const glError = gl.getError();
+      if (glError !== gl.NO_ERROR) {
+        console.error('[ShaderPipeline] GL error after pass:', name, glError, {
+          logicalOutputs,
+          outputBuffers,
+          highOutputs,
+        });
+        return false;
+      }
 
       if (highOutputs.length > 0) this.framebuffers.swapExtra();
       else this.framebuffers.swap();
