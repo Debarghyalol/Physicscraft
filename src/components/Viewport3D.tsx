@@ -20,6 +20,7 @@ import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
 import { ShaderPackRuntime } from '../shaderpack/ShaderPackRuntime';
+import { ShaderFinalPass } from '../shaderpack/ShaderFinalPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -115,6 +116,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // 2. WebGL Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     const shaderRuntime = new ShaderPackRuntime(renderer, { debug: graphicsRef.current.debugMode });
+    const shaderFinalPass = new ShaderFinalPass(renderer, shaderRuntime);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = graphics.shadows;
@@ -137,9 +139,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     let isDisposed = false;
     const steveLight = new THREE.Color();
 
-    // Shader-pack runtime stage 1: compile/link the imported pack programs and
-    // retain them for the later framebuffer/pass stages. Rendering remains on
-    // the existing Three.js path until the G-buffer runtime is enabled.
+    // Shader-pack runtime: compile/link the imported pack and execute the
+    // real final fullscreen pass when the pack provides one. The scene itself
+    // is rendered into colortex0 first.
     let shaderLoadGeneration = 0;
     const reloadShaderRuntime = async () => {
       const generation = ++shaderLoadGeneration;
@@ -152,7 +154,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       const active = shaderPacks.getActive();
       if (!active) {
-        shaderRuntime.dispose();
+        shaderFinalPass.dispose();
+      shaderRuntime.dispose();
         setShaderDiagnostics([]);
         console.info('[ShaderPipeline] No shader pack active; using vanilla renderer');
         return;
@@ -265,9 +268,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.player.model.setLightTint(steveLight);
       }
 
-      // Render Three.js scene
+      // Render through the active shader pack when its real final pass is available.
+      // Otherwise retain the normal Three.js renderer as a safe fallback.
       const renderStart = performance.now();
-      renderer.render(scene, camera);
+      const shaderRendered = shaderRuntime.isLoaded && shaderFinalPass.render(
+        scene,
+        camera,
+        renderer.domElement.width,
+        renderer.domElement.height
+      );
+      if (!shaderRendered) renderer.render(scene, camera);
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
         const info = renderer.info;
