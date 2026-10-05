@@ -40,6 +40,10 @@ export class ShaderGBufferPass {
     this.noiseTexture = this.makeTexture(new Uint8Array([127, 127, 127, 255]));
   }
 
+  public get framebufferManager(): ShaderFramebufferManager {
+    return this.framebuffers;
+  }
+
   public get colorTexture(): THREE.Texture | null {
     return this.framebuffers.getTexture(0);
   }
