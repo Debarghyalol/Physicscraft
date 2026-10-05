@@ -33,6 +33,7 @@ export class ShaderPackRuntime {
   private debug: boolean;
   private packId: string | null = null;
   private dimension: string | null = null;
+  private packTextures = new Map<string, THREE.Texture>();
 
   constructor(renderer: THREE.WebGLRenderer, options: ShaderRuntimeOptions = {}) {
     this.gl = renderer.getContext() as WebGL2RenderingContext;
@@ -59,6 +60,10 @@ export class ShaderPackRuntime {
     return [...this.diagnostics];
   }
 
+  public getTexture(name: string): THREE.Texture | null {
+    return this.packTextures.get(name) ?? null;
+  }
+
   /**
    * Load one shader-pack dimension and create persistent WebGL programs.
    *
@@ -70,6 +75,7 @@ export class ShaderPackRuntime {
     this.diagnostics = [];
 
     const { files } = await shaderPacks.loadFiles(packId);
+    await this.loadPackTextures(packId, files);
     const entries = this.discoverPrograms(files, dimension);
 
     this.log(`Loading ${packId} / ${dimension}: ${entries.size} programs`);
@@ -209,6 +215,33 @@ export class ShaderPackRuntime {
     this.definitions.clear();
     this.packId = null;
     this.dimension = null;
+    for (const texture of this.packTextures.values()) texture.dispose();
+    this.packTextures.clear();
+  }
+
+  private async loadPackTextures(packId: string, files: PackFiles): Promise<void> {
+    const properties = files.get('shaders.properties') ?? '';
+    const noiseMatch = /^texture\\.noise\\s*=\\s*(.+)$/mi.exec(properties);
+    if (!noiseMatch) return;
+
+    const path = noiseMatch[1].trim();
+    const blob = await shaderPacks.loadAsset(packId, path);
+    if (!blob) {
+      this.diagnostics.push(`[ShaderPipeline] Missing shader-pack texture: ${path}`);
+      return;
+    }
+
+    const bitmap = await createImageBitmap(blob);
+    const texture = new THREE.Texture(bitmap);
+    texture.name = 'ShaderPackNoiseTexture';
+    texture.colorSpace = THREE.NoColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.needsUpdate = true;
+    this.packTextures.set('noisetex', texture);
+    this.log(`Loaded shader-pack noisetex: ${path} (${bitmap.width}x${bitmap.height})`);
   }
 
   private errorToString(error: unknown): string {
