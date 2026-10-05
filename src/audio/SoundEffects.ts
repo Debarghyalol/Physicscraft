@@ -13,19 +13,63 @@ class SoundSynthesizer {
   // Keep the Minecraft asset hierarchy intact: dig/* is used for block break/place,
   // while step/* is used for footsteps. UI button clicks use random/click_stereo.
   private readonly soundAssets: Record<string, string[]> = {
-    dig_grass: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/grass${i + 1}.ogg`, import.meta.url).href),
-    dig_stone: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/stone${i + 1}.ogg`, import.meta.url).href),
-    dig_wood: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/wood${i + 1}.ogg`, import.meta.url).href),
-    dig_sand: Array.from({ length: 4 }, (_, i) => new URL(`../../sounds/dig/sand${i + 1}.ogg`, import.meta.url).href),
+    dig_grass: Object.values(import.meta.glob('../../sounds/dig/grass*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    dig_stone: Object.values(import.meta.glob('../../sounds/dig/stone*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    dig_wood: Object.values(import.meta.glob('../../sounds/dig/wood*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    dig_sand: Object.values(import.meta.glob('../../sounds/dig/sand*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
 
-    step_grass: Array.from({ length: 6 }, (_, i) => new URL(`../../sounds/step/grass${i + 1}.ogg`, import.meta.url).href),
-    step_stone: Array.from({ length: 6 }, (_, i) => new URL(`../../sounds/step/stone${i + 1}.ogg`, import.meta.url).href),
-    step_wood: Array.from({ length: 6 }, (_, i) => new URL(`../../sounds/step/wood${i + 1}.ogg`, import.meta.url).href),
-    step_sand: Array.from({ length: 5 }, (_, i) => new URL(`../../sounds/step/sand${i + 1}.ogg`, import.meta.url).href),
+    step_grass: Object.values(import.meta.glob('../../sounds/step/grass*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_stone: Object.values(import.meta.glob('../../sounds/step/stone*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_wood: Object.values(import.meta.glob('../../sounds/step/wood*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    step_sand: Object.values(import.meta.glob('../../sounds/step/sand*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
 
-    ui_button: [new URL('../../sounds/random/click_stereo.ogg', import.meta.url).href],
-    fall_small: [new URL('../../sounds/damage/fallsmall.ogg', import.meta.url).href],
-    fall_big: [new URL('../../sounds/damage/fallbig.ogg', import.meta.url).href],
+    ui_button: Object.values(import.meta.glob('../../sounds/random/click_stereo.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    fall_small: Object.values(import.meta.glob('../../sounds/damage/fallsmall.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    fall_big: Object.values(import.meta.glob('../../sounds/damage/fallbig.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
   };
 
   private playAsset(url: string, volume: number = 1.0, playbackRate: number = 1.0): void {
