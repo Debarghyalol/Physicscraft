@@ -177,7 +177,6 @@ export class PlayerController {
       startVy = this.jumpVelocity;
       newVy = this.jumpVelocity - this.gravityAcceleration * delta;
       this.isGrounded = false;
-      soundManager.playJump();
     } else if (!this.isGrounded) {
       newVy = Math.max(-60, this.velY - this.gravityAcceleration * delta);
     } else if (newVy < 0) {
@@ -272,7 +271,7 @@ export class PlayerController {
     return this.voxelWorld.getVoxel(x, y, z) !== VoxelType.AIR;
   }
 
-  private getSoundMaterial(voxelType: VoxelType): 'grass' | 'stone' | 'wood' | 'sand' {
+  private getSoundMaterial(voxelType: VoxelType): 'grass' | 'stone' | 'wood' | 'sand' | 'glass' {
     switch (voxelType) {
       case VoxelType.WOOD:
         return 'wood';
@@ -285,9 +284,10 @@ export class PlayerController {
       case VoxelType.STONE:
       case VoxelType.BEDROCK:
       case VoxelType.GLASS:
+      case VoxelType.GLOWSTONE:
+        return 'glass';
       case VoxelType.COBBLESTONE:
       case VoxelType.GOLD:
-      case VoxelType.GLOWSTONE:
       case VoxelType.TNT:
       default:
         return 'stone';
