@@ -80,9 +80,9 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, his
         <Metric label="Geometries" value={sample.geometries} />
         <Metric label="Textures" value={sample.textures} />
         <Metric label="JS heap" value={sample.jsHeapMb == null ? 'unavailable' : fmt(sample.jsHeapMb) + ' MB'} />
-        {shaderDiagnostics.length > 0 && (
+        {onCopyShaderErrors && (
           <button type="button" className="pointer-events-auto mt-2 rounded border border-white/30 bg-black/70 px-2 py-1 text-[10px] text-white hover:bg-white/15" onClick={onCopyShaderErrors}>
-            Copy Shader Errors ({shaderDiagnostics.length})
+            Copy Shader Errors
           </button>
         )}
       </div>
