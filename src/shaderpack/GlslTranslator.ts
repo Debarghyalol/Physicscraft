@@ -259,7 +259,7 @@ export function translateProgram(input: TranslateInput): TranslateResult {
       return index;
     };
     src = src.replace(
-      /layout\\s*\\(\\s*location\\s*=\\s*(\\d+)\\s*\\)\\s*out\\b/g,
+      /layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*out\b/g,
       (_match, locationText: string) => {
         const location = Number(locationText);
         const physical = drawBuffers[location];
