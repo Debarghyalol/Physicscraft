@@ -427,7 +427,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       {/* Cinematic Viewport Frame Mode Overlay (Brackets + HUD) */}
       <ViewportFrameOverlay enabled={graphics.viewportFrameMode} fps={currentFps} />
       <DebugOverlay enabled={graphics.debugMode} sample={debugSample} history={debugHistoryRef.current} shaderDiagnostics={shaderDiagnostics} onCopyShaderErrors={() => {
-        const text = shaderDiagnostics.join('\\n\\n') || '[ShaderPipeline] No shader runtime errors captured.';
+        const diagnostics = [...shaderDiagnostics, ...shaderPacks.getCompileDiagnostics()];
+        const uniqueDiagnostics = [...new Set(diagnostics)];
+        const text = uniqueDiagnostics.join('\\n\\n') || '[ShaderPipeline] No shader runtime or compatibility errors captured.';
         void navigator.clipboard.writeText(text).then(() => console.info('[ShaderPipeline] Diagnostics copied to clipboard'));
       }} />
 
