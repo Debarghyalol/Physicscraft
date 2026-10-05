@@ -303,7 +303,8 @@ class Coercer {
         }
         fullType = ft + arr;
         fields.push([fname, fullType]);
-        body += `${quals.join(' ')} ${ft} ${fname}${arr};\n`;
+        const fq = this.needsPrecision(ft, quals) ? [...quals, 'highp'] : quals;
+        body += `${fq.join(' ')} ${ft} ${fname}${arr};\n`;
       } while (this.eat(','));
       this.expect(';');
     }
@@ -341,6 +342,8 @@ class Coercer {
     }
 
     // variable declaration list
+    // Some mobile drivers reject array declarations without an explicit precision.
+    if (this.needsPrecision(typeName, quals)) quals.push('highp');
     const qualStr = quals.length ? quals.join(' ') + ' ' : '';
     const isConst = quals.includes('const');
     const isUniformLike = quals.some((q) => q === 'uniform' || q === 'in' || q === 'out' || q === 'attribute' || q === 'varying');
@@ -382,6 +385,14 @@ class Coercer {
     }
     this.expect(';');
     this.emit(`${qualStr}${typeName} ${parts.join(', ')};\n`);
+  }
+
+  /** Explicit `highp` on numeric declarations: some mobile drivers refuse arrays without it. */
+  private needsPrecision(type: string, quals: string[]): boolean {
+    if (quals.some((q) => q === 'highp' || q === 'mediump' || q === 'lowp')) return false;
+    const base = isArray(type) ? elementType(type) : type;
+    if (base === 'bool' || /^bvec/.test(base)) return false;
+    return SCALARS.has(base) || VEC_RE.test(base) || MAT_RE.test(base);
   }
 
   private isConstExpr(e: Expr): boolean {
@@ -440,6 +451,7 @@ class Coercer {
       const dir = pq.includes('inout') ? 'inout' : pq.includes('out') ? 'out' : 'in';
       params.push({ type: full, qual: dir });
       if (pname) scope.set(pname, full);
+      if (this.needsPrecision(pt, pq)) pq.push('highp');
       pText.push(`${pq.join(' ')} ${pt} ${pname}${isArray(pt) ? '' : arr}`.trim());
       if (!this.eat(',')) break;
     }
