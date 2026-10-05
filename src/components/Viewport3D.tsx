@@ -120,7 +120,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const shaderRuntime = new ShaderPackRuntime(renderer, { debug: graphicsRef.current.debugMode });
     const shaderFinalPass = new ShaderFinalPass(renderer, shaderRuntime);
     const shaderGBufferPass = new ShaderGBufferPass(renderer, shaderRuntime);
-    const shaderFullscreenPass = new ShaderFullscreenPass(renderer, shaderRuntime, (shaderGBufferPass as unknown as { framebuffers: import('../shaderpack/ShaderFramebufferManager').ShaderFramebufferManager }).framebuffers);
+    const shaderFullscreenPass = new ShaderFullscreenPass(renderer, shaderRuntime, shaderGBufferPass.framebufferManager);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = graphics.shadows;
