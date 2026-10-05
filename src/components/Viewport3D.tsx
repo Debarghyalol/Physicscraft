@@ -164,7 +164,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (generation !== shaderLoadGeneration || isDisposed) return;
         const diagnostics = shaderRuntime.getDiagnostics();
         setShaderDiagnostics(diagnostics.length > 0 ? diagnostics : [error instanceof Error ? (error.stack || error.message) : String(error)]);
-        console.error('[ShaderPipeline] Failed to load shader runtime:', error instanceof Error ? (error.stack || error.message) : String(error);
+        console.error('[ShaderPipeline] Failed to load shader runtime:', error instanceof Error ? (error.stack || error.message) : String(error));
         shaderRuntime.dispose();
       }
     };
