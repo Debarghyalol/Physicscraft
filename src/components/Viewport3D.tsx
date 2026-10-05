@@ -556,3 +556,4 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       />
     </div>
   );
+};
