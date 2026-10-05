@@ -41,9 +41,9 @@ export class ShaderFullscreenPass {
   public render(name: string, width: number, height: number, frameCounter: number, worldTime: number, shadows: ShaderShadowResources | null = null): boolean {
     const definition = this.runtime.getDefinition(name);
     const program = this.runtime.getProgram(name);
-    const readTarget = this.framebuffers.readTarget;
-    const writeTarget = this.framebuffers.writeTarget;
-    if (!definition || !program || !readTarget || !writeTarget) return false;
+    const mainReadTarget = this.framebuffers.readTarget;
+    const mainWriteTarget = this.framebuffers.writeTarget;
+    if (!definition || !program || !mainReadTarget || !mainWriteTarget) return false;
 
     this.ensureGeometry(program);
     const logicalOutputs = definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0];
