@@ -45,7 +45,7 @@ export const SKY_PRESETS: Record<SkyPreset, EnvironmentSettings> = {
 
 export class EnvironmentManager {
   private scene: THREE.Scene;
-  private renderer: THREE.WebGLRenderer;
+  private renderer: THREE.Renderer;
 
   public minecraftSky: MinecraftSky;
   public sunLight: THREE.DirectionalLight;
@@ -58,7 +58,7 @@ export class EnvironmentManager {
   private white = new THREE.Color(1, 1, 1);
   private warmTint = new THREE.Color(1.0, 0.7, 0.45);
 
-  constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
+  constructor(scene: THREE.Scene, renderer: THREE.Renderer) {
     this.scene = scene;
     this.renderer = renderer;
 
@@ -81,42 +81,9 @@ export class EnvironmentManager {
     this.sunLight.shadow.camera.bottom = -shadowD;
     this.sunLight.shadow.bias = -0.0003;
 
-    // Shader packs expect shadowtex0/shadowtex1 to be real depth textures.
-    // Three.js' WebGL shadow path can otherwise allocate only a color shadow
-    // map plus a depth renderbuffer, leaving shadow.map.depthTexture null.
-    // Install an explicit depth attachment so WebGL2 can legally bind it to
-    // both sampler2D and sampler2DShadow (with the pass-specific sampler state).
-    const shadowDepthTexture = new THREE.DepthTexture(
-      this.sunLight.shadow.mapSize.width,
-      this.sunLight.shadow.mapSize.height,
-      THREE.UnsignedIntType,
-    );
-    shadowDepthTexture.format = THREE.DepthFormat;
-    shadowDepthTexture.minFilter = THREE.NearestFilter;
-    shadowDepthTexture.magFilter = THREE.NearestFilter;
-    shadowDepthTexture.wrapS = THREE.ClampToEdgeWrapping;
-    shadowDepthTexture.wrapT = THREE.ClampToEdgeWrapping;
-    shadowDepthTexture.generateMipmaps = false;
-    shadowDepthTexture.name = 'PhysicscraftShadowDepth';
-
-    const shadowRenderTarget = new THREE.WebGLRenderTarget(
-      this.sunLight.shadow.mapSize.width,
-      this.sunLight.shadow.mapSize.height,
-      {
-        depthBuffer: true,
-        stencilBuffer: false,
-        generateMipmaps: false,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
-        wrapS: THREE.ClampToEdgeWrapping,
-        wrapT: THREE.ClampToEdgeWrapping,
-      },
-    );
-    shadowRenderTarget.depthTexture = shadowDepthTexture;
-    shadowRenderTarget.texture.colorSpace = THREE.NoColorSpace;
-    shadowRenderTarget.texture.name = 'PhysicscraftShadowColor';
-    this.sunLight.shadow.map = shadowRenderTarget;
-
+    // Let the active Three.js renderer own the shadow render target.
+    // WebGPURenderer uses its native depth target; do not install a
+    // WebGLRenderTarget here.
     this.scene.add(this.sunLight);
 
     // 3. Fill Directional Light (Soft blue sky bounce, never washed out)
