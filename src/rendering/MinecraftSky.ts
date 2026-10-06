@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { attribute, float, length, positionWorld, smoothstep, uniform } from 'three/tsl';
 
 /**
  * Minecraft sky system
@@ -21,34 +23,6 @@ const CLOUD_RADIUS = 20; // cells rendered around the camera
 const CLOUD_SPEED = 0.6; // blocks / second (0.03 blocks per tick)
 let MASK_W = 256; // vanilla clouds.png is 256x256
 let MASK_H = 256;
-
-const CLOUD_VERT = /* glsl */ `
-  attribute float shade;
-  uniform vec2 uCenter;
-  varying float vShade;
-  varying float vDist;
-  void main() {
-    vShade = shade;
-    vec4 wp = modelMatrix * vec4(position, 1.0);
-    vDist = length(wp.xz - uCenter);
-    gl_Position = projectionMatrix * viewMatrix * wp;
-  }
-`;
-
-const CLOUD_FRAG = /* glsl */ `
-  uniform vec3 uTint;
-  uniform float uAlpha;
-  uniform float uFadeStart;
-  uniform float uFadeEnd;
-  varying float vShade;
-  varying float vDist;
-  void main() {
-    float fade = 1.0 - smoothstep(uFadeStart, uFadeEnd, vDist);
-    if (fade < 0.01) discard;
-    gl_FragColor = vec4(uTint * vShade, uAlpha * fade);
-    #include <colorspace_fragment>
-  }
-`;
 
 function mulberry32(seed: number) {
   return () => {
@@ -84,7 +58,12 @@ export class MinecraftSky {
   private defaultCloudMask: Uint8Array | null = null;
   private defaultSun!: THREE.Texture;
   private defaultMoons: THREE.Texture[] = [];
-  private cloudMaterial: THREE.ShaderMaterial;
+  private cloudMaterial: MeshBasicNodeMaterial;
+  private readonly cloudTintNode = uniform(new THREE.Color(1, 1, 1));
+  private readonly cloudAlphaNode = uniform(0.8);
+  private readonly cloudFadeStartNode = uniform(CLOUD_RADIUS * CLOUD_CELL * 0.55);
+  private readonly cloudFadeEndNode = uniform(CLOUD_RADIUS * CLOUD_CELL * 0.95);
+  private readonly cloudCenterNode = uniform(new THREE.Vector2());
   private cloudScroll = 0;
   private cloudCellX = Number.NaN;
   private cloudCellZ = Number.NaN;
@@ -160,21 +139,26 @@ export class MinecraftSky {
     this.defaultCloudMask = this.cloudMask;
     this.defaultSun = this.sunTexture;
     this.defaultMoons = this.moonTextures;
-    this.cloudMaterial = new THREE.ShaderMaterial({
-      vertexShader: CLOUD_VERT,
-      fragmentShader: CLOUD_FRAG,
-      uniforms: {
-        uTint: { value: new THREE.Color(1, 1, 1) },
-        uAlpha: { value: 0.8 },
-        uFadeStart: { value: CLOUD_RADIUS * CLOUD_CELL * 0.55 },
-        uFadeEnd: { value: CLOUD_RADIUS * CLOUD_CELL * 0.95 },
-        uCenter: { value: new THREE.Vector2() },
-      },
+    this.cloudMaterial = new MeshBasicNodeMaterial({
       transparent: true,
       depthWrite: true,
       side: THREE.FrontSide,
     });
-    this.cloudMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.cloudMaterial);
+    const cloudShade = attribute('shade', 'float');
+    const cloudDistance = length(positionWorld.xz.sub(this.cloudCenterNode));
+    const cloudFade = float(1).sub(
+      smoothstep(this.cloudFadeStartNode, this.cloudFadeEndNode, cloudDistance)
+    );
+    this.cloudMaterial.colorNode = this.cloudTintNode.mul(cloudShade);
+    this.cloudMaterial.opacityNode = this.cloudAlphaNode.mul(cloudFade);
+
+    // Give the mesh valid attributes immediately. The old implementation created an
+    // empty BufferGeometry first, which WebGPURenderer attempted to build before the
+    // first cloud rebuild and reported "Vertex attribute position not found".
+    const initialGeometry = new THREE.BufferGeometry();
+    initialGeometry.setAttribute('position', new THREE.Float32BufferAttribute([0, CLOUD_THICKNESS, 0], 3));
+    initialGeometry.setAttribute('shade', new THREE.Float32BufferAttribute([1], 1));
+    this.cloudMesh = new THREE.Mesh(initialGeometry, this.cloudMaterial);
     this.cloudMesh.frustumCulled = false;
     this.cloudMesh.renderOrder = -5;
     this.scene.add(this.cloudMesh);
@@ -252,7 +236,7 @@ export class MinecraftSky {
     const f = THREE.MathUtils.clamp(sunHeight * 2 + 0.5, 0, 1);
     const r = f * 0.9 + 0.1;
     const b = f * 0.85 + 0.15;
-    (this.cloudMaterial.uniforms.uTint.value as THREE.Color).setRGB(
+    this.cloudTintNode.value.setRGB(
       Math.pow(r, 2.2),
       Math.pow(r, 2.2),
       Math.pow(b, 2.2)
@@ -445,7 +429,7 @@ export class MinecraftSky {
       this.cloudCellZ = cz;
       this.rebuildClouds(cx, cz);
     }
-    (this.cloudMaterial.uniforms.uCenter.value as THREE.Vector2).set(px, pz);
+    this.cloudCenterNode.value.set(px, pz);
   }
 
   public dispose() {
