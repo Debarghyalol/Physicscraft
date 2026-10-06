@@ -5,6 +5,7 @@ import {
   mrt,
   normalView,
   output,
+  vec4,
 } from 'three/tsl';
 import type { Node } from 'three/tsl';
 
