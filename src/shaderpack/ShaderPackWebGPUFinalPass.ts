@@ -1,12 +1,10 @@
 import { UnsignedByteType } from 'three';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
-  attribute,
   diffuseColor,
   mrt,
   normalView,
   output,
-  vec4,
 } from 'three/tsl';
 import type { Node } from 'three/tsl';
 
@@ -19,8 +17,6 @@ export interface NostalgiaGBuffer {
   color: Node;
   albedo: Node;
   normal: Node;
-  light: Node;
-  material: Node;
   depth: Node;
 }
 
@@ -38,38 +34,30 @@ export interface NostalgiaGBuffer {
  * final beauty buffer.
  */
 export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): NostalgiaGBuffer {
-  const lightAttribute = attribute('aLight', 'vec2');
-
+  // Keep only the attachments consumed by the current WebGPU deferred adapter.
+  // Three's MRT defaults to RGBA16F, so:
+  //   output = 8 bytes/sample
+  //   albedo = 4 bytes/sample (RGBA8)
+  //   normal = 8 bytes/sample (RGBA16F)
+  // Total = 20 bytes/sample, safely below the device limit of 32.
+  //
+  // Do not read aLight here. Voxel chunks have it, but other scene geometry
+  // (particles, player meshes, sky, etc.) does not; an unconditional TSL
+  // attribute would make every material pipeline fail to build.
   scenePass.setMRT(
     mrt({
-      // This remains available as the ordinary beauty output. Keep it FP16
-      // because it is the final HDR-capable scene color.
       output,
-
-      // These three auxiliary targets only contain normalized color/light/
-      // material data, so RGBA8 is sufficient and avoids exceeding WebGPU's
-      // 32-byte-per-sample color-attachment limit.
       albedo: diffuseColor,
       normal: normalView,
-      light: vec4(lightAttribute.x, lightAttribute.y, 0.0, 1.0),
-      material: vec4(0.0, 0.0, 0.0, 1.0),
     }),
   );
 
-  // Three defaults MRT attachments to RGBA16F. Five FP16 attachments would
-  // cost 5 * 8 = 40 bytes/sample, while WebGPU guarantees only 32 here.
-  // Keep the normal FP16 for signed normal precision; the other auxiliary
-  // buffers are safely reduced to RGBA8.
   scenePass.getTexture('albedo').type = UnsignedByteType;
-  scenePass.getTexture('light').type = UnsignedByteType;
-  scenePass.getTexture('material').type = UnsignedByteType;
 
   return {
     color: scenePass.getTextureNode('output'),
     albedo: scenePass.getTextureNode('albedo'),
     normal: scenePass.getTextureNode('normal'),
-    light: scenePass.getTextureNode('light'),
-    material: scenePass.getTextureNode('material'),
     depth: scenePass.getTextureNode('depth'),
   };
 }
