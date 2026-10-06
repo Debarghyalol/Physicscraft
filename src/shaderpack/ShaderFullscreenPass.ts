@@ -81,13 +81,12 @@ export class ShaderFullscreenPass {
     const logicalOutputs = definition.drawBuffers?.length ? [...new Set(definition.drawBuffers)] : [0];
     const highOutputs = logicalOutputs.filter((index) => this.framebuffers.logicalToExtraAttachment(index) >= 0);
     const mainOutputs = logicalOutputs.filter((index) => this.framebuffers.logicalToExtraAttachment(index) < 0);
-    if (highOutputs.length > 0 && mainOutputs.length > 0) {
-      console.warn('[ShaderPipeline] Mixed main/extra render targets are not supported:', name, logicalOutputs);
-      return false;
-    }
-    const outputBuffers = highOutputs.length > 0
-      ? highOutputs.map((index) => this.framebuffers.logicalToExtraAttachment(index))
-      : this.resolveOutputBuffers(definition);
+    const mixedOutputs = highOutputs.length > 0 && mainOutputs.length > 0;
+    const outputBuffers = mixedOutputs
+      ? logicalOutputs
+      : highOutputs.length > 0
+        ? highOutputs.map((index) => this.framebuffers.logicalToExtraAttachment(index))
+        : this.resolveOutputBuffers(definition);
     if (outputBuffers.length === 0) {
       console.warn('[ShaderPipeline] Pass has no valid output buffers:', name, logicalOutputs);
       return false;
@@ -107,8 +106,12 @@ export class ShaderFullscreenPass {
     if (highOutputs.length === 0) this.framebuffers.prepareWriteTarget(copyPhysicalAttachments);
 
     const previousTarget = this.renderer.getRenderTarget();
-    const readTarget = highOutputs.length > 0 ? this.framebuffers.extraReadTarget : this.framebuffers.readTarget;
-    const writeTarget = highOutputs.length > 0 ? this.framebuffers.extraWriteTarget : this.framebuffers.writeTarget;
+    const readTarget = highOutputs.length > 0 && !mixedOutputs
+      ? this.framebuffers.extraReadTarget
+      : this.framebuffers.readTarget;
+    const writeTarget = highOutputs.length > 0 && !mixedOutputs
+      ? this.framebuffers.extraWriteTarget
+      : this.framebuffers.writeTarget;
     if (!readTarget || !writeTarget) {
       console.warn('[ShaderPipeline] Pass target unavailable:', name, {
         highOutputs,
@@ -181,10 +184,11 @@ export class ShaderFullscreenPass {
       // location 0 writes there. Three.js' WebGLRenderTarget instead attaches
       // colortex4 to COLOR_ATTACHMENT4, so simply calling drawBuffers() on the
       // Three.js FBO is not equivalent to Iris. Build the same pass-local FBO.
-      const passFramebufferError = this.configurePassFramebuffer(writeTarget, outputBuffers);
+      const passFramebufferError = this.configurePassFramebuffer(outputBuffers);
       if (passFramebufferError !== gl.NO_ERROR) {
         console.error('[ShaderPipeline] GL error after pass framebuffer setup:', name, passFramebufferError, {
           ...diagnosticContext(),
+          mixedOutputs,
           drawBufferList: this.buildDrawBufferList(outputBuffers),
         });
         return false;
@@ -193,6 +197,7 @@ export class ShaderFullscreenPass {
       if (passFramebufferStatus !== gl.FRAMEBUFFER_COMPLETE) {
         console.error('[ShaderPipeline] Incomplete Iris-compatible pass framebuffer:', name, passFramebufferStatus, {
           ...diagnosticContext(),
+          mixedOutputs,
           drawBufferList: this.buildDrawBufferList(outputBuffers),
         });
         return false;
@@ -386,8 +391,14 @@ export class ShaderFullscreenPass {
         return false;
       }
 
-      if (highOutputs.length > 0) this.framebuffers.swapExtra();
-      else this.framebuffers.swap();
+      if (mixedOutputs) {
+        this.framebuffers.swap();
+        this.framebuffers.swapExtra();
+      } else if (highOutputs.length > 0) {
+        this.framebuffers.swapExtra();
+      } else {
+        this.framebuffers.swap();
+      }
 
       for (let unit = 0; unit < textureUnit; unit += 1) {
         gl.activeTexture(gl.TEXTURE0 + unit);
@@ -489,10 +500,7 @@ export class ShaderFullscreenPass {
     return outputBuffers.map((_, index) => gl.COLOR_ATTACHMENT0 + index);
   }
 
-  private configurePassFramebuffer(
-    writeTarget: THREE.WebGLRenderTarget,
-    outputBuffers: number[],
-  ): number {
+  private configurePassFramebuffer(outputBuffers: number[]): number {
     const gl = this.gl;
     if (!this.passFramebuffer) {
       this.passFramebuffer = gl.createFramebuffer();
@@ -508,15 +516,13 @@ export class ShaderFullscreenPass {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
     }
 
-    const textures = writeTarget.textures;
     for (let outputIndex = 0; outputIndex < outputBuffers.length; outputIndex += 1) {
-      const textureIndex = outputBuffers[outputIndex];
-      const texture = textures[textureIndex];
+      const logicalIndex = outputBuffers[outputIndex];
+      const texture = this.framebuffers.getTexture(logicalIndex, 'write');
       if (!texture) {
         console.error('[ShaderPipeline] Missing pass output texture:', {
-          textureIndex,
+          logicalIndex,
           outputIndex,
-          availableTextures: textures.length,
         });
         return gl.INVALID_OPERATION;
       }
