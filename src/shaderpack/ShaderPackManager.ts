@@ -226,14 +226,77 @@ class ShaderPackManagerImpl {
     return reports;
   }
 
-).exec(p);
-      if (!match) continue;
+
   /** Translate shader stages through GLSL -> SPIR-V -> WGSL for WebGPU validation. */
   async compileWebGPUReport(id: string, dimension: string): Promise<ProgramReport[]> {
     const { files } = await this.loadFiles(id);
     const names = new Map<string, { vsh?: string; fsh?: string }>();
     for (const p of files.keys()) {
-      const match = new RegExp('^' + dimension + '/([^/]+)\\.(vsh|fsh).exec(p);
+      const match = new RegExp('^' + dimension + '/([^/]+)\\\\.(vsh|fsh)
+      if (!match) continue;
+      const entry = names.get(match[1]) ?? {};
+      entry[match[2] as 'vsh' | 'fsh'] = p;
+      names.set(match[1], entry);
+    }
+    const reports: ProgramReport[] = [];
+    for (const [name, entries] of [...names].sort()) {
+      for (const stage of ['vertex', 'fragment'] as const) {
+        const entry = stage === 'vertex' ? entries.vsh : entries.fsh;
+        if (!entry) continue;
+        try {
+          const translated = translateProgram({ files, entry, stage });
+          await compileShaderToWGSL(translated.source, stage);
+          reports.push({ name, stage, ok: true, log: '' });
+        } catch (err: any) {
+          reports.push({ name, stage, ok: false, log: String(err?.message ?? err) });
+        }
+      }
+    }
+    this.lastCompileReports = reports;
+    return reports;
+  }
+
+  getCompileDiagnostics(): string[] {
+    return this.lastCompileReports
+      .filter((report) => !report.ok)
+      .map((report) => `[ShaderPipeline] ${report.name} (${report.stage})\n${report.log}`);
+  }
+}
+
+export const shaderPacks = new ShaderPackManagerImpl();
+).exec(p);
+      if (!match) continue;
+      const entry = names.get(match[1]) ?? {};
+      entry[match[2] as 'vsh' | 'fsh'] = p;
+      names.set(match[1], entry);
+    }
+    const reports: ProgramReport[] = [];
+    for (const [name, entries] of [...names].sort()) {
+      for (const stage of ['vertex', 'fragment'] as const) {
+        const entry = stage === 'vertex' ? entries.vsh : entries.fsh;
+        if (!entry) continue;
+        try {
+          const translated = translateProgram({ files, entry, stage });
+          await compileShaderToWGSL(translated.source, stage);
+          reports.push({ name, stage, ok: true, log: '' });
+        } catch (err: any) {
+          reports.push({ name, stage, ok: false, log: String(err?.message ?? err) });
+        }
+      }
+    }
+    this.lastCompileReports = reports;
+    return reports;
+  }
+
+  getCompileDiagnostics(): string[] {
+    return this.lastCompileReports
+      .filter((report) => !report.ok)
+      .map((report) => `[ShaderPipeline] ${report.name} (${report.stage})\\n${report.log}`);
+  }
+}
+
+export const shaderPacks = new ShaderPackManagerImpl();
+).exec(p);
       if (!match) continue;
       const entry = names.get(match[1]) ?? {};
       entry[match[2] as 'vsh' | 'fsh'] = p;
