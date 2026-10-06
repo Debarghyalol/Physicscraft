@@ -407,6 +407,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           cameraFacing: facing,
           cameraYaw: cameraHeading,
           cameraPitch,
+          sunDirection: {
+            x: nostalgiaWorldLight.x,
+            y: nostalgiaWorldLight.y,
+            z: nostalgiaWorldLight.z,
+          },
         };
         debugHistoryRef.current = debugHistoryRef.current.length >= 120
           ? [...debugHistoryRef.current.slice(1), sample]
