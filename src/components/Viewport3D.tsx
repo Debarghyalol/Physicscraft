@@ -324,7 +324,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const shadowProjection = shadowCamera.projectionMatrix.clone();
         const shadowProjectionInverse = shadowProjection.clone().invert();
         const shadowResources = {
-          texture: envManager.getShadowMap(),
+          texture: envManager.getShadowDepthTexture(),
           modelView: shadowModelView,
           modelViewInverse: shadowModelViewInverse,
           projection: shadowProjection,
