@@ -222,7 +222,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             if (isNostalgiaFinalSource(translatedFinal.source)) {
               // The PassNode owns the MRT configuration; configure it before the render graph compiles.
               const deferredColor = createNostalgiaDeferredLighting(
-                sceneGBuffer.color,
+                sceneGBuffer.albedo,
                 sceneGBuffer.normal,
                 nostalgiaLightDirectionView,
                 nostalgiaLightStrength,
