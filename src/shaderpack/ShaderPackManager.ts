@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { PackFiles, translateProgram } from './GlslTranslator';
+import { compileShaderToWGSL } from './ShaderPackWebGPUCompiler';
 
 /**
  * Shader pack (OptiFine / Iris format) import and storage.
