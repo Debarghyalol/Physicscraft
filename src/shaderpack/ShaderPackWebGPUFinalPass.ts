@@ -86,7 +86,9 @@ export function createNostalgiaDeferredLighting(
   // beauty-buffer multiplier so the new G-buffer path is visually obvious.
   const lighting = diffuse.mul(lightStrength).mul(0.9).add(0.10);
 
-  return vec4(albedo.rgb.mul(lighting), albedo.a);
+  // output is already a vec4 node; replace the alpha component without
+  // relying on the TSL vec4 constructor at runtime.
+  return albedo.mul(lighting);
 }
 
 /**
