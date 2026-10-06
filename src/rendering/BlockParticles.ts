@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { VoxelType } from '../types/physics';
 import { VoxelWorld } from './VoxelWorld';
+import { SpriteNodeMaterial } from 'three/webgpu';
+import { instancedBufferAttribute, texture, uniformTexture, uv, vec2 } from 'three/tsl';
 
 /**
  * Minecraft-style block break particles.
@@ -20,42 +22,16 @@ const MIN_LIFE = 0.45;
 const MAX_LIFE = 1.0;
 const SHRINK_TIME = 0.25;
 
-const VERTEX_SHADER = /* glsl */ `
-  attribute vec4 aRect;   // u0, v0, du, dv of the texture patch
-  attribute vec3 aColor;  // per-particle light * brightness jitter
-  attribute float aSize;  // world-space size (0 = dead / hidden)
-  uniform float uScale;   // pixels per world unit at distance 1
-  varying vec4 vRect;
-  varying vec3 vColor;
-  void main() {
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    gl_Position = projectionMatrix * mv;
-    float px = aSize * uScale / max(-mv.z, 0.01);
-    gl_PointSize = aSize > 0.0 ? clamp(px, 2.0, 64.0) : 0.0;
-    vRect = aRect;
-    vColor = aColor;
-  }
-`;
-
-const FRAGMENT_SHADER = /* glsl */ `
-  uniform sampler2D uMap;
-  uniform vec3 uTint;
-  varying vec4 vRect;
-  varying vec3 vColor;
-  void main() {
-    vec2 pc = vec2(gl_PointCoord.x, 1.0 - gl_PointCoord.y);
-    vec4 t = texture2D(uMap, vRect.xy + pc * vRect.zw);
-    if (t.a < 0.5) discard;
-    gl_FragColor = vec4(t.rgb * vColor * uTint, 1.0);
-    #include <colorspace_fragment>
-  }
-`;
-
 export class BlockParticles {
-  private readonly points: THREE.Points;
+  private readonly points: THREE.Sprite;
   private readonly geometry: THREE.BufferGeometry;
-  private readonly material: THREE.ShaderMaterial;
-
+  private readonly material: SpriteNodeMaterial;
+  private readonly positionAttribute: THREE.InstancedBufferAttribute;
+  private readonly rectAttribute: THREE.InstancedBufferAttribute;
+  private readonly colorAttribute: THREE.InstancedBufferAttribute;
+  private readonly sizeAttribute: THREE.InstancedBufferAttribute;
+  private readonly mapNode: ReturnType<typeof uniformTexture>;
+  private readonly tintNode = uniformTexture(this.voxelWorld.material.map);
   private readonly pos = new Float32Array(MAX_PARTICLES * 3);
   private readonly rect = new Float32Array(MAX_PARTICLES * 4);
   private readonly color = new Float32Array(MAX_PARTICLES * 3);
@@ -73,33 +49,46 @@ export class BlockParticles {
 
   constructor(private readonly scene: THREE.Scene, private readonly voxelWorld: VoxelWorld) {
     this.geometry = new THREE.BufferGeometry();
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
-    this.geometry.setAttribute('aRect', new THREE.BufferAttribute(this.rect, 4));
-    this.geometry.setAttribute('aColor', new THREE.BufferAttribute(this.color, 3));
-    this.geometry.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
 
-    this.material = new THREE.ShaderMaterial({
-      uniforms: {
-        uMap: { value: voxelWorld.material.map },
-        uTint: { value: new THREE.Color(1, 1, 1) },
-        uScale: { value: 600 },
-      },
-      vertexShader: VERTEX_SHADER,
-      fragmentShader: FRAGMENT_SHADER,
+    // WebGPU does not support variable-size point primitives. Use Three.js'
+    // instanced SpriteNodeMaterial instead; Sprite handles camera-facing quads
+    // while the instanced attributes keep this at one draw call.
+    this.positionAttribute = new THREE.InstancedBufferAttribute(this.pos, 3);
+    this.rectAttribute = new THREE.InstancedBufferAttribute(this.rect, 4);
+    this.colorAttribute = new THREE.InstancedBufferAttribute(this.color, 3);
+    this.sizeAttribute = new THREE.InstancedBufferAttribute(this.size, 1);
+
+    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
+    this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    this.geometry.setIndex([0, 1, 2, 0, 2, 3]);
+
+    const positionNode = instancedBufferAttribute(this.positionAttribute, 'vec3');
+    const rectNode = instancedBufferAttribute(this.rectAttribute, 'vec4');
+    const colorNode = instancedBufferAttribute(this.colorAttribute, 'vec3');
+    const sizeNode = instancedBufferAttribute(this.sizeAttribute, 'float');
+
+    this.mapNode = uniformTexture(this.voxelWorld.material.map);
+    const particleUV = uv().mul(rectNode.zw).add(rectNode.xy);
+    const sampled = texture(this.mapNode, particleUV);
+
+    this.material = new SpriteNodeMaterial({
+      transparent: true,
+      depthWrite: false,
+      alphaTest: 0.5,
+      sizeAttenuation: true,
     });
+    this.material.positionNode = positionNode;
+    this.material.scaleNode = vec2(sizeNode);
+    this.material.colorNode = sampled.rgb.mul(colorNode);
+    this.material.opacityNode = sampled.a;
+    this.material.toneMapped = false;
 
-    this.points = new THREE.Points(this.geometry, this.material);
-    this.points.frustumCulled = false; // positions move every frame; bounds would go stale
+    this.points = new THREE.Sprite(this.material);
+    this.points.count = MAX_PARTICLES;
+    this.points.frustumCulled = false;
     this.points.visible = false;
     this.points.renderOrder = 2;
-    this.points.onBeforeRender = (renderer, _scene, camera) => {
-      // Keep particle size in step with the viewport / FOV / resource-pack atlas.
-      renderer.getDrawingBufferSize(this.bufferSize);
-      const fov = (camera as THREE.PerspectiveCamera).fov ?? 70;
-      this.material.uniforms.uScale.value = this.bufferSize.y / (2 * Math.tan((fov * Math.PI) / 360));
-      this.material.uniforms.uMap.value = this.voxelWorld.material.map;
-      (this.material.uniforms.uTint.value as THREE.Color).copy(this.voxelWorld.material.color);
-    };
+
     this.scene.add(this.points);
   }
 
@@ -147,8 +136,11 @@ export class BlockParticles {
       this.color[i * 3 + 2] = this.light.b * jitter;
     }
 
-    (this.geometry.attributes.aRect as THREE.BufferAttribute).needsUpdate = true;
-    (this.geometry.attributes.aColor as THREE.BufferAttribute).needsUpdate = true;
+    this.rectAttribute.needsUpdate = true;
+    this.colorAttribute.needsUpdate = true;
+    this.positionAttribute.needsUpdate = true;
+    this.sizeAttribute.needsUpdate = true;
+    this.mapNode.value = this.voxelWorld.material.map;
     this.points.visible = true;
   }
 
@@ -209,8 +201,8 @@ export class BlockParticles {
       this.size[i] = this.baseSize[i] * Math.min(1, remaining / SHRINK_TIME);
     }
 
-    (this.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-    (this.geometry.attributes.aSize as THREE.BufferAttribute).needsUpdate = true;
+    this.positionAttribute.needsUpdate = true;
+    this.sizeAttribute.needsUpdate = true;
     if (this.aliveCount === 0) this.points.visible = false; // skip the draw call while idle
   }
 
