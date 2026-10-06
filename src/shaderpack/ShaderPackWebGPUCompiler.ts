@@ -35,11 +35,29 @@ async function getGlslang(): Promise<GlslangCompiler> {
         );
       }
 
-      const module = await import('@webgpu/glslang/dist/web-devel/glslang.js');
-      return (await module.default({
-        wasmBinary: bytes,
-        locateFile: () => glslangWasmUrl,
-      })) as GlslangCompiler;
+      // vite.config.ts patches this module so its default export is the raw
+      // Emscripten factory (the stock one ignores every option we pass).
+      // The returned Module is thenable, so never resolve a promise with it
+      // directly; resolve with a plain wrapper from onRuntimeInitialized.
+      const factory = (await import('@webgpu/glslang/dist/web-devel/glslang.js'))
+        .default as unknown as (opts: Record<string, unknown>) => unknown;
+      return await new Promise<GlslangCompiler>((resolve, reject) => {
+        try {
+          factory({
+            wasmBinary: bytes,
+            locateFile: () => glslangWasmUrl,
+            onRuntimeInitialized(this: any) {
+              resolve({
+                compileGLSL: (src: string, stage: 'vertex' | 'fragment' | 'compute') =>
+                  this.compileGLSL(src, stage),
+              });
+            },
+            onAbort: (reason: unknown) => reject(new Error(`glslang aborted: ${String(reason)}`)),
+          });
+        } catch (e) {
+          reject(e);
+        }
+      });
     })();
   }
   return glslangPromise;
@@ -83,7 +101,7 @@ export async function compileShaderToWGSL(
   }
 
   const wgsl = nagaTranslate({
-    from: 'spv',
+    from: 'spirv',
     to: 'wgsl',
     source: spirv,
   });
