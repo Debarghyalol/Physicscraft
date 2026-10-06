@@ -5,8 +5,9 @@ import {
   mrt,
   normalView,
   output,
-  vec4,
+  shadow,
 } from 'three/tsl';
+import type { DirectionalLight } from 'three';
 import type { Node } from 'three/tsl';
 
 type NostalgiaScenePass = {
@@ -76,7 +77,7 @@ export function createNostalgiaDeferredLighting(
   sceneNormal: Node,
   lightDirectionView: Node,
   lightStrength: Node,
-  sunLight: import('three').DirectionalLight,
+  sunLight: DirectionalLight,
 ): Node {
   const normal = sceneNormal.xyz.normalize();
   const lightDir = lightDirectionView.normalize();
