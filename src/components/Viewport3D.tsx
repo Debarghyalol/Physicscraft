@@ -140,7 +140,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const scenePass = pass(scene, camera);
     const sceneGBuffer = activateNostalgiaGBuffer(scenePass);
     const renderPipeline = new RenderPipeline(renderer, sceneGBuffer.color);
-    const nostalgiaLightDirectionView = uniform(new THREE.Vector3(0, 1, 0));
+    const nostalgiaLightDirectionWorld = uniform(new THREE.Vector3(0, 1, 0));
     const nostalgiaLightStrength = uniform(1.0);
 
     // 2. WebGPU canvas configuration
@@ -184,8 +184,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     const steveLight = new THREE.Color();
     const nostalgiaWorldLight = new THREE.Vector3();
-    const nostalgiaViewLight = new THREE.Vector3();
-    const nostalgiaViewMatrix = new THREE.Matrix3();
     const debugCameraDirection = new THREE.Vector3();
 
     // Shader-pack execution is intentionally paused here. The previous
@@ -225,7 +223,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               const deferredColor = createNostalgiaDeferredLighting(
                 sceneGBuffer.albedo,
                 sceneGBuffer.normal,
-                nostalgiaLightDirectionView,
+                nostalgiaLightDirectionWorld,
                 nostalgiaLightStrength,
                 envManager.sunLight,
               );
@@ -353,9 +351,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       // been rebuilt when this code runs.
       nostalgiaWorldLight.copy(envManager.minecraftSky.getSunDirection());
       if (nostalgiaWorldLight.y < 0) nostalgiaWorldLight.negate();
-      nostalgiaViewMatrix.setFromMatrix4(camera.matrixWorldInverse);
-      nostalgiaViewLight.copy(nostalgiaWorldLight).applyMatrix3(nostalgiaViewMatrix).normalize();
-      nostalgiaLightDirectionView.value.copy(nostalgiaViewLight);
+      nostalgiaWorldLight.normalize();
+      nostalgiaLightDirectionWorld.value.copy(nostalgiaWorldLight);
       nostalgiaLightStrength.value = Math.max(0.0, envManager.sunLight.intensity);
       
       // Capture the exact world-space camera look vector for the F3 diagnostics.
