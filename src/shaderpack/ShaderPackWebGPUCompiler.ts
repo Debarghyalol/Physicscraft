@@ -100,11 +100,18 @@ export async function compileShaderToWGSL(
     throw new Error(`GLSL compiler returned no SPIR-V for ${stage} shader`);
   }
 
-  const wgsl = nagaTranslate({
-    from: 'spirv',
-    to: 'wgsl',
-    source: spirv,
-  });
+  let wgsl: string;
+  try {
+    wgsl = nagaTranslate({
+      from: 'spirv',
+      to: 'wgsl',
+      source: spirv,
+    });
+  } catch (err: any) {
+    // NagaError.message is only the first line; the useful detail is in `formatted`.
+    const detail = typeof err?.formatted === 'string' ? err.formatted : String(err?.message ?? err);
+    throw new Error(`naga ${err?.kind ?? 'error'} (${stage}): ${detail}`);
+  }
 
   if (typeof wgsl !== 'string' || wgsl.trim().length === 0) {
     throw new Error(`Naga returned no WGSL for ${stage} shader`);
