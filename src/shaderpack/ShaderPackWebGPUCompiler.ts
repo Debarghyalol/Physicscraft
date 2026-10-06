@@ -1,4 +1,5 @@
 import { init as initNaga, translate as nagaTranslate } from 'naga-wasm';
+import glslangWasmUrl from '@webgpu/glslang/dist/web-devel/glslang.wasm?url';
 
 type GlslangCompiler = {
   compileGLSL(source: string, stage: 'vertex' | 'fragment' | 'compute'): Uint32Array;
@@ -10,7 +11,12 @@ let nagaInitialized = false;
 async function getGlslang(): Promise<GlslangCompiler> {
   if (!glslangPromise) {
     glslangPromise = import('@webgpu/glslang/dist/web-devel/glslang.js').then(async (module) => {
-      return (await module.default()) as GlslangCompiler;
+      // Vite fingerprints JS chunks, so glslang's Emscripten default lookup
+      // can otherwise request a non-existent sibling .wasm URL. Explicitly
+      // provide the emitted WASM asset URL instead of relying on import.meta.url.
+      return (await module.default({
+        locateFile: () => glslangWasmUrl,
+      })) as GlslangCompiler;
     });
   }
   return glslangPromise;
