@@ -141,6 +141,7 @@ const FTRANSFORM_DECL =
 
 /** `textureGather` is GLSL ES 3.10+, so WebGL2 needs a texelFetch based replacement. */
 const TEXTURE_GATHER_POLYFILL = `
+// @iris-polyfill-begin
 vec4 iris_textureGather(sampler2D s, vec2 uv, int comp) {
   ivec2 sz = textureSize(s, 0);
   vec2 t = uv * vec2(sz) - 0.5;
@@ -162,10 +163,12 @@ vec4 iris_textureGather(sampler2DShadow s, vec2 uv, float refZ) {
     texture(s, vec3((b + vec2(1.0, 0.0)) / sz, refZ)),
     texture(s, vec3(b / sz, refZ)));
 }
+// @iris-polyfill-end
 `;
 
 /** `bitfieldInsert` / `bitfieldExtract` are desktop GLSL 4.0 only. */
 const BITFIELD_POLYFILL = `
+// @iris-polyfill-begin
 uint iris_bitfieldInsert(uint base, uint ins, int off, int bits) {
   uint mask = bits >= 32 ? 0xFFFFFFFFu : ((1u << uint(bits)) - 1u);
   return (base & ~(mask << uint(off))) | ((ins & mask) << uint(off));
@@ -180,6 +183,7 @@ int iris_bitfieldExtract(int v, int off, int bits) {
   if (bits < 32 && (r & (1u << uint(bits - 1))) != 0u) r |= ~mask;
   return int(r);
 }
+// @iris-polyfill-end
 `;
 
 const ENGINE_SYMBOLS: Record<string, string> = {

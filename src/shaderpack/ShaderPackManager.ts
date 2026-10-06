@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { PackFiles, translateProgram } from './GlslTranslator';
 import { compileShaderToWGSL } from './ShaderPackWebGPUCompiler';
+import { buildVaryingLocations, collectVaryings, toVulkanGlsl } from './ShaderPackVulkanGlsl';
 
 /**
  * Shader pack (OptiFine / Iris format) import and storage.
@@ -247,13 +248,35 @@ class ShaderPackManagerImpl {
 
     const reports: ProgramReport[] = [];
     for (const [name, entries] of [...names].sort()) {
+      // Translate both stages first: vertex outputs and fragment inputs must share one
+      // program-wide location table.
+      const translated: Partial<Record<'vertex' | 'fragment', string>> = {};
       for (const stage of ['vertex', 'fragment'] as const) {
         const entry = stage === 'vertex' ? entries.vsh : entries.fsh;
         if (!entry) continue;
         try {
-          const translated = translateProgram({ files, entry, stage });
-          await compileShaderToWGSL(translated.source, stage);
-          reports.push({ name, stage, ok: true, log: '' });
+          translated[stage] = translateProgram({ files, entry, stage }).source;
+        } catch (err: any) {
+          reports.push({ name, stage, ok: false, log: String(err?.message ?? err) });
+        }
+      }
+      let varyingLocations: Map<string, number> | undefined;
+      try {
+        varyingLocations = buildVaryingLocations(
+          translated.vertex ? collectVaryings(translated.vertex, 'vertex') : [],
+          translated.fragment ? collectVaryings(translated.fragment, 'fragment') : [],
+        );
+      } catch (err: any) {
+        reports.push({ name, stage: 'vertex', ok: false, log: String(err?.message ?? err) });
+        continue;
+      }
+      for (const stage of ['vertex', 'fragment'] as const) {
+        const source = translated[stage];
+        if (source === undefined) continue;
+        try {
+          const vk = toVulkanGlsl(source, { stage, varyingLocations });
+          await compileShaderToWGSL(vk.source, stage);
+          reports.push({ name, stage, ok: true, log: vk.warnings.join('\n') });
         } catch (err: any) {
           reports.push({ name, stage, ok: false, log: String(err?.message ?? err) });
         }
