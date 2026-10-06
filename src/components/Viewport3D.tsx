@@ -346,8 +346,13 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.player.model.setLightTint(steveLight);
       }
 
-        // Keep the deferred lighting node synchronized with the actual animated Minecraft sun.
-      envManager.sunLight.getWorldDirection(nostalgiaWorldLight).negate();
+        // Use the Minecraft sky's authoritative celestial direction for deferred lighting.
+      // This is the direction FROM the surface TOWARD the sun/moon. Do not derive it
+      // back from DirectionalLight.matrixWorld here: the light transform is updated
+      // earlier in EnvironmentManager.update(), and its world matrix may not yet have
+      // been rebuilt when this code runs.
+      nostalgiaWorldLight.copy(envManager.minecraftSky.getSunDirection());
+      if (nostalgiaWorldLight.y < 0) nostalgiaWorldLight.negate();
       nostalgiaViewMatrix.setFromMatrix4(camera.matrixWorldInverse);
       nostalgiaViewLight.copy(nostalgiaWorldLight).applyMatrix3(nostalgiaViewMatrix).normalize();
       nostalgiaLightDirectionView.value.copy(nostalgiaViewLight);
