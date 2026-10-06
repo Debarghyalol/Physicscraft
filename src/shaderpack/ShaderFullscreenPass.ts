@@ -26,6 +26,7 @@ export class ShaderFullscreenPass {
    * COLOR_ATTACHMENTN, so we need this remapping FBO for composite passes. */
   private passFramebuffer: WebGLFramebuffer | null = null;
   private readonly neutralTexture: THREE.DataTexture;
+  private readonly whiteTexture: THREE.DataTexture;
 
   /** WebGL2 rejects the draw (INVALID_OPERATION, "Mismatch between texture
    * format and sampler type") when a depth texture with compare mode enabled is
@@ -51,6 +52,14 @@ export class ShaderFullscreenPass {
     this.neutralTexture.wrapS = THREE.ClampToEdgeWrapping;
     this.neutralTexture.wrapT = THREE.ClampToEdgeWrapping;
     this.neutralTexture.needsUpdate = true;
+
+    this.whiteTexture = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+    this.whiteTexture.colorSpace = THREE.NoColorSpace;
+    this.whiteTexture.minFilter = THREE.NearestFilter;
+    this.whiteTexture.magFilter = THREE.NearestFilter;
+    this.whiteTexture.wrapS = THREE.ClampToEdgeWrapping;
+    this.whiteTexture.wrapT = THREE.ClampToEdgeWrapping;
+    this.whiteTexture.needsUpdate = true;
   }
 
   public render(name: string, width: number, height: number, frameCounter: number, worldTime: number, shadows: ShaderShadowResources | null = null): boolean {
@@ -263,11 +272,15 @@ export class ShaderFullscreenPass {
         if (!assertTextureCall('activeTexture ' + sampler)) return false;
         const isShadowTex = sampler === 'shadowtex0' || sampler === 'shadowtex1';
         const isShadowColor = sampler === 'shadowcolor0' || sampler === 'shadowcolor1';
+        // shadowcolor0/1 are color samplers. This renderer has no shadow color
+        // buffer, and the shadow map texture is a compare-mode depth texture,
+        // which WebGL2 refuses to read through sampler2D/texelFetch. Bind an
+        // untinted white color texture instead (no colored shadow tint).
         const texture =
           sampler === 'noisetex' ? this.runtime.getTexture('noisetex') :
-          (isShadowTex || isShadowColor)
-            ? shadows?.texture ?? null
-            : null;
+          isShadowTex ? shadows?.texture ?? null :
+          isShadowColor ? this.whiteTexture :
+          null;
         if (isShadowTex) {
           // shadowtex0/1 are depth samplers (sampler2D or sampler2DShadow).
           gl.bindTexture(gl.TEXTURE_2D, texture ? this.getTextureHandle(texture) : this.getNeutralDepthTexture());
@@ -413,6 +426,7 @@ export class ShaderFullscreenPass {
     }
     this.disposeGeometry();
     this.neutralTexture.dispose();
+    this.whiteTexture.dispose();
   }
 
   private ensureGeometry(program: WebGLProgram): void {
