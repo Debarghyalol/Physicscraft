@@ -186,6 +186,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const nostalgiaWorldLight = new THREE.Vector3();
     const nostalgiaViewLight = new THREE.Vector3();
     const nostalgiaViewMatrix = new THREE.Matrix3();
+    const debugCameraDirection = new THREE.Vector3();
 
     // Shader-pack execution is intentionally paused here. The previous
     // implementation compiled raw GLSL through WebGL. WebGPURenderer requires
@@ -352,6 +353,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       nostalgiaLightDirectionView.value.copy(nostalgiaViewLight);
       nostalgiaLightStrength.value = Math.max(0.0, envManager.sunLight.intensity);
       
+      // Capture the exact world-space camera look vector for the F3 diagnostics.
+      // Three.js cameras look along their local -Z axis, and getWorldDirection()
+      // returns that direction in world space.
+      camera.updateMatrixWorld(true);
+      camera.getWorldDirection(debugCameraDirection);
+
       // Render through the WebGPU render graph. Shader-pack stages will be
       // composed here as TSL nodes instead of WebGL fullscreen passes.
       renderPipeline.render();
@@ -360,6 +367,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const info = renderer.info;
         const memory = memoryInfo();
         const meshes = scene.children.reduce((count, object) => count + (object instanceof THREE.Mesh ? 1 : 0), 0);
+        const horizontalLength = Math.hypot(debugCameraDirection.x, debugCameraDirection.z);
+        const facing = horizontalLength < 0.0001
+          ? (debugCameraDirection.y >= 0 ? 'UP (+Y)' : 'DOWN (-Y)')
+          : Math.abs(debugCameraDirection.x) >= Math.abs(debugCameraDirection.z)
+            ? (debugCameraDirection.x >= 0 ? '+X' : '-X')
+            : (debugCameraDirection.z >= 0 ? '+Z' : '-Z');
+        const cameraHeading = Math.atan2(debugCameraDirection.x, debugCameraDirection.z) * 180 / Math.PI;
+        const cameraPitch = Math.asin(THREE.MathUtils.clamp(debugCameraDirection.y, -1, 1)) * 180 / Math.PI;
         const sample: DebugFrameSample = {
           frameMs: renderEnd - frameStart,
           physicsMs: physicsEnd - physicsStart,
@@ -374,6 +389,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           textures: info.memory.textures,
           jsHeapMb: memory,
           playerPos: engine.player ? engine.player.getPosition() : null,
+          cameraPos: {
+            x: camera.position.x,
+            y: camera.position.y,
+            z: camera.position.z,
+          },
+          cameraDirection: {
+            x: debugCameraDirection.x,
+            y: debugCameraDirection.y,
+            z: debugCameraDirection.z,
+          },
+          cameraFacing: facing,
+          cameraYaw: cameraHeading,
+          cameraPitch,
         };
         debugHistoryRef.current = debugHistoryRef.current.length >= 120
           ? [...debugHistoryRef.current.slice(1), sample]
