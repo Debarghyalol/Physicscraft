@@ -1,11 +1,16 @@
 import { UnsignedByteType } from 'three';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
+  Loop,
   diffuseColor,
+  float,
   mrt,
   normalView,
   output,
   shadow,
+  texture,
+  time,
+  vec2,
 } from 'three/tsl';
 import type { DirectionalLight } from 'three';
 import type { Node } from 'three/tsl';
@@ -36,16 +41,6 @@ export interface NostalgiaGBuffer {
  * final beauty buffer.
  */
 export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): NostalgiaGBuffer {
-  // Keep only the attachments consumed by the current WebGPU deferred adapter.
-  // Three's MRT defaults to RGBA16F, so:
-  //   output = 8 bytes/sample
-  //   albedo = 4 bytes/sample (RGBA8)
-  //   normal = 8 bytes/sample (RGBA16F)
-  // Total = 20 bytes/sample, safely below the device limit of 32.
-  //
-  // Do not read aLight here. Voxel chunks have it, but other scene geometry
-  // (particles, player meshes, sky, etc.) does not; an unconditional TSL
-  // attribute would make every material pipeline fail to build.
   scenePass.setMRT(
     mrt({
       output,
@@ -65,12 +60,93 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
 }
 
 /**
- * First real deferred lighting stage.
+ * Translate Nostalgia's shadowFiltered() kernel into TSL and install it into
+ * Three's ShadowNode filter hook. Three continues to own shadow-map rendering,
+ * projection, bias and lifetime; this replaces only the filtering algorithm.
  *
- * This consumes the actual Nostalgia-style albedo/normal G-buffer instead of
- * the already-lit beauty buffer. It is intentionally the WebGPU equivalent
- * of the core diffuse operation in deferred1.fsh; shadow/VPS filtering is
- * added in the following stage once the WebGPU shadow attachments are exposed.
+ * Iris normally provides shadowtex0, shadowtex1 and shadowcolor0 separately.
+ * The current WebGPU renderer has one native directional shadow depth texture,
+ * so this port reproduces Nostalgia's depth/occlusion filtering path and
+ * leaves transparent shadow colour for the later dedicated shadow pass.
+ */
+function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
+  const lightShadow = sunLight.shadow as any;
+  if (lightShadow.__nostalgiaFilterInstalled === true) return;
+
+  lightShadow.filterNode = ({ depthTexture, shadowCoord, shadow }: any) => {
+    const mapSize = vec2(shadow.mapSize.width, shadow.mapSize.height);
+    const shadowmapPixel = vec2(1.0).div(mapSize);
+
+    // Nostalgia: R2((i + dither) * 64.0), with the same plastic constant.
+    const rho = 1.324717957244746;
+    const tau = Math.PI * 2.0;
+    const iterations = 12;
+    const dither = time.mul(60.0).fract();
+
+    // Nostalgia's shadowmapWarp() works around the centered shadow-map domain.
+    // ShadowNode has already performed the light projection and normalization.
+    const centered = shadowCoord.xy.mul(2.0).sub(1.0);
+    const distortion = centered.mul(1.169).length().mul(0.85).add(0.15);
+    const warped = centered.div(distortion);
+    const uv = warped.mul(0.5).add(0.5);
+
+    // getShadowRegular() clamps the filter to at least two shadow pixels.
+    // DirectionalLightShadow.radius is used as the runtime sigma control.
+    const sigma = float(shadow.radius ?? 1.0).mul(shadowmapPixel.x);
+    const minSoftSigma = shadowmapPixel.x.mul(2.0);
+    const softSigma = sigma.max(minSoftSigma);
+
+    const totalShadow = float(0.0).toVar('nostalgiaShadowTotal');
+
+    Loop(iterations, ({ i }) => {
+      const n = float(i).add(dither).mul(64.0);
+      const r2 = vec2(
+        float(0.5).add(n.div(rho)).fract(),
+        float(0.5).add(n.div(rho * rho)).fract(),
+      );
+      const angle = r2.x.mul(tau);
+      const diskRadius = r2.y.sqrt();
+      const offset = vec2(angle.cos(), angle.sin()).mul(diskRadius).mul(softSigma);
+
+      // GetShadowBilinear(): four depth comparisons followed by explicit
+      // bilinear interpolation, mirroring Nostalgia's shadowtex sampling.
+      const sampleUv = uv.add(offset);
+      const pixel = sampleUv.mul(mapSize).sub(0.5);
+      const base = pixel.floor().add(0.5).div(mapSize);
+      const frac = pixel.fract();
+      const texel = vec2(1.0).div(mapSize);
+
+      const s00 = texture(depthTexture, base).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
+      const s10 = texture(depthTexture, base.add(vec2(1.0, 0.0).mul(texel))).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
+      const s01 = texture(depthTexture, base.add(vec2(0.0, 1.0).mul(texel))).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
+      const s11 = texture(depthTexture, base.add(vec2(1.0, 1.0).mul(texel))).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
+
+      const row0 = s00.mul(frac.x.oneMinus()).add(s10.mul(frac.x));
+      const row1 = s01.mul(frac.x.oneMinus()).add(s11.mul(frac.x));
+      const bilinear = row0.mul(frac.y.oneMinus()).add(row1.mul(frac.y));
+      totalShadow.addAssign(bilinear);
+    });
+
+    const filtered = totalShadow.div(iterations);
+
+    // Nostalgia's sharpenedShadow = linStep(TotalShadow.a, borders.x, borders.y)
+    // where borders are mixed from (0.5,0.6) to (0.0,1.0) using sigma/minSoftSigma.
+    const sharpenLerp = sigma.div(minSoftSigma).clamp(0.0, 1.0);
+    const borderLow = float(0.5).mul(sharpenLerp.oneMinus());
+    const borderHigh = float(0.6).mul(sharpenLerp.oneMinus()).add(sharpenLerp);
+
+    return filtered
+      .sub(borderLow)
+      .div(borderHigh.sub(borderLow).max(0.0001))
+      .clamp(0.0, 1.0);
+  };
+
+  lightShadow.__nostalgiaFilterInstalled = true;
+}
+
+/**
+ * Deferred lighting using the actual Nostalgia shadowFiltered() kernel
+ * translated to TSL, with Three.js retaining the native shadow-map renderer.
  */
 export function createNostalgiaDeferredLighting(
   albedo: Node,
@@ -83,18 +159,12 @@ export function createNostalgiaDeferredLighting(
   const lightDir = lightDirectionView.normalize();
   const diffuse = normal.dot(lightDir).max(0.0);
 
-  // Use Three.js's native WebGPU shadow node. This samples the DirectionalLight
-  // shadow map generated by WebGPURenderer, so the deferred pass receives the
-  // same dynamic sun/moon shadowing as the scene.
+  installNostalgiaShadowFilter(sunLight);
   const shadowFactor = shadow(sunLight).clamp(0.0, 1.0);
 
-  // Keep a small sky contribution while attenuating only the direct component
-  // with the actual shadow map.
   const direct = diffuse.mul(lightStrength).mul(0.9).mul(shadowFactor);
   const lighting = direct.add(0.10);
 
-  // output is already a vec4 node; replace the alpha component without
-  // relying on the TSL vec4 constructor at runtime.
   return albedo.mul(lighting);
 }
 
