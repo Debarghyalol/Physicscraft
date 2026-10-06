@@ -162,8 +162,11 @@ export function createNostalgiaDeferredLighting(
   installNostalgiaShadowFilter(sunLight);
   const shadowFactor = shadow(sunLight).clamp(0.0, 1.0);
 
+  // The custom deferred node bypasses Three's normal HemisphereLight/fill
+  // evaluation, so restore a Minecraft-like sky-light contribution explicitly.
+  const skyAmbient = float(0.28);
   const direct = diffuse.mul(lightStrength).mul(0.9).mul(shadowFactor);
-  const lighting = direct.add(0.10);
+  const lighting = direct.add(skyAmbient).clamp(0.0, 1.5);
 
   return albedo.mul(lighting);
 }
@@ -171,7 +174,16 @@ export function createNostalgiaDeferredLighting(
 /**
  * Nostalgia's final.fsh applies CAS with strength 0.5 to colortex0.
  */
-export function createNostalgiaFinalOutput(sceneColor: Node): Node {
+export function createNostalgiaFinalOutput(
+  deferredColor: Node,
+  originalSceneColor: Node,
+  sceneDepth: Node,
+): Node {
+  // WebGPURenderer defaults to a normal depth buffer. A cleared depth value
+  // identifies the sky/background, whose original pass contains the actual
+  // Minecraft sun, moon, stars and cloud rendering.
+  const background = sceneDepth.greaterThanEqual(0.99999);
+  const sceneColor = background.select(originalSceneColor, deferredColor);
   return sharpen(sceneColor, 0.5, false);
 }
 
