@@ -103,8 +103,15 @@ export class EnvironmentManager {
     this.applySettings(this.currentSettings);
   }
 
-  public getShadowMap(): THREE.Texture | null {
-    return this.sunLight.shadow.map?.texture ?? null;
+  /**
+   * Returns the actual depth attachment of the directional-light shadow map.
+   *
+   * Shader-pack shadowtex0/shadowtex1 are depth textures in Iris/OptiFine.
+   * The render-target color texture (shadow.map.texture) is NOT compatible
+   * with sampler2D/sampler2DShadow and causes WebGL INVALID_OPERATION 1282.
+   */
+  public getShadowDepthTexture(): THREE.DepthTexture | null {
+    return this.sunLight.shadow.map?.depthTexture ?? null;
   }
 
   public getShadowCamera(): THREE.Camera {
