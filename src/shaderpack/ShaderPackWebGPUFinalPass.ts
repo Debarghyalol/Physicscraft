@@ -1,4 +1,4 @@
-import { sharpen } from 'three/tsl';
+import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import type { Node } from 'three/tsl';
 
 /**
