@@ -49,7 +49,10 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
       // deferred albedo applies the Minecraft face shading a second time and makes
       // vertical/underside faces unnaturally black before lighting even runs.
       albedo: materialColor,
-      normal: normalWorld,
+      // MRT color targets are normalized 0..1. Store the world normal encoded
+      // from [-1,1] to [0,1]; writing normalWorld directly clips negative X/Y/Z
+      // components and destroys the side/bottom-face normals in the deferred pass.
+      normal: normalWorld.mul(0.5).add(0.5),
     }),
   );
 
