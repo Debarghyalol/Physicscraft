@@ -14,6 +14,11 @@ export interface DebugFrameSample {
   textures: number;
   jsHeapMb: number | null;
   playerPos: { x: number; y: number; z: number } | null;
+  cameraPos: { x: number; y: number; z: number } | null;
+  cameraDirection: { x: number; y: number; z: number } | null;
+  cameraFacing: string;
+  cameraYaw: number | null;
+  cameraPitch: number | null;
 }
 
 export interface DebugOverlayProps {
@@ -67,6 +72,25 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, his
           value={sample.playerPos
             ? fmt(sample.playerPos.x, 3) + ' / ' + fmt(sample.playerPos.y, 3) + ' / ' + fmt(sample.playerPos.z, 3)
             : '—'}
+        />
+        <Metric
+          label="Camera XYZ"
+          value={sample.cameraPos
+            ? fmt(sample.cameraPos.x, 3) + ' / ' + fmt(sample.cameraPos.y, 3) + ' / ' + fmt(sample.cameraPos.z, 3)
+            : '—'}
+        />
+        <Metric
+          label="Look dir"
+          value={sample.cameraDirection
+            ? fmt(sample.cameraDirection.x, 3) + ' / ' + fmt(sample.cameraDirection.y, 3) + ' / ' + fmt(sample.cameraDirection.z, 3)
+            : '—'}
+        />
+        <Metric label="Facing" value={sample.cameraFacing} />
+        <Metric
+          label="Yaw / Pitch"
+          value={sample.cameraYaw == null || sample.cameraPitch == null
+            ? '—'
+            : fmt(sample.cameraYaw, 2) + '° / ' + fmt(sample.cameraPitch, 2) + '°'}
         />
         <Metric label="Frame" value={fmt(sample.frameMs, 2) + ' ms'} />
         <Metric label="Physics" value={fmt(sample.physicsMs, 2) + ' ms'} />
