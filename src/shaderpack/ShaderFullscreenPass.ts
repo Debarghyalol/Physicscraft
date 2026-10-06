@@ -95,14 +95,20 @@ export class ShaderFullscreenPass {
     // for drawing. Copy the complete read set into the write set first, then
     // swap only after the pass has finished.
     const sampledLogicalAttachments = this.getSampledColorAttachments(definition.fragmentSource);
-    const outputSet = new Set(outputBuffers);
+    // Main-buffer reads must be copied to the write side before a mixed
+    // pass, otherwise the pass would sample a color attachment that is also
+    // attached for drawing. Extra-buffer outputs live in their own ping-pong
+    // target and do not participate in this copy.
+    const mainOutputPhysical = new Set(
+      mainOutputs.map((index) => this.framebuffers.logicalToPhysicalAttachment(index))
+    );
     const copyPhysicalAttachments = new Set(
       sampledLogicalAttachments
         .filter((index) => this.framebuffers.logicalToExtraAttachment(index) < 0)
         .map((index) => this.framebuffers.logicalToPhysicalAttachment(index))
-        .filter((index) => !outputSet.has(index))
+        .filter((index) => !mainOutputPhysical.has(index))
     );
-    if (highOutputs.length === 0) this.framebuffers.prepareWriteTarget(copyPhysicalAttachments);
+    if (mainOutputs.length > 0) this.framebuffers.prepareWriteTarget(copyPhysicalAttachments);
 
     const previousTarget = this.renderer.getRenderTarget();
     const readTarget = highOutputs.length > 0 && !mixedOutputs
