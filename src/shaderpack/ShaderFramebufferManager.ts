@@ -124,6 +124,9 @@ export class ShaderFramebufferManager {
     const extraSlot = this.logicalToExtraAttachment(index);
     if (extraSlot >= 0) {
       const selectedExtra = target === 'read' ? this.extraReadTarget : target === 'write' ? this.extraWriteTarget : this.extraPrimary;
+      // Three.js' WebGLRenderTarget count is capped by the implementation's
+      // MRT support. If a device exposes fewer than 8 attachments, keep the
+      // logical slot unavailable rather than aliasing an unrelated texture.
       return selectedExtra?.textures[extraSlot] ?? null;
     }
     const physicalIndex = this.logicalToPhysicalAttachment(index);
@@ -209,7 +212,9 @@ export class ShaderFramebufferManager {
     // constructor options hits the depthTexture setter before the target
     // is fully initialized and can throw "reading 'renderTarget'".
     const target = new THREE.WebGLRenderTarget(width, height, {
-      count,
+      count: Math.min(count, Math.max(1, Number(this.renderer.getContext().getParameter(
+        (this.renderer.getContext() as WebGL2RenderingContext).MAX_COLOR_ATTACHMENTS
+      )) || 1)),
       depthBuffer: depth,
       stencilBuffer: false,
       generateMipmaps: false,
