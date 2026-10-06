@@ -1,14 +1,28 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import fs from 'node:fs';
 import path from 'path';
+import type { Plugin } from 'vite';
 import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
+
+function emitGlslangWasm(): Plugin {
+  return {
+    name: 'physicscraft-glslang-wasm',
+    generateBundle() {
+      const wasmPath = path.resolve('node_modules/@webgpu/glslang/dist/web-devel/glslang.wasm');
+      if (!fs.existsSync(wasmPath)) throw new Error('glslang WASM not found at ' + wasmPath);
+      this.emitFile({ type: 'asset', fileName: 'glslang.wasm', source: fs.readFileSync(wasmPath) });
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
     plugins: [
       react(),
       tailwindcss(),
+      emitGlslangWasm(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'icon.svg'],
@@ -34,7 +48,7 @@ export default defineConfig(() => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}'],
         },
         devOptions: {
           enabled: true,
