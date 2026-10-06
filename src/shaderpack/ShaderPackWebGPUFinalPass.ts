@@ -162,7 +162,8 @@ export function createNostalgiaDeferredLighting(
   lightStrength: Node,
   sunLight: DirectionalLight,
 ): Node {
-  const normal = sceneNormal.xyz.normalize();
+  // Decode the 0..1 G-buffer normal back into a unit world-space vector.
+  const normal = sceneNormal.xyz.mul(2.0).sub(1.0).normalize();
   const lightDir = lightDirectionView.normalize();
   const diffuse = normal.dot(lightDir).max(0.0);
 
