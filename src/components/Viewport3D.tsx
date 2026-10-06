@@ -138,7 +138,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // WebGPU post-processing is owned by Three's RenderPipeline/TSL stack.
     // The scene pass is colortex0 for the first shader-pack output adapter.
     const scenePass = pass(scene, camera);
-    const renderPipeline = new RenderPipeline(renderer);
+    const sceneGBuffer = activateNostalgiaGBuffer(scenePass);
+    const renderPipeline = new RenderPipeline(renderer, sceneGBuffer.color);
     const nostalgiaLightDirectionView = uniform(new THREE.Vector3(0, 1, 0));
     const nostalgiaLightStrength = uniform(1.0);
 
@@ -220,10 +221,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             });
             if (isNostalgiaFinalSource(translatedFinal.source)) {
               // The PassNode owns the MRT configuration; configure it before the render graph compiles.
-              const gbuffer = activateNostalgiaGBuffer(scenePass);
               const deferredColor = createNostalgiaDeferredLighting(
-                gbuffer.color,
-                gbuffer.normal,
+                sceneGBuffer.color,
+                sceneGBuffer.normal,
                 nostalgiaLightDirectionView,
                 nostalgiaLightStrength,
               );
