@@ -240,7 +240,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           '[Renderer] WebGPU renderer initialized.',
           `[ShaderPipeline] ${reports.filter((report) => report.ok).length}/${reports.length} world0 shader stages translated to WGSL.`,
           finalAdapter
-            ? '[ShaderPipeline] Active final.fsh mapped to WebGPU TSL final pass (Nostalgia CAS).'
+            ? '[ShaderPipeline] Nostalgia deferred lighting + final CAS stages mapped to WebGPU TSL.'
             : '[ShaderPipeline] No supported WebGPU final-pass adapter for the active pack yet.',
           ...failed.slice(0, 12).map((report) =>
             `[ShaderPipeline] ${report.name} (${report.stage})\\n${report.log}`,
