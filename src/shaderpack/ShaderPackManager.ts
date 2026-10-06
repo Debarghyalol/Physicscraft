@@ -232,7 +232,7 @@ class ShaderPackManagerImpl {
     const { files } = await this.loadFiles(id);
     const names = new Map<string, { vsh?: string; fsh?: string }>();
     for (const p of files.keys()) {
-      const match = new RegExp('^' + dimension + '/([^/]+)\\\\.(vsh|fsh)
+      const match = new RegExp('^' + dimension + '/([^/]+)\\.(vsh|fsh)$').exec(p);
       if (!match) continue;
       const entry = names.get(match[1]) ?? {};
       entry[match[2] as 'vsh' | 'fsh'] = p;
