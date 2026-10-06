@@ -82,11 +82,10 @@ export class ShaderFullscreenPass {
     const highOutputs = logicalOutputs.filter((index) => this.framebuffers.logicalToExtraAttachment(index) >= 0);
     const mainOutputs = logicalOutputs.filter((index) => this.framebuffers.logicalToExtraAttachment(index) < 0);
     const mixedOutputs = highOutputs.length > 0 && mainOutputs.length > 0;
-    const outputBuffers = mixedOutputs
-      ? logicalOutputs
-      : highOutputs.length > 0
-        ? highOutputs.map((index) => this.framebuffers.logicalToExtraAttachment(index))
-        : this.resolveOutputBuffers(definition);
+    // Keep the logical RENDERTARGETS indices all the way into the pass FBO.
+    // configurePassFramebuffer() resolves each logical buffer to either the
+    // main ping-pong target or the extra target, which also enables mixed lists.
+    const outputBuffers = logicalOutputs;
     if (outputBuffers.length === 0) {
       console.warn('[ShaderPipeline] Pass has no valid output buffers:', name, logicalOutputs);
       return false;
