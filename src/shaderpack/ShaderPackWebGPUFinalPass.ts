@@ -1,5 +1,4 @@
-import { Node } from 'three/tsl';
-import { sharpen } from 'three/tsl';
+import { Node, sharpen } from 'three/tsl';
 
 /**
  * First real WebGPU shader-pack output adapter.
