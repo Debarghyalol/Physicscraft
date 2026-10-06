@@ -226,6 +226,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 sceneGBuffer.normal,
                 nostalgiaLightDirectionView,
                 nostalgiaLightStrength,
+                envManager.sunLight,
               );
               renderPipeline.outputNode = createNostalgiaFinalOutput(deferredColor);
               renderPipeline.needsUpdate = true;
