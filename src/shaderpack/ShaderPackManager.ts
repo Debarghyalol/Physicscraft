@@ -1,6 +1,5 @@
 import JSZip from 'jszip';
 import { PackFiles, translateProgram } from './GlslTranslator';
-import { compileShaderToWGSL } from './ShaderPackWebGPUCompiler';
 
 /**
  * Shader pack (OptiFine / Iris format) import and storage.
@@ -227,16 +226,19 @@ class ShaderPackManagerImpl {
     return reports;
   }
 
-
+  getCompileDiagnostics(): string[] {
+    return this.lastCompileReports
+      .filter((report) => !report.ok)
+      .map((report) => `[ShaderPipeline] ${report.name} (${report.stage})\n${report.log}`);
+  }
   /** Translate shader stages through GLSL -> SPIR-V -> WGSL for WebGPU validation. */
   async compileWebGPUReport(id: string, dimension: string): Promise<ProgramReport[]> {
     const { files } = await this.loadFiles(id);
     const names = new Map<string, { vsh?: string; fsh?: string }>();
 
     for (const p of files.keys()) {
-      const match = new RegExp(\`^\${dimension}/([^/]+)\\.(vsh|fsh)$\`).exec(p);
+      const match = new RegExp(`^${dimension}/([^/]+)\\\\.(vsh|fsh)$`).exec(p);
       if (!match) continue;
-
       const entry = names.get(match[1]) ?? {};
       entry[match[2] as 'vsh' | 'fsh'] = p;
       names.set(match[1], entry);
@@ -247,7 +249,6 @@ class ShaderPackManagerImpl {
       for (const stage of ['vertex', 'fragment'] as const) {
         const entry = stage === 'vertex' ? entries.vsh : entries.fsh;
         if (!entry) continue;
-
         try {
           const translated = translateProgram({ files, entry, stage });
           await compileShaderToWGSL(translated.source, stage);
@@ -257,7 +258,6 @@ class ShaderPackManagerImpl {
         }
       }
     }
-
     this.lastCompileReports = reports;
     return reports;
   }
@@ -265,8 +265,9 @@ class ShaderPackManagerImpl {
   getCompileDiagnostics(): string[] {
     return this.lastCompileReports
       .filter((report) => !report.ok)
-      .map((report) => \`[ShaderPipeline] \${report.name} (\${report.stage})\\n\${report.log}\`);
+      .map((report) => `[ShaderPipeline] ${report.name} (${report.stage})\\n${report.log}`);
   }
+
 }
 
 export const shaderPacks = new ShaderPackManagerImpl();
