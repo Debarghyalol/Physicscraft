@@ -1,5 +1,5 @@
 import { init as initNaga, translate as nagaTranslate } from 'naga-wasm';
-import glslangWasmUrl from '@webgpu/glslang/dist/web-devel/glslang.wasm?url';
+const glslangWasmUrl = `${import.meta.env.BASE_URL}glslang.wasm`;
 
 type GlslangCompiler = {
   compileGLSL(source: string, stage: 'vertex' | 'fragment' | 'compute'): Uint32Array;
