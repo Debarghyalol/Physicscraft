@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
-import { pass } from 'three/tsl';
+import { pass, uniform, float } from 'three/tsl';
 import { PhysicsEngine } from '../physics/PhysicsEngine';
 import {
   ActiveTool,
@@ -22,7 +22,7 @@ import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
 import { translateProgram } from '../shaderpack/GlslTranslator';
-import { activateNostalgiaGBuffer, createNostalgiaFinalOutput, isNostalgiaFinalSource } from '../shaderpack/ShaderPackWebGPUFinalPass';
+import { activateNostalgiaGBuffer, createNostalgiaDeferredLighting, createNostalgiaFinalOutput, isNostalgiaFinalSource } from '../shaderpack/ShaderPackWebGPUFinalPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -138,8 +138,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // WebGPU post-processing is owned by Three's RenderPipeline/TSL stack.
     // The scene pass is colortex0 for the first shader-pack output adapter.
     const scenePass = pass(scene, camera);
-    const scenePassColor = scenePass.getTextureNode('output');
-    const renderPipeline = new RenderPipeline(renderer, scenePassColor);
+    const renderPipeline = new RenderPipeline(renderer);
+    const nostalgiaLightDirectionView = uniform(new THREE.Vector3(0, 1, 0));
+    const nostalgiaLightStrength = uniform(1.0);
 
     // 2. WebGPU canvas configuration
     const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
@@ -181,6 +182,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     engineRef.current = engine;
 
     const steveLight = new THREE.Color();
+    const nostalgiaWorldLight = new THREE.Vector3();
+    const nostalgiaViewLight = new THREE.Vector3();
+    const nostalgiaViewMatrix = new THREE.Matrix3();
 
     // Shader-pack execution is intentionally paused here. The previous
     // implementation compiled raw GLSL through WebGL. WebGPURenderer requires
@@ -216,8 +220,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
             });
             if (isNostalgiaFinalSource(translatedFinal.source)) {
               // The PassNode owns the MRT configuration; configure it before the render graph compiles.
-              activateNostalgiaGBuffer(scenePass);
-              renderPipeline.outputNode = createNostalgiaFinalOutput(scenePassColor);
+              const gbuffer = activateNostalgiaGBuffer(scenePass);
+              const deferredColor = createNostalgiaDeferredLighting(
+                gbuffer.color,
+                gbuffer.normal,
+                nostalgiaLightDirectionView,
+                nostalgiaLightStrength,
+              );
+              renderPipeline.outputNode = createNostalgiaFinalOutput(deferredColor);
               renderPipeline.needsUpdate = true;
               finalAdapter = true;
             }
@@ -330,7 +340,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.player.model.setLightTint(steveLight);
       }
 
-        // Render through the WebGPU render graph. Shader-pack stages will be
+        // Keep the deferred lighting node synchronized with the actual animated Minecraft sun.
+      envManager.sunLight.getWorldDirection(nostalgiaWorldLight).negate();
+      nostalgiaViewMatrix.setFromMatrix4(camera.matrixWorldInverse);
+      nostalgiaViewLight.copy(nostalgiaWorldLight).applyMatrix3(nostalgiaViewMatrix).normalize();
+      nostalgiaLightDirectionView.value.copy(nostalgiaViewLight);
+      nostalgiaLightStrength.value = Math.max(0.0, envManager.sunLight.intensity);
+      
+      // Render through the WebGPU render graph. Shader-pack stages will be
       // composed here as TSL nodes instead of WebGL fullscreen passes.
       renderPipeline.render();
       const renderEnd = performance.now();
