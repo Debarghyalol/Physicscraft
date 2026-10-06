@@ -163,8 +163,24 @@ export function createNostalgiaDeferredLighting(
   const shadowFactor = shadow(sunLight).clamp(0.0, 1.0);
 
   // The custom deferred node bypasses Three's normal HemisphereLight/fill
-  // evaluation, so restore a Minecraft-like sky-light contribution explicitly.
-  const skyAmbient = float(0.28);
+  // evaluation. A constant ambient term makes every face equally exposed, which
+  // is especially wrong for Minecraft: upward-facing surfaces see the sky while
+  // downward-facing surfaces receive much less sky illumination. Use a cheap
+  // hemispherical sky term here until the full Iris lightmap G-buffer is wired in.
+  //
+  // normal.y:
+  //   +1 = upward face   -> full sky exposure
+  //    0 = vertical face -> partial sky exposure
+  //   -1 = downward face -> minimum ambient
+  //
+  // Keep a small floor so the underside does not become mathematically black,
+  // while tying the ambient energy to the current sun/moon intensity so it also
+  // follows the day/night cycle instead of staying at a fixed brightness.
+  const skyExposure = normal.y.mul(0.5).add(0.5).clamp(0.0, 1.0);
+  const skyAmbient = float(0.08)
+    .add(skyExposure.mul(0.32))
+    .mul(lightStrength.max(0.18));
+
   const direct = diffuse.mul(lightStrength).mul(0.9).mul(shadowFactor);
   const lighting = direct.add(skyAmbient).clamp(0.0, 1.5);
 
