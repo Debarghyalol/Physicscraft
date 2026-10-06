@@ -21,6 +21,8 @@ import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
+import { translateProgram } from '../shaderpack/GlslTranslator';
+import { createNostalgiaFinalOutput, isNostalgiaFinalSource } from '../shaderpack/ShaderPackWebGPUFinalPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -133,11 +135,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const camera = new THREE.PerspectiveCamera(graphics.fov, aspect, 0.1, 400);
     cameraRef.current = camera;
 
-    // WebGPU post-processing is now owned by Three's RenderPipeline/TSL stack.
-    // Shader-pack passes will be inserted into this graph once their translated
-    // WGSL resources are mapped to TSL nodes.
+    // WebGPU post-processing is owned by Three's RenderPipeline/TSL stack.
+    // The scene pass is colortex0 for the first shader-pack output adapter.
     const scenePass = pass(scene, camera);
-    const renderPipeline = new RenderPipeline(renderer, scenePass);
+    const scenePassColor = scenePass.getTextureNode('output');
+    const renderPipeline = new RenderPipeline(renderer, scenePassColor);
 
     // 2. WebGPU canvas configuration
     const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
@@ -201,9 +203,33 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const reports = await shaderPacks.compileWebGPUReport(activePack.id, 'world0');
         if (disposed) return;
         const failed = reports.filter((report) => !report.ok);
+
+        let finalAdapter = false;
+        try {
+          const { files } = await shaderPacks.loadFiles(activePack.id);
+          const finalEntry = 'world0/final.fsh';
+          if (files.has(finalEntry)) {
+            const translatedFinal = translateProgram({
+              files,
+              entry: finalEntry,
+              stage: 'fragment',
+            });
+            if (isNostalgiaFinalSource(translatedFinal.source)) {
+              renderPipeline.outputNode = createNostalgiaFinalOutput(scenePassColor);
+              renderPipeline.needsUpdate = true;
+              finalAdapter = true;
+            }
+          }
+        } catch (adapterError: any) {
+          console.warn('[ShaderPipeline] WebGPU final-pass adapter setup failed:', adapterError);
+        }
+
         setShaderDiagnostics([
           '[Renderer] WebGPU renderer initialized.',
           `[ShaderPipeline] ${reports.filter((report) => report.ok).length}/${reports.length} world0 shader stages translated to WGSL.`,
+          finalAdapter
+            ? '[ShaderPipeline] Active final.fsh mapped to WebGPU TSL final pass (Nostalgia CAS).'
+            : '[ShaderPipeline] No supported WebGPU final-pass adapter for the active pack yet.',
           ...failed.slice(0, 12).map((report) =>
             `[ShaderPipeline] ${report.name} (${report.stage})\\n${report.log}`,
           ),
