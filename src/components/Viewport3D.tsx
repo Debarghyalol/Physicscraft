@@ -228,7 +228,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 nostalgiaLightStrength,
                 envManager.sunLight,
               );
-              renderPipeline.outputNode = createNostalgiaFinalOutput(deferredColor);
+              renderPipeline.outputNode = createNostalgiaFinalOutput(
+                deferredColor,
+                sceneGBuffer.color,
+                sceneGBuffer.depth,
+              );
               renderPipeline.needsUpdate = true;
               finalAdapter = true;
             }
