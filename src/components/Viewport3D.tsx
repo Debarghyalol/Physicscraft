@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
+import { WebGPURenderer } from 'three/webgpu';
 import { PhysicsEngine } from '../physics/PhysicsEngine';
 import {
   ActiveTool,
@@ -19,10 +20,6 @@ import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
-import { ShaderPackRuntime } from '../shaderpack/ShaderPackRuntime';
-import { ShaderFinalPass } from '../shaderpack/ShaderFinalPass';
-import { ShaderGBufferPass } from '../shaderpack/ShaderGBufferPass';
-import { ShaderFullscreenPass } from '../shaderpack/ShaderFullscreenPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -109,18 +106,33 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const container = containerRef.current;
     if (!container) return;
 
+    let disposed = false;
+    let cleanupRenderer: (() => void) | null = null;
+
+    const initializeRenderer = async () => {
+      const renderer = new WebGPURenderer({
+        antialias: true,
+        powerPreference: 'high-performance',
+      });
+      await renderer.init();
+
+      if (disposed) {
+        renderer.dispose();
+        return;
+      }
+
+      console.info(
+        '[Renderer] Three.js WebGPURenderer initialized:',
+        renderer.backend?.isWebGPUBackend ? 'WebGPU' : 'WebGL2 fallback'
+      );
+
     // 1. Three.js Scene & Camera setup
     const scene = new THREE.Scene();
     const aspect = container.clientWidth / container.clientHeight;
     const camera = new THREE.PerspectiveCamera(graphics.fov, aspect, 0.1, 400);
     cameraRef.current = camera;
 
-    // 2. WebGL Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    const shaderRuntime = new ShaderPackRuntime(renderer, { debug: graphicsRef.current.debugMode });
-    const shaderFinalPass = new ShaderFinalPass(renderer, shaderRuntime);
-    const shaderGBufferPass = new ShaderGBufferPass(renderer, shaderRuntime);
-    const shaderFullscreenPass = new ShaderFullscreenPass(renderer, shaderRuntime, shaderGBufferPass.framebufferManager);
+    // 2. WebGPU canvas configuration
     const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
     renderer.setPixelRatio(pixelRatio);
 
@@ -140,14 +152,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
 
-      const drawingBuffer = renderer.getDrawingBufferSize(new THREE.Vector2());
-      shaderGBufferPass.resize(drawingBuffer.x, drawingBuffer.y);
-      shaderFinalPass.resize(drawingBuffer.x, drawingBuffer.y);
     };
 
     resizeRenderer();
     renderer.shadowMap.enabled = graphics.shadows;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
 
     container.appendChild(renderer.domElement);
 
@@ -163,56 +171,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const engine = new PhysicsEngine(scene, camera);
     engineRef.current = engine;
 
-    let isDisposed = false;
     const steveLight = new THREE.Color();
 
-    // Shader-pack runtime: compile/link the imported pack and execute the
-    // real final fullscreen pass when the pack provides one. The scene itself
-    // is rendered into colortex0 first.
-    let shaderLoadGeneration = 0;
-    const reloadShaderRuntime = async () => {
-      const generation = ++shaderLoadGeneration;
+    // Shader-pack execution is intentionally paused here. The previous
+    // implementation compiled raw GLSL through WebGL. WebGPURenderer requires
+    // TSL/node materials, so shader stages will be ported to WGSL/TSL instead
+    // of routing them through the old WebGL pipeline.
+    setShaderDiagnostics([
+      '[Renderer] WebGPU renderer initialized.',
+      '[ShaderPipeline] GLSL shader-pack execution is paused during WebGPU migration.',
+    ]);
 
-      // Shader packs live in IndexedDB. Wait for the manager to finish loading
-      // persisted packs before checking the active selection; otherwise the
-      // viewport can race init() and incorrectly fall back to vanilla.
-      await shaderPacks.init();
-      if (generation !== shaderLoadGeneration || isDisposed) return;
-
-      const active = shaderPacks.getActive();
-      if (!active) {
-        shaderRuntime.dispose();
-        setShaderDiagnostics([]);
-        console.info('[ShaderPipeline] No shader pack active; using vanilla renderer');
-        return;
-      }
-
-      console.info(`[ShaderPipeline] Loading active pack: ${active.name} (${active.id}) / world0`);
-
-      try {
-        await shaderRuntime.load(active.id, 'world0');
-        if (generation !== shaderLoadGeneration || isDisposed) return;
-        const diagnostics = shaderRuntime.getDiagnostics();
-        setShaderDiagnostics(diagnostics);
-        console.info('[ShaderPipeline] Program catalog:', shaderRuntime.getProgramNames());
-        if (diagnostics.length > 0) {
-          console.warn(`[ShaderPipeline] ${diagnostics.length} pass(es) failed; successful programs remain loaded`);
-        }
-      } catch (error) {
-        if (generation !== shaderLoadGeneration || isDisposed) return;
-        const diagnostics = shaderRuntime.getDiagnostics();
-        setShaderDiagnostics(diagnostics.length > 0 ? diagnostics : [error instanceof Error ? (error.stack || error.message) : String(error)]);
-        console.error('[ShaderPipeline] Failed to load shader runtime:', error instanceof Error ? (error.stack || error.message) : String(error));
-        shaderRuntime.dispose();
-      }
-    };
-    const unsubscribeShaders = shaderPacks.subscribe(() => {
-      void reloadShaderRuntime();
-    });
-    void reloadShaderRuntime();
     let unsubscribePacks: (() => void) | null = null;
     engine.initialize().then(() => {
-      if (isDisposed) return;
+      if (disposed) return;
       engine.voxelWorld.setRenderDistance(graphicsRef.current.renderDistance);
       onEngineReady(engine);
       // Clean Minecraft world by default: no clutter physics objects
@@ -294,91 +266,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.player.model.setLightTint(steveLight);
       }
 
-      // Real shader-pack pipeline, currently at:
-      //   gbuffers_terrain -> ping-pong colortex0..7 + depthtex0 -> deferred chain -> final -> screen
-      // Keep the vanilla renderer as a safe fallback until the next pass is
-      // available or a shader stage fails on the current GPU.
-      const renderStart = performance.now();
-      let shaderRendered = false;
-
-      if (shaderRuntime.isLoaded && engine.voxelWorld) {
-        const lightDir = envManager.minecraftSky.getSunDirection();
-        const gbufferRendered = shaderGBufferPass.render(
-          scene,
-          camera,
-          engine.voxelWorld,
-          renderer.domElement.width,
-          renderer.domElement.height,
-          frameCount,
-          Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000,
-          lightDir
-        );
-
-        // Never feed an uninitialized/cleared G-buffer into the rest of the
-        // shader chain. A missing terrain stage must fall back to the normal
-        // renderer instead of producing a solid clear-color screen.
-        const shaderWorldTime = Math.floor(envManager.minecraftSky.timeOfDay * 24000) % 24000;
-        const shadowCamera = envManager.getShadowCamera();
-        const shadowModelView = shadowCamera.matrixWorldInverse.clone();
-        const shadowModelViewInverse = shadowCamera.matrixWorld.clone();
-        const shadowProjection = shadowCamera.projectionMatrix.clone();
-        const shadowProjectionInverse = shadowProjection.clone().invert();
-        const shadowResources = {
-          texture: envManager.getShadowDepthTexture(),
-          modelView: shadowModelView,
-          modelViewInverse: shadowModelViewInverse,
-          projection: shadowProjection,
-          projectionInverse: shadowProjectionInverse,
-        };
-        const drawingBuffer = renderer.getDrawingBufferSize(new THREE.Vector2());
-        const shaderWidth = Math.max(1, Math.floor(drawingBuffer.x));
-        const shaderHeight = Math.max(1, Math.floor(drawingBuffer.y));
-
-        const orderedPasses = (prefix: 'prepare' | 'deferred' | 'composite') =>
-          shaderRuntime
-            .getProgramNames()
-            .filter((name) => new RegExp('^' + prefix + '(?:\\d+)?$').test(name))
-            .sort((a, b) => {
-              const ai = a === prefix ? 0 : Number(a.slice(prefix.length));
-              const bi = b === prefix ? 0 : Number(b.slice(prefix.length));
-              return ai - bi;
-            });
-
-        // OptiFine/Iris executes the fullscreen stages in this order after the
-        // terrain G-buffer: prepare -> deferred -> composite -> final.
-        if (gbufferRendered) {
-          let pipelineOk = true;
-          for (const passName of [
-            ...orderedPasses('prepare'),
-            ...orderedPasses('deferred'),
-            ...orderedPasses('composite'),
-          ]) {
-            if (!shaderFullscreenPass.render(
-              passName,
-              shaderWidth,
-              shaderHeight,
-              frameCount,
-              shaderWorldTime,
-              shadowResources,
-            )) {
-              console.warn('[ShaderPipeline] Pass failed at runtime:', passName);
-              pipelineOk = false;
-              break;
-            }
-          }
-
-          const gbufferColor = shaderGBufferPass.colorTexture;
-          if (pipelineOk && gbufferColor) {
-            shaderRendered = shaderFinalPass.renderTexture(
-              gbufferColor,
-              shaderWidth,
-              shaderHeight
-            );
-          }
-        }
-      }
-
-      if (!shaderRendered) renderer.render(scene, camera);
+      // Render the scene through WebGPU. The shader-pack path will be
+      // rebuilt as a TSL/WGSL render graph rather than WebGL fullscreen passes.
+      renderer.render(scene, camera);
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
         const info = renderer.info;
@@ -413,14 +303,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     resizeObserver.observe(container);
     window.addEventListener('resize', resizeRenderer);
 
-    return () => {
-      isDisposed = true;
+    cleanupRenderer = () => {
       unsubscribePacks?.();
-      unsubscribeShaders();
-      shaderGBufferPass.dispose();
-      shaderFullscreenPass.dispose();
-      shaderFinalPass.dispose();
-      shaderRuntime.dispose();
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
       window.removeEventListener('resize', resizeRenderer);
@@ -430,6 +314,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
+    };
+    };
+
+    void initializeRenderer();
+
+    return () => {
+      disposed = true;
+      cleanupRenderer?.();
     };
   }, [onEngineReady, onUpdateStats]);
 
