@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { WebGPURenderer } from 'three/webgpu';
+import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
+import { pass } from 'three/tsl';
 import { PhysicsEngine } from '../physics/PhysicsEngine';
 import {
   ActiveTool,
@@ -132,11 +133,17 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const camera = new THREE.PerspectiveCamera(graphics.fov, aspect, 0.1, 400);
     cameraRef.current = camera;
 
+    // WebGPU post-processing is now owned by Three's RenderPipeline/TSL stack.
+    // Shader-pack passes will be inserted into this graph once their translated
+    // WGSL resources are mapped to TSL nodes.
+    const scenePass = pass(scene, camera);
+    const renderPipeline = new RenderPipeline(renderer, scenePass);
+
     // 2. WebGPU canvas configuration
     const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
     renderer.setPixelRatio(pixelRatio);
 
-    // Keep the canvas's CSS box and its WebGL drawing buffer in sync. On
+    // Keep the canvas's CSS box and its WebGPU drawing buffer in sync. On
     // mobile browsers the canvas can otherwise be displayed larger than the
     // drawing buffer, leaving the shader viewport anchored to the
     // bottom-left and exposing the page/clear color around it.
@@ -266,9 +273,9 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.player.model.setLightTint(steveLight);
       }
 
-      // Render the scene through WebGPU. The shader-pack path will be
-      // rebuilt as a TSL/WGSL render graph rather than WebGL fullscreen passes.
-      renderer.render(scene, camera);
+        // Render through the WebGPU render graph. Shader-pack stages will be
+      // composed here as TSL nodes instead of WebGL fullscreen passes.
+      renderPipeline.render();
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
         const info = renderer.info;
@@ -277,7 +284,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const sample: DebugFrameSample = {
           frameMs: renderEnd - frameStart,
           physicsMs: physicsEnd - physicsStart,
-          renderMs: renderEnd - renderStart,
+          renderMs: renderEnd - frameStart,
           streamingMs,
           generationMs: engine.voxelWorld.consumeDebugGenerationTime(),
           chunks: engine.voxelWorld.chunks.size,
@@ -310,6 +317,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       window.removeEventListener('resize', resizeRenderer);
       envManager.dispose();
       engine.dispose();
+      renderPipeline.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -421,7 +429,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       onContextMenu={(e) => e.preventDefault()}
       onMouseDown={handleMouseDown}
     >
-      {/* 3D WebGL Canvas */}
+      {/* 3D WebGPU Canvas */}
       <div ref={containerRef} className="w-full h-full cursor-crosshair" />
 
       <InventoryOverlay
