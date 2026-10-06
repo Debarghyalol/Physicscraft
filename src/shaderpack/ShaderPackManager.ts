@@ -227,15 +227,12 @@ class ShaderPackManagerImpl {
     return reports;
   }
 
-  /**
-   * Translate every shader stage for one dimension through the WebGPU compiler.
-   * This validates the shader language/backend boundary without creating a WebGL context.
-   */
+  /** Translate shader stages through GLSL -> SPIR-V -> WGSL for WebGPU validation. */
   async compileWebGPUReport(id: string, dimension: string): Promise<ProgramReport[]> {
     const { files } = await this.loadFiles(id);
     const names = new Map<string, { vsh?: string; fsh?: string }>();
     for (const p of files.keys()) {
-      const m = new RegExp(`^${dimension}/([^/]+)\\.(vsh|fsh)import JSZip from 'jszip';
+      const match = new RegExp(`^${dimension}/([^/]+)\\\\.(vsh|fsh)import JSZip from 'jszip';
 import { PackFiles, translateProgram } from './GlslTranslator';
 import { compileShaderToWGSL } from './ShaderPackWebGPUCompiler';
 
@@ -465,32 +462,25 @@ class ShaderPackManagerImpl {
   }
 
 ).exec(p);
-      if (!m) continue;
-      const e = names.get(m[1]) ?? {};
-      e[m[2] as 'vsh' | 'fsh'] = p;
-      names.set(m[1], e);
+      if (!match) continue;
+      const entry = names.get(match[1]) ?? {};
+      entry[match[2] as 'vsh' | 'fsh'] = p;
+      names.set(match[1], entry);
     }
-
     const reports: ProgramReport[] = [];
-    for (const [name, e] of [...names].sort()) {
+    for (const [name, entries] of [...names].sort()) {
       for (const stage of ['vertex', 'fragment'] as const) {
-        const entry = stage === 'vertex' ? e.vsh : e.fsh;
+        const entry = stage === 'vertex' ? entries.vsh : entries.fsh;
         if (!entry) continue;
         try {
           const translated = translateProgram({ files, entry, stage });
           await compileShaderToWGSL(translated.source, stage);
           reports.push({ name, stage, ok: true, log: '' });
         } catch (err: any) {
-          reports.push({
-            name,
-            stage,
-            ok: false,
-            log: String(err?.message ?? err),
-          });
+          reports.push({ name, stage, ok: false, log: String(err?.message ?? err) });
         }
       }
     }
-
     this.lastCompileReports = reports;
     return reports;
   }
