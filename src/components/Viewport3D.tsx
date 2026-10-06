@@ -186,8 +186,37 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // of routing them through the old WebGL pipeline.
     setShaderDiagnostics([
       '[Renderer] WebGPU renderer initialized.',
-      '[ShaderPipeline] GLSL shader-pack execution is paused during WebGPU migration.',
+      '[ShaderPipeline] WebGPU shader compiler bridge is active.',
     ]);
+
+    // Validate the selected Iris/OptiFine pack through the new WebGPU compiler.
+    // Rendering is intentionally still vanilla here: compilation and rendering are
+    // separate milestones, so a shader translation failure cannot corrupt the game loop.
+    void (async () => {
+      try {
+        await shaderPacks.init();
+        const activePack = shaderPacks.getActive();
+        if (!activePack || disposed) return;
+
+        const reports = await shaderPacks.compileWebGPUReport(activePack.id, 'world0');
+        if (disposed) return;
+        const failed = reports.filter((report) => !report.ok);
+        setShaderDiagnostics([
+          '[Renderer] WebGPU renderer initialized.',
+          `[ShaderPipeline] ${reports.filter((report) => report.ok).length}/${reports.length} world0 shader stages translated to WGSL.`,
+          ...failed.slice(0, 12).map((report) =>
+            `[ShaderPipeline] ${report.name} (${report.stage})\\n${report.log}`,
+          ),
+        ]);
+      } catch (error: any) {
+        if (!disposed) {
+          setShaderDiagnostics((previous) => [
+            ...previous,
+            `[ShaderPipeline] WebGPU compiler initialization failed: ${String(error?.message ?? error)}`,
+          ]);
+        }
+      }
+    })();
 
     let unsubscribePacks: (() => void) | null = null;
     engine.initialize().then(() => {
