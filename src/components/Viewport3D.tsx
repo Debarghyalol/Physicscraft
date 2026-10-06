@@ -22,7 +22,7 @@ import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
 import { translateProgram } from '../shaderpack/GlslTranslator';
-import { createNostalgiaFinalOutput, isNostalgiaFinalSource } from '../shaderpack/ShaderPackWebGPUFinalPass';
+import { activateNostalgiaGBuffer, createNostalgiaFinalOutput, isNostalgiaFinalSource } from '../shaderpack/ShaderPackWebGPUFinalPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -215,6 +215,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               stage: 'fragment',
             });
             if (isNostalgiaFinalSource(translatedFinal.source)) {
+              // The PassNode owns the MRT configuration; configure it before the render graph compiles.
+              activateNostalgiaGBuffer(scenePass);
               renderPipeline.outputNode = createNostalgiaFinalOutput(scenePassColor);
               renderPipeline.needsUpdate = true;
               finalAdapter = true;
