@@ -5,7 +5,7 @@ import {
   diffuseColor,
   float,
   mrt,
-  normalView,
+  normalWorld,
   output,
   shadow,
   texture,
@@ -45,7 +45,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     mrt({
       output,
       albedo: diffuseColor,
-      normal: normalView,
+      normal: normalWorld,
     }),
   );
 
