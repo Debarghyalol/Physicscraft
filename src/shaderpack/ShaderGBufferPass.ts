@@ -110,12 +110,38 @@ export class ShaderGBufferPass {
     // Nostalgia expects the lightmap UV in the second texture coordinate.
     uniforms.eyeAltitude.value = camera.position.y;
 
+    // Three.js enables every attachment of the MRT target (all 8) as draw
+    // buffers, but gbuffers_terrain only writes a few of them. WebGL2 rejects
+    // such draws ("Active draw buffers with missing fragment shader outputs"),
+    // so nothing would be drawn at all. Iris only enables the buffers named by
+    // RENDERTARGETS; do the same by masking the rest with NONE right before each
+    // chunk draw (Three.js re-applies its own list whenever the render target
+    // changes, e.g. after its internal shadow pass, so a single call is not enough).
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const gTarget = this.framebuffers.target;
+    const attachmentCount = this.framebuffers.attachmentCountValue;
+    const writtenLocations = this.getFragmentOutputLocations(definition.fragmentSource);
+    const maskedDrawBuffers = Array.from({ length: attachmentCount }, (_, index) =>
+      writtenLocations.has(index) ? gl.COLOR_ATTACHMENT0 + index : gl.NONE
+    );
+    const allDrawBuffers = Array.from({ length: attachmentCount }, (_, index) => gl.COLOR_ATTACHMENT0 + index);
+
     const hidden: Array<[THREE.Object3D, boolean]> = [];
+    const patchedHooks: Array<[THREE.Object3D, THREE.Object3D['onBeforeRender']]> = [];
     scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
       const keep = object.userData?.isVoxelChunk === true;
       hidden.push([object, object.visible]);
       object.visible = keep;
+      if (keep) {
+        const original = object.onBeforeRender;
+        patchedHooks.push([object, original]);
+        object.onBeforeRender = (...args: Parameters<THREE.Object3D['onBeforeRender']>) => {
+          original.apply(object, args);
+          // Only the G-buffer target: leave Three.js' shadow pass untouched.
+          if (this.renderer.getRenderTarget() === gTarget) gl.drawBuffers(maskedDrawBuffers);
+        };
+      }
     });
 
     const previousOverride = scene.overrideMaterial;
@@ -127,6 +153,10 @@ export class ShaderGBufferPass {
       this.renderer.clear(true, true, true);
       this.renderer.render(scene, camera);
     } finally {
+      for (const [object, hook] of patchedHooks) object.onBeforeRender = hook;
+      // Put the full attachment list back so Three.js' cached state stays
+      // truthful and the next frame's clear() covers every attachment.
+      if (gTarget && this.renderer.getRenderTarget() === gTarget) gl.drawBuffers(allDrawBuffers);
       this.renderer.setRenderTarget(previousTarget);
       scene.overrideMaterial = previousOverride;
       for (const [object, visible] of hidden) object.visible = visible;
@@ -215,6 +245,16 @@ export class ShaderGBufferPass {
     };
 
     this.materialKey = key;
+  }
+
+  /** Fragment output locations declared via `layout(location = N) out`. */
+  private getFragmentOutputLocations(fragmentSource: string): Set<number> {
+    const locations = new Set<number>();
+    const pattern = /layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*out\b/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(fragmentSource)) !== null) locations.add(Number(match[1]));
+    if (locations.size === 0) locations.add(0);
+    return locations;
   }
 
   private stripVersion(source: string): string {

@@ -27,6 +27,17 @@ export class ShaderFullscreenPass {
   private passFramebuffer: WebGLFramebuffer | null = null;
   private readonly neutralTexture: THREE.DataTexture;
 
+  /** WebGL2 rejects the draw (INVALID_OPERATION, "Mismatch between texture
+   * format and sampler type") when a depth texture with compare mode enabled is
+   * read through sampler2D, or when a sampler2DShadow reads a texture without
+   * compare mode. Iris/OpenGL is lenient about this; WebGL is not. Sampler
+   * objects override the texture's own compare state per unit, so the same
+   * Three.js shadow/depth texture can serve both sampler2D and sampler2DShadow. */
+  private plainDepthSampler: WebGLSampler | null = null;
+  private shadowCompareSampler: WebGLSampler | null = null;
+  private neutralDepth: WebGLTexture | null = null;
+  private readonly samplerTypeCache = new WeakMap<WebGLProgram, Map<string, number>>();
+
   constructor(renderer: THREE.WebGLRenderer, runtime: ShaderPackRuntime, framebuffers: ShaderFramebufferManager) {
     this.renderer = renderer;
     this.runtime = runtime;
@@ -108,6 +119,7 @@ export class ShaderFullscreenPass {
     const depthTexture = this.framebuffers.depthTexture;
     const depthHandle = depthTexture ? this.getTextureHandle(depthTexture) : null;
     let textureUnit = 0;
+    const samplerUnits: number[] = [];
 
     try {
       // Stage 1: Three.js binds the framebuffer and (for MRT targets) sets
@@ -218,15 +230,29 @@ export class ShaderFullscreenPass {
         textureUnit++;
       }
 
+      const samplerTypes = this.getSamplerTypes(program);
+      const isShadowSampler = (uniformName: string): boolean =>
+        samplerTypes.get(uniformName) === gl.SAMPLER_2D_SHADOW;
+
       for (let index = 0; index < 8; index += 1) {
-        const location = gl.getUniformLocation(program, 'depthtex' + index);
+        const uniformName = 'depthtex' + index;
+        const location = gl.getUniformLocation(program, uniformName);
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
-        if (!assertTextureCall('activeTexture depthtex' + index)) return false;
-        gl.bindTexture(gl.TEXTURE_2D, index === 0 && depthHandle ? depthHandle : this.getTextureHandle(this.neutralTexture));
-        if (!assertTextureCall('bindTexture depthtex' + index)) return false;
+        if (!assertTextureCall('activeTexture ' + uniformName)) return false;
+        const wantsShadow = isShadowSampler(uniformName);
+        if (index === 0 && depthHandle) {
+          gl.bindTexture(gl.TEXTURE_2D, depthHandle);
+        } else {
+          // depthtex1+ are not produced by this renderer: bind a real depth
+          // texture so a depth/shadow sampler never sees a color texture.
+          gl.bindTexture(gl.TEXTURE_2D, this.getNeutralDepthTexture());
+        }
+        gl.bindSampler(textureUnit, this.getDepthSampler(wantsShadow));
+        samplerUnits.push(textureUnit);
+        if (!assertTextureCall('bindTexture ' + uniformName)) return false;
         gl.uniform1i(location, textureUnit);
-        if (!assertTextureCall('uniform1i depthtex' + index)) return false;
+        if (!assertTextureCall('uniform1i ' + uniformName)) return false;
         textureUnit++;
       }
 
@@ -235,12 +261,21 @@ export class ShaderFullscreenPass {
         if (!location) continue;
         gl.activeTexture(gl.TEXTURE0 + textureUnit);
         if (!assertTextureCall('activeTexture ' + sampler)) return false;
+        const isShadowTex = sampler === 'shadowtex0' || sampler === 'shadowtex1';
+        const isShadowColor = sampler === 'shadowcolor0' || sampler === 'shadowcolor1';
         const texture =
           sampler === 'noisetex' ? this.runtime.getTexture('noisetex') :
-          (sampler === 'shadowtex0' || sampler === 'shadowtex1' || sampler === 'shadowcolor0' || sampler === 'shadowcolor1')
+          (isShadowTex || isShadowColor)
             ? shadows?.texture ?? null
             : null;
-        gl.bindTexture(gl.TEXTURE_2D, texture ? this.getTextureHandle(texture) : this.getTextureHandle(this.neutralTexture));
+        if (isShadowTex) {
+          // shadowtex0/1 are depth samplers (sampler2D or sampler2DShadow).
+          gl.bindTexture(gl.TEXTURE_2D, texture ? this.getTextureHandle(texture) : this.getNeutralDepthTexture());
+          gl.bindSampler(textureUnit, this.getDepthSampler(isShadowSampler(sampler)));
+          samplerUnits.push(textureUnit);
+        } else {
+          gl.bindTexture(gl.TEXTURE_2D, texture ? this.getTextureHandle(texture) : this.getTextureHandle(this.neutralTexture));
+        }
         if (!assertTextureCall('bindTexture ' + sampler)) return false;
         gl.uniform1i(location, textureUnit);
         if (!assertTextureCall('uniform1i ' + sampler)) return false;
@@ -347,6 +382,10 @@ export class ShaderFullscreenPass {
       }
       gl.useProgram(null);
     } finally {
+      // Sampler objects are global GL state that Three.js knows nothing about;
+      // always release them so later Three.js draws use their textures' own
+      // sampling parameters again.
+      for (const unit of samplerUnits) gl.bindSampler(unit, null);
       this.renderer.setRenderTarget(previousTarget);
       this.renderer.resetState();
     }
@@ -356,6 +395,18 @@ export class ShaderFullscreenPass {
 
   public dispose(): void {
     const gl = this.gl;
+    if (this.plainDepthSampler) {
+      gl.deleteSampler(this.plainDepthSampler);
+      this.plainDepthSampler = null;
+    }
+    if (this.shadowCompareSampler) {
+      gl.deleteSampler(this.shadowCompareSampler);
+      this.shadowCompareSampler = null;
+    }
+    if (this.neutralDepth) {
+      gl.deleteTexture(this.neutralDepth);
+      this.neutralDepth = null;
+    }
     if (this.passFramebuffer) {
       gl.deleteFramebuffer(this.passFramebuffer);
       this.passFramebuffer = null;
@@ -557,6 +608,65 @@ export class ShaderFullscreenPass {
       gl.uniform1i(hideGUI, 0);
       if (!check('hideGUI', 'uniform1i')) return;
     }
+  }
+
+  /** Map of active sampler uniform name -> GL type (SAMPLER_2D, SAMPLER_2D_SHADOW, ...). */
+  private getSamplerTypes(program: WebGLProgram): Map<string, number> {
+    const cached = this.samplerTypeCache.get(program);
+    if (cached) return cached;
+    const gl = this.gl;
+    const types = new Map<string, number>();
+    const count = Number(gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS)) || 0;
+    for (let i = 0; i < count; i += 1) {
+      const info = gl.getActiveUniform(program, i);
+      if (info) types.set(info.name.replace(/\[0\]$/, ''), info.type);
+    }
+    this.samplerTypeCache.set(program, types);
+    return types;
+  }
+
+  /** Sampler object for depth-format textures. `compare` selects hardware
+   * shadow comparison (sampler2DShadow) or plain depth reads (sampler2D). */
+  private getDepthSampler(compare: boolean): WebGLSampler | null {
+    const gl = this.gl;
+    const existing = compare ? this.shadowCompareSampler : this.plainDepthSampler;
+    if (existing) return existing;
+    const sampler = gl.createSampler();
+    if (!sampler) return null;
+    gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    if (compare) {
+      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.samplerParameteri(sampler, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+      gl.samplerParameteri(sampler, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+      this.shadowCompareSampler = sampler;
+    } else {
+      // Depth textures sampled as float must be NEAREST and compare-free.
+      gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.samplerParameteri(sampler, gl.TEXTURE_COMPARE_MODE, gl.NONE);
+      this.plainDepthSampler = sampler;
+    }
+    return sampler;
+  }
+
+  /** 1x1 depth texture used where the pack expects a depth/shadow sampler but
+   * this renderer has nothing to provide (e.g. depthtex1, or the first frame
+   * before the shadow map exists). */
+  private getNeutralDepthTexture(): WebGLTexture | null {
+    if (this.neutralDepth) return this.neutralDepth;
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) return null;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, 1, 1, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.neutralDepth = texture;
+    return texture;
   }
 
   private getTextureHandle(texture: THREE.Texture): WebGLTexture | null {
