@@ -1,4 +1,5 @@
-import { Node, sharpen } from 'three/tsl';
+import { sharpen } from 'three/tsl';
+import type { Node } from 'three/tsl';
 
 /**
  * First real WebGPU shader-pack output adapter.
@@ -17,5 +18,5 @@ export function createNostalgiaFinalOutput(sceneColor: Node): Node {
 }
 
 export function isNostalgiaFinalSource(source: string): boolean {
-  return /CAS_Strength\\s+0\\.5/.test(source) && /uniform\\s+sampler2D\\s+colortex0/.test(source);
+  return /textureCAS\s*\(/.test(source) && /uniform\s+sampler2D\s+colortex0/.test(source);
 }
