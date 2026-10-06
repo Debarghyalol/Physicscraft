@@ -51,6 +51,11 @@ export function activateNostalgiaGBuffer(sceneColor: Node): Node {
  * the equivalent final sharpening without falling back to WebGL.
  */
 export function createNostalgiaFinalOutput(sceneColor: Node): Node {
+  // Configure the scene pass before building the final node graph. PassNode
+  // requires MRT configuration before compilation, so doing this here keeps
+  // the existing Viewport3D setup small while still activating the real
+  // WebGPU G-buffer path.
+  activateNostalgiaGBuffer(sceneColor);
   return sharpen(sceneColor, 0.5, false);
 }
 
