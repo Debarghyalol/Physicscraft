@@ -103,8 +103,8 @@ export class ShaderFramebufferManager {
 
       this.primary = this.createTarget(w, h, count, depth, 'Primary');
       this.secondary = pingPong ? this.createTarget(w, h, count, depth, 'Secondary') : null;
-      this.extraPrimary = pingPong ? this.createTarget(w, h, 4, false, 'ExtraPrimary') : null;
-      this.extraSecondary = pingPong ? this.createTarget(w, h, 4, false, 'ExtraSecondary') : null;
+      this.extraPrimary = pingPong ? this.createTarget(w, h, 8, false, 'ExtraPrimary') : null;
+      this.extraSecondary = pingPong ? this.createTarget(w, h, 8, false, 'ExtraSecondary') : null;
       this.extraReadIndex = 0;
       this.attachmentCount = count;
       this.pingPongEnabled = pingPong;
@@ -136,11 +136,11 @@ export class ShaderFramebufferManager {
   }
 
   public logicalToExtraAttachment(index: number): number {
-    if (index === 8) return 0;
-    if (index === 10) return 1;
-    if (index === 11) return 2;
-    if (index === 15) return 3;
-    return -1;
+    // WebGL exposes at most eight color attachments per draw target. Keep
+    // colortex0..7 in the primary MRT and give every logical colortex8..15
+    // its own slot in the secondary MRT. This is required because Nostalgia
+    // uses transient buffers such as 9, 12, 13 and 14 in addition to 8/10/11/15.
+    return index >= 8 && index <= 15 ? index - 8 : -1;
   }
 
   public swapExtra(): void {
@@ -148,12 +148,9 @@ export class ShaderFramebufferManager {
   }
 
   public logicalToPhysicalAttachment(index: number): number {
-    // Nostalgia uses a few logical buffers above WebGL's usual 8 color
-    // attachments. This pack never reads colortex6, so it can safely act as
-    // the storage slot for the transient colortex8/10 data; colortex11 uses
-    // slot 7. The mapping is stable across the deferred/composite chain.
-    if (index === 8 || index === 10) return 6;
-    if (index === 11) return 7;
+    // Logical buffers 0..7 are stored directly in the primary MRT.
+    // Logical buffers 8..15 are stored in the secondary MRT and therefore
+    // never need to be represented by a primary attachment index.
     return index;
   }
 
