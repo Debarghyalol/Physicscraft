@@ -2,7 +2,7 @@ import { UnsignedByteType } from 'three';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
   Loop,
-  diffuseColor,
+  materialColor,
   float,
   mrt,
   normalWorld,
@@ -44,7 +44,11 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
   scenePass.setMRT(
     mrt({
       output,
-      albedo: diffuseColor,
+      // Use the material's actual texture/color, not diffuseColor. diffuseColor
+      // already contains VoxelWorld's baked face/AO vertex color, so using it as
+      // deferred albedo applies the Minecraft face shading a second time and makes
+      // vertical/underside faces unnaturally black before lighting even runs.
+      albedo: materialColor,
       normal: normalWorld,
     }),
   );
