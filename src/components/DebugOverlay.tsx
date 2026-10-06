@@ -19,6 +19,7 @@ export interface DebugFrameSample {
   cameraFacing: string;
   cameraYaw: number | null;
   cameraPitch: number | null;
+  sunDirection: { x: number; y: number; z: number } | null;
 }
 
 export interface DebugOverlayProps {
@@ -86,6 +87,12 @@ export const DebugOverlay: React.FC<DebugOverlayProps> = ({ enabled, sample, his
             : '—'}
         />
         <Metric label="Facing" value={sample.cameraFacing} />
+        <Metric
+          label="Sun dir"
+          value={sample.sunDirection
+            ? fmt(sample.sunDirection.x, 3) + ' / ' + fmt(sample.sunDirection.y, 3) + ' / ' + fmt(sample.sunDirection.z, 3)
+            : '—'}
+        />
         <Metric
           label="Yaw / Pitch"
           value={sample.cameraYaw == null || sample.cameraPitch == null
