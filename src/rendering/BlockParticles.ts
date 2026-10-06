@@ -24,14 +24,12 @@ const SHRINK_TIME = 0.25;
 
 export class BlockParticles {
   private readonly points: THREE.Sprite;
-  private readonly geometry: THREE.BufferGeometry;
   private readonly material: SpriteNodeMaterial;
   private readonly positionAttribute: THREE.InstancedBufferAttribute;
   private readonly rectAttribute: THREE.InstancedBufferAttribute;
   private readonly colorAttribute: THREE.InstancedBufferAttribute;
   private readonly sizeAttribute: THREE.InstancedBufferAttribute;
   private readonly mapNode: ReturnType<typeof uniformTexture>;
-  private readonly tintNode = uniformTexture(this.voxelWorld.material.map);
   private readonly pos = new Float32Array(MAX_PARTICLES * 3);
   private readonly rect = new Float32Array(MAX_PARTICLES * 4);
   private readonly color = new Float32Array(MAX_PARTICLES * 3);
@@ -48,8 +46,6 @@ export class BlockParticles {
   private readonly bufferSize = new THREE.Vector2();
 
   constructor(private readonly scene: THREE.Scene, private readonly voxelWorld: VoxelWorld) {
-    this.geometry = new THREE.BufferGeometry();
-
     // WebGPU does not support variable-size point primitives. Use Three.js'
     // instanced SpriteNodeMaterial instead; Sprite handles camera-facing quads
     // while the instanced attributes keep this at one draw call.
@@ -57,10 +53,6 @@ export class BlockParticles {
     this.rectAttribute = new THREE.InstancedBufferAttribute(this.rect, 4);
     this.colorAttribute = new THREE.InstancedBufferAttribute(this.color, 3);
     this.sizeAttribute = new THREE.InstancedBufferAttribute(this.size, 1);
-
-    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
-    this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
-    this.geometry.setIndex([0, 1, 2, 0, 2, 3]);
 
     const positionNode = instancedBufferAttribute(this.positionAttribute, 'vec3');
     const rectNode = instancedBufferAttribute(this.rectAttribute, 'vec4');
@@ -208,7 +200,6 @@ export class BlockParticles {
 
   public dispose() {
     this.scene.remove(this.points);
-    this.geometry.dispose();
     this.material.dispose();
   }
 }
