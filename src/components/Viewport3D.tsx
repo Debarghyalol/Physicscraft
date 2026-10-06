@@ -147,7 +147,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     resizeRenderer();
     renderer.shadowMap.enabled = graphics.shadows;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
 
     container.appendChild(renderer.domElement);
 
