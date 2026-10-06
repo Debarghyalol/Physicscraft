@@ -234,7 +234,7 @@ class ShaderPackManagerImpl {
   /** Translate shader stages through GLSL -> SPIR-V -> WGSL for WebGPU validation. */
   async compileWebGPUReport(id: string, dimension: string): Promise<ProgramReport[]> {
     const { files } = await this.loadFiles(id);
-    const names = new Map<string, { vsh?: string; fsh?: string }>();
+      const match = new RegExp('^' + dimension + '/([^/]+)\\.(vsh|fsh)$').exec(p);
 
     for (const p of files.keys()) {
       const match = new RegExp(`^${dimension}/([^/]+)\\\\.(vsh|fsh)$`).exec(p);
@@ -265,7 +265,7 @@ class ShaderPackManagerImpl {
   getCompileDiagnostics(): string[] {
     return this.lastCompileReports
       .filter((report) => !report.ok)
-      .map((report) => `[ShaderPipeline] ${report.name} (${report.stage})\\n${report.log}`);
+      .map((report) => `[ShaderPipeline] ${report.name} (${report.stage})\n${report.log}`);
   }
 
 }
