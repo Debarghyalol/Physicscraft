@@ -172,7 +172,8 @@ export class EnvironmentManager {
       if (sunDir.y < 0) sunDir.negate(); // at night the light comes from the moon's side of the sky
       this.sunLight.position.copy(playerPos).add(sunDir.multiplyScalar(40));
       this.sunLight.target.position.copy(playerPos);
-      this.sunLight.target.updateMatrixWorld();
+      this.sunLight.target.updateMatrixWorld(true);
+      this.sunLight.updateMatrixWorld(true);
     }
   }
 
@@ -223,6 +224,7 @@ export class EnvironmentManager {
   public dispose() {
     this.minecraftSky.dispose();
     this.scene.remove(this.sunLight);
+    this.scene.remove(this.sunLight.target);
     this.scene.remove(this.fillLight);
     this.scene.remove(this.ambientLight);
   }
