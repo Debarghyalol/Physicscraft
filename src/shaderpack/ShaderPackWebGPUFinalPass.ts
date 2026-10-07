@@ -469,12 +469,26 @@ export function createNostalgiaFinalOutput(
   deferredColor: Node,
   originalSceneColor: Node,
   sceneDepth: Node,
+  translucentColor?: Node,
+  translucentDepth?: Node,
 ): Node {
-  // WebGPURenderer defaults to a normal depth buffer. A cleared depth value
-  // identifies the sky/background, whose original pass contains the actual
-  // Minecraft sun, moon, stars and cloud rendering.
+  // The Iris/Nostalgia ordering is:
+  //   solid + cutout -> deferred G-buffer -> lighting -> forward translucent -> final.
+  // The translucent pass is rendered on its own layer with depthWrite disabled.
+  // Its depth is compared against the opaque depth here so glass behind a solid wall
+  // cannot leak through the deferred image.
   const background = sceneDepth.greaterThanEqual(0.99999);
-  const sceneColor = background.select(originalSceneColor, deferredColor);
+  const baseColor = background.select(originalSceneColor, deferredColor);
+
+  if (!translucentColor || !translucentDepth) {
+    return sharpen(baseColor, 0.5, false);
+  }
+
+  const alpha = translucentColor.a.clamp(0.0, 1.0);
+  const inFront = translucentDepth.lessThan(sceneDepth.add(0.0001));
+  const visible = alpha.greaterThan(0.001).and(inFront);
+  const blended = mix(baseColor, translucentColor, alpha);
+  const sceneColor = visible.select(blended, baseColor);
   return sharpen(sceneColor, 0.5, false);
 }
 
