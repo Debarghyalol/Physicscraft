@@ -1752,11 +1752,23 @@ export class VoxelWorld {
   public getBlockTileRects(voxel: VoxelType): Array<[number, number, number, number]> {
     const cols = new Set<number>();
     for (let face = 0; face < 6; face++) cols.add(this.getVoxelFaceTile(voxel, face)[0]);
+
+    // The atlas is not 16 tiles wide in UV space: every tile has an extruded
+    // gutter (res / 8) on both sides. The old particle UV calculation assumed
+    // a 16x16 no-gutter atlas, so break particles sampled unrelated/white atlas
+    // pixels instead of the broken block texture.
+    const image = this.atlasTexture.image as HTMLCanvasElement | undefined;
+    const width = image?.width ?? 16 * 18;
+    const height = image?.height ?? 18;
+    const res = height / 1.125; // height = res + 2*(res/8)
+    const pad = res / 8;
+    const stride = res + pad * 2;
+
     return [...cols].map((col) => [
-      (col + ATLAS_INNER_MIN) / 16,
-      ATLAS_INNER_MIN_V,
-      (col + ATLAS_INNER_MAX) / 16,
-      ATLAS_INNER_MAX_V,
+      (col * stride + pad + res * ATLAS_INNER_MIN / 1) / width,
+      (pad + res * ATLAS_INNER_MIN_V) / height,
+      (col * stride + pad + res * ATLAS_INNER_MAX / 1) / width,
+      (pad + res * ATLAS_INNER_MAX_V) / height,
     ]);
   }
 
