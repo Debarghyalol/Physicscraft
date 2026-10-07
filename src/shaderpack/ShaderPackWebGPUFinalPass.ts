@@ -119,7 +119,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
   scenePass.setMRT(
     mrt({
       output: materialColor,
-      gdata: vec4(oct.x, oct.y, packedLight, 0.0),
+      gdata: vec4(oct.x, oct.y, packedLight, light.z),
     }),
   );
 
@@ -147,7 +147,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     lightmap: vec4(
       packed.z.mul(65535.0).mod(16.0).div(15.0),
       packed.z.mul(65535.0).div(16.0).floor().mod(16.0).div(15.0),
-      1.0,
+      packed.w,
       1.0,
     ) as unknown as Node,
     depth: scenePass.getTextureNode('depth'),
