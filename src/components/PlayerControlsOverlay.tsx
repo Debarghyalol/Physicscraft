@@ -198,8 +198,8 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       const canvas = await resourcePacks.getTexture(entry.paths);
       if (alive) setSrc(canvas ? canvas.toDataURL('image/png') : null);
     };
-    refresh();
-    const unsubscribe = resourcePacks.subscribe(refresh);
+    void refresh();
+    const unsubscribe = resourcePacks.subscribe(() => { void refresh(); });
     return () => {
       alive = false;
       unsubscribe();
@@ -207,30 +207,53 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
   }, [type]);
 
   if (!src) {
-    // Keep the built-in icon renderer as the default fallback because the app does not
-    // ship individual block PNGs under public/textures/block.
     return (
-      <div className="flex items-center justify-center" style={{ width: 32, height: 32 }}>
+      <div className="flex items-center justify-center" style={{ width: 34, height: 34 }}>
         <IsometricVoxelIcon type={type} />
       </div>
     );
   }
 
+  // Render the real resource-pack texture as a small isometric cube rather than
+  // a flat square. The side faces are darker to restore Minecraft-style depth.
+  const faceStyle: React.CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    backgroundImage: 'url(' + src + ')',
+    backgroundSize: '100% 100%',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+    imageRendering: 'pixelated',
+    backfaceVisibility: 'hidden',
+  };
+
   return (
-    <span
+    <div
       aria-hidden="true"
-      className="block shrink-0"
       style={{
-        width: 32,
-        height: 32,
-        backgroundImage: `url(${src})`,
-        backgroundSize: 'contain',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        imageRendering: 'pixelated',
-        filter: 'drop-shadow(1px 2px 1px rgba(0,0,0,0.65))',
+        width: 34,
+        height: 34,
+        perspective: 90,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'visible',
       }}
-    />
+    >
+      <div
+        style={{
+          position: 'relative',
+          width: 24,
+          height: 24,
+          transform: 'rotateX(-28deg) rotateY(45deg) scale(0.92)',
+          transformStyle: 'preserve-3d',
+        }}
+      >
+        <div style={{ ...faceStyle, transform: 'translateZ(12px)', filter: 'saturate(1.15) contrast(1.08) brightness(0.98)' }} />
+        <div style={{ ...faceStyle, transform: 'rotateY(90deg) translateZ(12px)', filter: 'saturate(1.15) contrast(1.08) brightness(0.76)' }} />
+        <div style={{ ...faceStyle, transform: 'rotateX(90deg) translateZ(12px)', filter: 'saturate(1.15) contrast(1.08) brightness(1.08)' }} />
+      </div>
+    </div>
   );
 };
 
