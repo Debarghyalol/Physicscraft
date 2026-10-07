@@ -223,6 +223,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               const deferredColor = createNostalgiaDeferredLighting(
                 sceneGBuffer.albedo,
                 sceneGBuffer.normal,
+                sceneGBuffer.depth,
                 nostalgiaLightDirectionWorld,
                 nostalgiaLightStrength,
                 envManager.sunLight,
