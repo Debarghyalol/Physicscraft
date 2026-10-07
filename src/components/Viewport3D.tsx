@@ -241,6 +241,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 sceneGBuffer.albedo,
                 sceneGBuffer.normal,
                 sceneGBuffer.lightmap,
+                sceneGBuffer.gdata,
                 sceneGBuffer.depth,
                 nostalgiaLightDirectionWorld,
                 nostalgiaLightStrength,
