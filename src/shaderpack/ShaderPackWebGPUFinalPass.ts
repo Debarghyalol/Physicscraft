@@ -133,7 +133,7 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
     // coordinate too: warping only the lookup shifts/magnifies every shadow (at the
     // centre of the map it scaled coordinates by ~6.7x). Resolution is instead tuned
     // through the shadow frustum size (see EnvironmentManager).
-    const uv = shadowCoord.xy;
+    const shadowUv = shadowCoord.xy;
 
     // getShadowRegular() clamps the filter to at least two shadow pixels.
     // DirectionalLightShadow.radius is used as the runtime sigma control.
@@ -155,7 +155,7 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
 
       // GetShadowBilinear(): four depth comparisons followed by explicit
       // bilinear interpolation, mirroring Nostalgia's shadowtex sampling.
-      const sampleUv = uv.add(offset);
+      const sampleUv = shadowUv.add(offset);
       const pixel = sampleUv.mul(mapSize).sub(0.5);
       const base = pixel.floor().add(0.5).div(mapSize);
       const frac = pixel.fract();
