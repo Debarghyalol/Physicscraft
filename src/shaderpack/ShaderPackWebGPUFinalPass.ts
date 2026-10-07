@@ -101,6 +101,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     normal: scenePass.getTextureNode('normal'),
     lightmap: scenePass.getTextureNode('lightmap'),
     depth: scenePass.getTextureNode('depth'),
+    velocity: scenePass.getTextureNode('velocity'),
   };
 }
 
