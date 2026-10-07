@@ -125,7 +125,8 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
     const iterations = 12;
     // Keep the sample pattern stable per screen pixel. A time-varying dither makes the
     // 12-tap filter crawl every frame and is especially visible on voxel shadow edges.
-    const dither = uv().x.mul(127.1).add(uv().y.mul(311.7)).sin().mul(43758.5453).fract();
+    const screenUv = uv();
+    const dither = screenUv.x.mul(127.1).add(screenUv.y.mul(311.7)).sin().mul(43758.5453).fract();
 
     // Nostalgia warps the shadow map (shadowmapWarp) both when rendering it and when
     // sampling it. Three renders an unwarped map here, so sampling must use the unwarped
