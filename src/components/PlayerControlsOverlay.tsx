@@ -242,6 +242,9 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
         type === VoxelType.WOOD ? ['block/oak_log', 'block/oak_log_side'] :
         entry.paths
       );
+      const grassOverlay = type === VoxelType.GRASS
+        ? await get(['block/grass_block_side_overlay'])
+        : null;
 
       if (!top && !side) {
         if (alive) setSrc(null);
@@ -250,8 +253,24 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       side = side ?? top;
       top = top ?? side;
 
-      if (type === VoxelType.GRASS && top) top = tintIfGrayscale(top, '#91bd59');
-      if (type === VoxelType.LEAVES && side) side = tintIfGrayscale(side, '#77ab2f');
+      if (type === VoxelType.GRASS) {
+        if (top) top = tintIfGrayscale(top, '#91bd59');
+        if (side) side = tintIfGrayscale(side, '#91bd59');
+        if (side && grassOverlay) {
+          const combined = document.createElement('canvas');
+          combined.width = side.width;
+          combined.height = side.height;
+          const cg = combined.getContext('2d')!;
+          cg.imageSmoothingEnabled = false;
+          cg.drawImage(side, 0, 0);
+          cg.drawImage(grassOverlay, 0, 0, grassOverlay.width, grassOverlay.height, 0, 0, side.width, side.height);
+          side = combined;
+        }
+      }
+      if (type === VoxelType.LEAVES) {
+        if (side) side = tintIfGrayscale(side, '#77ab2f');
+        if (top) top = tintIfGrayscale(top, '#77ab2f');
+      }
 
       const out = document.createElement('canvas');
       out.width = 40;
@@ -724,7 +743,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* MCPE-style 8-way D-pad. Diagonals live in the four gaps. */}
+      {/* MCPE-style 8-way D-pad: contiguous 3x3 grid; diagonals appear only while selected. */}
       <div
         ref={dpadContainerRef}
         className="ui-touch-interactive absolute left-3 sm:left-5 bottom-[clamp(4.25rem,9vh,6.5rem)] pointer-events-auto select-none touch-none z-30"
@@ -735,33 +754,35 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         onTouchCancel={handleDpadTouchEnd}
       >
         {([
-          ['up', 1, 0, 'Move Forward', 56, 0, 56],
-          ['left', 0, -1, 'Strafe Left', 0, 56, 56],
-          ['sneak_dpad', null, null, 'Sneak / Crouch', 56, 56, 56],
-          ['right', 0, 1, 'Strafe Right', 112, 56, 56],
-          ['down', -1, 0, 'Move Backward', 56, 112, 56],
-          ['up_left', 1, -1, 'Forward-Left', 8, 8, 40],
-          ['up_right', 1, 1, 'Forward-Right', 120, 8, 40],
-          ['down_left', -1, -1, 'Back-Left', 8, 120, 40],
-          ['down_right', -1, 1, 'Back-Right', 120, 120, 40],
-        ] as [string, number | null, number | null, string, number, number, number][]).map(([name, f, r, title, left, top, size]) => {
+          ['up_left', 1, -1, 'Forward-Left', 0, 0],
+          ['up', 1, 0, 'Move Forward', 56, 0],
+          ['up_right', 1, 1, 'Forward-Right', 112, 0],
+          ['left', 0, -1, 'Strafe Left', 0, 56],
+          ['sneak_dpad', null, null, 'Sneak / Crouch', 56, 56],
+          ['right', 0, 1, 'Strafe Right', 112, 56],
+          ['down_left', -1, -1, 'Back-Left', 0, 112],
+          ['down', -1, 0, 'Move Backward', 56, 112],
+          ['down_right', -1, 1, 'Back-Right', 112, 112],
+        ] as [string, number | null, number | null, string, number, number][]).map(([name, f, r, title, left, top]) => {
           const isCenter = f === null;
+          const isDiagonal = f !== null && r !== null && f !== 0 && r !== 0;
           const isActive = isCenter
             ? isSneaking
             : dpadDir.forward === f && dpadDir.right === r;
+          const visible = !isDiagonal || isActive;
 
           return (
             <div
               key={name}
               className="absolute"
-              style={{ left, top, width: size, height: size, zIndex: 2 }}
+              style={{ left, top, width: 56, height: 56, zIndex: isDiagonal ? 3 : 2 }}
             >
               <ControlImg
                 name={name}
                 pressed={isActive}
-                size={size}
+                size={56}
                 title={title}
-                visible
+                visible={visible}
                 onClick={isCenter ? () => setIsSneaking(!isSneaking) : undefined}
               />
             </div>
