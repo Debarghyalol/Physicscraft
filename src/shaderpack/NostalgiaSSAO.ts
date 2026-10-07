@@ -24,6 +24,8 @@ export interface SceneCameraNodes {
   near: Node;
   far: Node;
   projectionMatrixInverse: Node;
+  projectionMatrix: Node;
+  viewMatrix: Node;
   worldMatrix: Node;
   /** projectionMatrix[1][1] = 1 / tan(fov / 2) */
   projection11: Node;
@@ -34,6 +36,8 @@ export function createSceneCameraNodes(camera: PerspectiveCamera): SceneCameraNo
     near: reference('near', 'float', camera),
     far: reference('far', 'float', camera),
     projectionMatrixInverse: uniform(camera.projectionMatrixInverse),
+    projectionMatrix: uniform(camera.projectionMatrix),
+    viewMatrix: uniform(camera.matrixWorldInverse),
     worldMatrix: uniform(camera.matrixWorld),
     projection11: (uniform(camera.projectionMatrix) as any).element(1).element(1),
   };
