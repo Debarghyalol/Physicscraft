@@ -90,6 +90,7 @@ class MeshBuilder {
   col: Float32Array;
   lit: Float32Array;
   normal: Float32Array;
+  materialClass: Float32Array;
   idx: Uint32Array;
   cap: number; // capacity in faces
   vc = 0;
@@ -102,6 +103,7 @@ class MeshBuilder {
     this.col = new Float32Array(cap * 12);
     this.lit = new Float32Array(cap * 8);
     this.normal = new Float32Array(cap * 12);
+    this.materialClass = new Float32Array(cap * 4);
     this.idx = new Uint32Array(cap * 6);
   }
 
@@ -125,6 +127,7 @@ class MeshBuilder {
     this.col = grow(this.col, cap * 12);
     this.lit = grow(this.lit, cap * 8);
     this.normal = grow(this.normal, cap * 12);
+    this.materialClass = grow(this.materialClass, cap * 4);
     this.idx = grow(this.idx, cap * 6);
     this.cap = cap;
   }
@@ -137,9 +140,12 @@ class MeshBuilder {
     const uv = g.getAttribute('uv') as THREE.BufferAttribute;
     const light = new THREE.BufferAttribute(this.lit.slice(0, this.vc * 2), 2);
     const normal = new THREE.BufferAttribute(this.normal.slice(0, this.vc * 3), 3);
+    const materialClass = new THREE.BufferAttribute(this.materialClass.slice(0, this.vc), 1);
     g.setAttribute('color', color);
     g.setAttribute('aLight', light);
     g.setAttribute('normal', normal);
+    // 0 = opaque/cutout G-buffer surface, 1 = forward translucent terrain.
+    g.setAttribute('aMaterialClass', materialClass);
 
     // Shader-pack aliases. The Nostalgia terrain program uses Minecraft's
     // legacy attribute names; keep the vanilla renderer's attributes intact
@@ -1373,7 +1379,13 @@ export class VoxelWorld {
               // Opaque and cutout blocks occlude neighbouring faces; translucent glass
               // keeps a face against every non-air neighbour so it remains visible through
               // the surface. Two adjacent glass blocks do not generate an internal face.
-              if (renderClass === 'translucent' ? nb !== 0 : !(nb === 0 || nb === VoxelType.GLASS)) continue;
+              if (
+                renderClass === 'translucent'
+                  ? nb !== 0
+                  : renderClass === 'cutout'
+                    ? nb === VoxelType.LEAVES
+                    : !(nb === 0 || nb === VoxelType.GLASS)
+              ) continue;
 
               const tileCol = this.getVoxelFaceTile(voxel, f)[0];
               const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
@@ -1414,6 +1426,7 @@ export class VoxelWorld {
                 mb.normal[o * 3] = FACE_NORMALS[f][0];
                 mb.normal[o * 3 + 1] = FACE_NORMALS[f][1];
                 mb.normal[o * 3 + 2] = FACE_NORMALS[f][2];
+                mb.materialClass[o] = renderClass === 'translucent' ? 1 : 0;
                 const shade = SHADE_LINEAR[f * 4 + aoLevel];
                 mb.col[o * 3] = shade;
                 mb.col[o * 3 + 1] = shade;
