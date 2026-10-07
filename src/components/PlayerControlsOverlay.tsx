@@ -429,22 +429,22 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
       return;
     }
 
-    // Determine 8-direction vector
-    const angle = Math.atan2(dy, dx); // -PI to PI
-    // -PI/2 is UP, PI/2 is DOWN, 0 is RIGHT, PI is LEFT
+    // Snap the finger to the nearest of the 8 directions. Equal 45° sectors
+    // make diagonal activation stable while sliding between buttons.
+    const angle = Math.atan2(dy, dx);
+    const sector = ((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8;
     let f = 0;
     let r = 0;
 
-    if (angle > -Math.PI * 0.75 && angle < -Math.PI * 0.25) {
-      f = 1; // UP
-    } else if (angle > Math.PI * 0.25 && angle < Math.PI * 0.75) {
-      f = -1; // DOWN
-    }
-
-    if (Math.abs(angle) < Math.PI * 0.35) {
-      r = 1; // RIGHT
-    } else if (Math.abs(angle) > Math.PI * 0.65) {
-      r = -1; // LEFT
+    switch (sector) {
+      case 0:  r = 1;  break; // RIGHT
+      case 1:  f = -1; r = 1;  break; // DOWN-RIGHT
+      case 2:  f = -1; break; // DOWN
+      case 3:  f = -1; r = -1; break; // DOWN-LEFT
+      case 4:  r = -1; break; // LEFT
+      case 5:  f = 1;  r = -1; break; // UP-LEFT
+      case 6:  f = 1;  break; // UP
+      case 7:  f = 1;  r = 1; break; // UP-RIGHT
     }
 
     setDpadDir({ forward: f, right: r });
