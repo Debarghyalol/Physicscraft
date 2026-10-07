@@ -142,6 +142,32 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
   }
 };
 
+const CONTROLS_PATH = '/textures/gui/controls';
+
+/** Pixel-art mobile control button (textures from public/textures/gui/controls). */
+const ControlImg: React.FC<{
+  name: string;
+  pressed: boolean;
+  size: number;
+  className?: string;
+  title?: string;
+  onClick?: () => void;
+}> = ({ name, pressed, size, className = '', title, onClick }) => (
+  <button
+    type="button"
+    title={title}
+    onClick={onClick}
+    className={`${className} select-none touch-none p-0 border-0 bg-transparent`}
+    style={{
+      width: size,
+      height: size,
+      backgroundImage: `url(${CONTROLS_PATH}/${name}${pressed ? '_pressed' : ''}.png)`,
+      backgroundSize: '100% 100%',
+      imageRendering: 'pixelated',
+    }}
+  />
+);
+
 export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onInputUpdate,
   onLookDelta,
@@ -551,64 +577,34 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         onTouchEnd={handleDpadTouchEnd}
         onTouchCancel={handleDpadTouchEnd}
       >
-        <div className="relative w-36 h-36 flex items-center justify-center">
-          {/* Forward (UP) */}
-          <button
-            type="button"
-            className={`mcpe-dpad-btn absolute top-0 left-12 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
-              dpadDir.forward === 1 ? 'active' : ''
-            }`}
-            title="Move Forward"
-          >
-            ▲
-          </button>
-
-          {/* Left */}
-          <button
-            type="button"
-            className={`mcpe-dpad-btn absolute top-12 left-0 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
-              dpadDir.right === -1 ? 'active' : ''
-            }`}
-            title="Strafe Left"
-          >
-            ◀
-          </button>
-
-          {/* Center Sneak / Crouch Button */}
-          <button
-            type="button"
-            onClick={() => {
-              setIsSneaking(!isSneaking);
-            }}
-            className={`mcpe-dpad-btn absolute top-12 left-12 w-12 h-12 flex items-center justify-center text-white text-base ${
-              isSneaking ? 'active text-yellow-300' : 'text-white/80'
-            }`}
-            title="Sneak / Crouch"
-          >
-            ◆
-          </button>
-
-          {/* Right */}
-          <button
-            type="button"
-            className={`mcpe-dpad-btn absolute top-12 right-0 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
-              dpadDir.right === 1 ? 'active' : ''
-            }`}
-            title="Strafe Right"
-          >
-            ▶
-          </button>
-
-          {/* Backward (DOWN) */}
-          <button
-            type="button"
-            className={`mcpe-dpad-btn absolute bottom-0 left-12 w-12 h-12 flex items-center justify-center text-white/90 text-lg font-bold ${
-              dpadDir.forward === -1 ? 'active' : ''
-            }`}
-            title="Move Backward"
-          >
-            ▼
-          </button>
+        <div className="grid grid-cols-3" style={{ width: 132, height: 132 }}>
+          {([
+            ['up_left', 1, -1, 'Forward-Left'],
+            ['up', 1, 0, 'Move Forward'],
+            ['up_right', 1, 1, 'Forward-Right'],
+            ['left', 0, -1, 'Strafe Left'],
+            ['sneak_dpad', null, null, 'Sneak / Crouch'],
+            ['right', 0, 1, 'Strafe Right'],
+            ['down_left', -1, -1, 'Back-Left'],
+            ['down', -1, 0, 'Move Backward'],
+            ['down_right', -1, 1, 'Back-Right'],
+          ] as [string, number | null, number | null, string][]).map(([name, f, r, title]) => {
+            const isCenter = f === null;
+            // Diagonals light up only on the exact diagonal; straight keys light up on the exact axis.
+            const pressed = isCenter
+              ? isSneaking
+              : dpadDir.forward === f && dpadDir.right === r;
+            return (
+              <ControlImg
+                key={name}
+                name={name}
+                pressed={pressed}
+                size={44}
+                title={title}
+                onClick={isCenter ? () => setIsSneaking(!isSneaking) : undefined}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -646,7 +642,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
 
         {/* Fly-down button (only while flying) */}
         {isFlying && (
-          <button
+          <div
             onTouchStart={(e) => {
               e.stopPropagation();
               setDescendPressed(true);
@@ -657,17 +653,13 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
             }}
             onMouseDown={() => setDescendPressed(true)}
             onMouseUp={() => setDescendPressed(false)}
-            className={`mcpe-action-btn w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-white text-2xl font-bold shadow-2xl ${
-              descendPressed ? 'active' : ''
-            }`}
-            title="Fly down"
           >
-            ▼
-          </button>
+            <ControlImg name="waterdescend" pressed={descendPressed} size={66} title="Fly down" />
+          </div>
         )}
 
-        {/* MCPE Jump Button */}
-        <button
+        {/* Fly-up / Jump Button */}
+        <div
           onTouchStart={(e) => {
             e.stopPropagation();
             setJumpPressed(true);
@@ -678,13 +670,14 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           }}
           onMouseDown={() => setJumpPressed(true)}
           onMouseUp={() => setJumpPressed(false)}
-          className={`mcpe-action-btn w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center text-white text-2xl font-bold shadow-2xl ${
-            jumpPressed ? 'active' : ''
-          }`}
-          title="Jump"
         >
-          ▲
-        </button>
+          <ControlImg
+            name={isFlying ? 'waterascend' : 'jump'}
+            pressed={jumpPressed}
+            size={66}
+            title="Jump"
+          />
+        </div>
       </div>
 
       {/* Mobile inventory button */}
