@@ -2,6 +2,9 @@ import { UnsignedByteType } from 'three';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
   Loop,
+  cameraProjectionMatrixInverse,
+  cameraWorldMatrix,
+  getViewPosition,
   materialColor,
   float,
   mrt,
@@ -10,7 +13,9 @@ import {
   shadow,
   texture,
   time,
+  uv,
   vec2,
+  vec4,
 } from 'three/tsl';
 import type { DirectionalLight } from 'three';
 import type { Node } from 'three/tsl';
@@ -158,38 +163,40 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
 export function createNostalgiaDeferredLighting(
   albedo: Node,
   sceneNormal: Node,
-  lightDirectionView: Node,
+  sceneDepth: Node,
+  lightDirectionWorld: Node,
   lightStrength: Node,
   sunLight: DirectionalLight,
 ): Node {
   // Decode the 0..1 G-buffer normal back into a unit world-space vector.
   const normal = sceneNormal.xyz.mul(2.0).sub(1.0).normalize();
-  const lightDir = lightDirectionView.normalize();
+  const lightDir = lightDirectionWorld.normalize();
   const diffuse = normal.dot(lightDir).max(0.0);
 
   installNostalgiaShadowFilter(sunLight);
-  const shadowFactor = shadow(sunLight).clamp(0.0, 1.0);
 
-  // The custom deferred node bypasses Three's normal HemisphereLight/fill
-  // evaluation. A constant ambient term makes every face equally exposed, which
-  // is especially wrong for Minecraft: upward-facing surfaces see the sky while
-  // downward-facing surfaces receive much less sky illumination. Use a cheap
-  // hemispherical sky term here until the full Iris lightmap G-buffer is wired in.
-  //
-  // normal.y:
-  //   +1 = upward face   -> full sky exposure
-  //    0 = vertical face -> partial sky exposure
-  //   -1 = downward face -> minimum ambient
-  //
-  // Keep a small floor so the underside does not become mathematically black,
-  // while tying the ambient energy to the current sun/moon intensity so it also
-  // follows the day/night cycle instead of staying at a fixed brightness.
+  // shadow() normally reads the *mesh* world position of the surface being shaded. In
+  // this full-screen pass that would be the screen quad's position, giving every pixel
+  // the same (meaningless) shadow lookup. Reconstruct the real world position of the
+  // scene pixel from the depth buffer and hand it to the ShadowNode through the build
+  // context (`shadowPositionWorld`), which Three honours for deferred use.
+  const viewPosition = getViewPosition(uv(), sceneDepth.x, cameraProjectionMatrixInverse);
+  const worldPosition = cameraWorldMatrix.mul(vec4(viewPosition, 1.0)).xyz;
+  const shadowFactor = (shadow(sunLight) as any)
+    .context({ shadowPositionWorld: worldPosition })
+    .clamp(0.0, 1.0) as Node;
+
+  // The custom deferred node bypasses Three's HemisphereLight evaluation, so supply a
+  // sky-ambient term here. Nostalgia is a path-traced pack: its indirect light is a
+  // sky gather weighted by lightmap sky-light, so vertical and downward faces still
+  // receive a large share of sky light (they are not near-black). Approximate that with
+  // a hemispherical term that falls from 1.0 (up) to ~0.78 (sides) to 0.55 (down),
+  // scaled by the current sun/moon intensity so it follows the day/night cycle.
   const skyExposure = normal.y.mul(0.5).add(0.5).clamp(0.0, 1.0);
-  const skyAmbient = float(0.08)
-    .add(skyExposure.mul(0.32))
-    .mul(lightStrength.max(0.18));
+  const faceShade = float(0.55).add(skyExposure.mul(0.45));
+  const skyAmbient = faceShade.mul(0.75).mul(lightStrength.max(0.18));
 
-  const direct = diffuse.mul(lightStrength).mul(0.9).mul(shadowFactor);
+  const direct = diffuse.mul(lightStrength).mul(0.8).mul(shadowFactor);
   const lighting = direct.add(skyAmbient).clamp(0.0, 1.5);
 
   return albedo.mul(lighting);
