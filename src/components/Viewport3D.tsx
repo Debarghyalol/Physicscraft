@@ -145,6 +145,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const nostalgiaLightStrength = uniform(1.0);
     const nostalgiaSkyDim = uniform(0.0);
     const nostalgiaFrameCounter = uniform(0.0);
+    let nostalgiaNoiseTexture: THREE.Texture | null = null;
 
     // 2. WebGPU canvas configuration
     const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
@@ -207,6 +208,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         const activePack = shaderPacks.getActive();
         if (!activePack || disposed) return;
 
+        // Nostalgia's SSAO uses the pack's real shaders/image/noise2D.png, not a procedural substitute.
+        // Keep it as a tiny 256x256 nearest-neighbour texture so the AO lookup is effectively texelFetch.
+        const noiseBlob = await shaderPacks.loadAsset(activePack.id, 'image/noise2D.png');
+        if (!noiseBlob) throw new Error('Active shader pack is missing shaders/image/noise2D.png');
+        const noiseBitmap = await createImageBitmap(noiseBlob);
+        nostalgiaNoiseTexture = new THREE.Texture(noiseBitmap);
+        nostalgiaNoiseTexture.wrapS = THREE.RepeatWrapping;
+        nostalgiaNoiseTexture.wrapT = THREE.RepeatWrapping;
+        nostalgiaNoiseTexture.magFilter = THREE.NearestFilter;
+        nostalgiaNoiseTexture.minFilter = THREE.NearestFilter;
+        nostalgiaNoiseTexture.generateMipmaps = false;
+        nostalgiaNoiseTexture.colorSpace = THREE.NoColorSpace;
+        nostalgiaNoiseTexture.needsUpdate = true;
+
         const reports = await shaderPacks.compileWebGPUReport(activePack.id, 'world0');
         if (disposed) return;
         const failed = reports.filter((report) => !report.ok);
@@ -234,6 +249,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 envManager.sunLight,
                 camera,
                 nostalgiaFrameCounter,
+                nostalgiaNoiseTexture,
               );
               const nostalgiaBeauty = createNostalgiaFinalOutput(
                 deferredColor,
@@ -458,6 +474,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       envManager.dispose();
       engine.dispose();
       renderPipeline.dispose();
+      nostalgiaNoiseTexture?.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
