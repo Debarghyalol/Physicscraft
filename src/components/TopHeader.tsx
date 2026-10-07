@@ -43,10 +43,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onOpenPauseMenu }) => {
         onClick={onOpenPauseMenu}
         className="pointer-events-auto absolute left-1/2 top-2 -translate-x-1/2 w-10 h-10 sm:w-11 sm:h-11 rounded-md bg-black/25 border border-white/10 shadow-lg transition active:scale-95"
         style={{
-          backgroundImage: "url('/textures/gui/Gui.png')",
+          backgroundImage: "url('/textures/gui/130366.png')",
           backgroundRepeat: 'no-repeat',
-          backgroundSize: '256px 256px',
-          backgroundPosition: '-200px -65px',
+          backgroundSize: '100% 100%',
+          backgroundPosition: 'center',
           imageRendering: 'pixelated',
         }}
         title="Open pause menu"
