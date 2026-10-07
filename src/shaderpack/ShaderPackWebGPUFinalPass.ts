@@ -495,6 +495,7 @@ export function createNostalgiaFinalOutput(
   deferredColor: Node,
   originalSceneColor: Node,
   sceneDepth: Node,
+  sceneGData?: Node,
   translucentColor?: Node,
   translucentDepth?: Node,
 ): Node {
@@ -504,8 +505,8 @@ export function createNostalgiaFinalOutput(
   // Its depth is compared against the opaque depth here so glass behind a solid wall
   // cannot leak through the deferred image.
   const background = sceneDepth.greaterThanEqual(0.99999);
-  const classCode = gdata
-    ? gdata.w.mul(3.0).add(0.5).floor().mod(2.0)
+  const classCode = sceneGData
+    ? sceneGData.w.mul(3.0).add(0.5).floor().mod(2.0)
     : float(0.0);
   const isTranslucent = classCode.greaterThan(0.5);
   const deferredOrForward = isTranslucent.select(originalSceneColor, deferredColor);
