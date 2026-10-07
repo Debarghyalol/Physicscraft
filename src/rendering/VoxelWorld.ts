@@ -172,6 +172,7 @@ export class ChunkColumn {
   ready = false; // all 8 neighbours lit -> safe to mesh
   modified = false; // edited by the player: never discarded when far away
   opaqueMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
+  cutoutMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   transMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
 
   constructor(cx: number, cz: number) {
@@ -251,8 +252,9 @@ export class VoxelWorld {
   private leafTopScratch = new Int16Array(256);
   private debugGenerationTimeMs = 0;
 
-  // Voxel materials: Opaque & Transparent (Glass) with crisp pixelated Minecraft texture atlas
+  // Terrain render classes mirror Iris/Nostalgia: opaque, alpha-cutout, translucent.
   public material!: THREE.MeshBasicMaterial;
+  public cutoutMaterial!: THREE.MeshBasicMaterial;
   public transparentMaterial!: THREE.MeshBasicMaterial;
   private atlasTexture!: THREE.CanvasTexture;
   private baseAtlasCanvas!: HTMLCanvasElement;
@@ -424,7 +426,8 @@ export class VoxelWorld {
       c.fillRect(ox + 7, oy + 7, 2, 2);
     });
 
-    // 7,0: Leaves (Oak green with dapples)
+    // 7,0: Leaves. Deliberately contains transparent pixels so the built-in texture
+    // exercises the same alpha-cutout path as a real Minecraft leaf PNG.
     drawTile(7, 0, (c, ox, oy) => {
       c.fillStyle = '#347b26';
       c.fillRect(ox, oy, 16, 16);
@@ -435,6 +438,13 @@ export class VoxelWorld {
             c.fillStyle = r > 0.8 ? '#245919' : '#4a9c37';
             c.fillRect(ox + px, oy + py, 1, 1);
           }
+        }
+      }
+      // Deterministic leaf gaps; the alpha test discards these fragments while
+      // the surrounding leaf faces still write depth and participate in shadows.
+      for (let px = 0; px < 16; px++) {
+        for (let py = 0; py < 16; py++) {
+          if (((px * 17 + py * 31 + 7) % 11) < 3) c.clearRect(ox + px, oy + py, 1, 1);
         }
       }
     });
@@ -538,16 +548,31 @@ export class VoxelWorld {
       vertexColors: true,
       transparent: false,
       side: THREE.FrontSide,
+      depthWrite: true,
     });
+    // Iris TERRAIN_CUTOUT: alpha-tested foliage stays in the depth/G-buffer path.
+    this.cutoutMaterial = new THREE.MeshBasicMaterial({
+      map: this.atlasTexture,
+      vertexColors: true,
+      transparent: false,
+      alphaTest: 0.1,
+      side: THREE.FrontSide,
+      depthWrite: true,
+    });
+    // Iris TERRAIN_TRANSLUCENT / Nostalgia forward.fsh: real texture alpha is blended
+    // after opaque + cutout terrain and does not write depth.
     this.transparentMaterial = new THREE.MeshBasicMaterial({
       map: this.atlasTexture,
       vertexColors: true,
       transparent: true,
-      opacity: 0.78,
+      opacity: 1.0,
       side: THREE.DoubleSide,
-      depthWrite: true,
+      depthTest: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
     });
     this.patchLightShader(this.material);
+    this.patchLightShader(this.cutoutMaterial);
     this.patchLightShader(this.transparentMaterial);
   }
 
@@ -698,8 +723,10 @@ export class VoxelWorld {
     const old = this.atlasTexture;
     this.atlasTexture = tex;
     this.material.map = tex;
+    this.cutoutMaterial.map = tex;
     this.transparentMaterial.map = tex;
     this.material.needsUpdate = true;
+    this.cutoutMaterial.needsUpdate = true;
     this.transparentMaterial.needsUpdate = true;
     old.dispose();
   }
@@ -712,6 +739,7 @@ export class VoxelWorld {
   /** Day/night world tint (voxel materials are unlit, so multiply their colour) */
   public setLightTint(color: THREE.Color) {
     this.material.color.copy(color);
+    this.cutoutMaterial.color.copy(color);
     this.transparentMaterial.color.copy(color);
   }
 
@@ -719,6 +747,10 @@ export class VoxelWorld {
     if (this.material) {
       this.material.wireframe = enabled;
       this.material.needsUpdate = true;
+    }
+    if (this.cutoutMaterial) {
+      this.cutoutMaterial.wireframe = enabled;
+      this.cutoutMaterial.needsUpdate = true;
     }
     if (this.transparentMaterial) {
       this.transparentMaterial.wireframe = enabled;
@@ -1303,8 +1335,13 @@ export class VoxelWorld {
     const count = col.counts[sy];
     const op = this.bufOpaque;
     const tr = this.bufTrans;
+    // Cutout geometry is intentionally kept separate from opaque geometry so its
+    // alpha-test material can participate in the same depth/G-buffer pass without
+    // becoming blended transparency.
+    const cut = new MeshBuilder(256);
     op.reset();
     tr.reset();
+    cut.reset();
 
     if (count > 0) {
       this.fillPad(col, sy);
@@ -1323,14 +1360,17 @@ export class VoxelWorld {
             const pi = ((ly + 1) * PAD + lz + 1) * PAD + lx + 1;
             const voxel = B[pi];
             if (voxel === 0) continue;
-            const glass = voxel === VoxelType.GLASS;
-            const mb = glass ? tr : op;
+            const renderClass = voxel === VoxelType.GLASS ? 'translucent' : voxel === VoxelType.LEAVES ? 'cutout' : 'opaque';
+            const mb = renderClass === 'translucent' ? tr : renderClass === 'cutout' ? cut : op;
             const wy = baseWy + ly;
 
             for (let f = 0; f < 6; f++) {
               if (f === 3 && wy <= WORLD_MIN_Y) continue;
               const nb = B[pi + FACE_OFF[f]];
-              if (glass ? nb !== 0 : !(nb === 0 || nb === VoxelType.GLASS)) continue;
+              // Opaque and cutout blocks occlude neighbouring faces; translucent glass
+              // keeps a face against every non-air neighbour so it remains visible through
+              // the surface. Two adjacent glass blocks do not generate an internal face.
+              if (renderClass === 'translucent' ? nb !== 0 : !(nb === 0 || nb === VoxelType.GLASS)) continue;
 
               const tileCol = this.getVoxelFaceTile(voxel, f)[0];
               const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
@@ -1398,13 +1438,23 @@ export class VoxelWorld {
     const cxw = col.cx * 16 + 8;
     const cyw = WORLD_MIN_Y + sy * 16 + 8;
     const czw = col.cz * 16 + 8;
-    this.applyBuilder(col, sy, op, false, cxw, cyw, czw);
-    this.applyBuilder(col, sy, tr, true, cxw, cyw, czw);
+    this.applyBuilder(col, sy, op, 'opaque', cxw, cyw, czw);
+    this.applyBuilder(col, sy, cut, 'cutout', cxw, cyw, czw);
+    this.applyBuilder(col, sy, tr, 'translucent', cxw, cyw, czw);
     if (rebuildCollider) this.updateSectionCollider(col, sy, op);
   }
 
-  private applyBuilder(col: ChunkColumn, sy: number, mb: MeshBuilder, trans: boolean, cx: number, cy: number, cz: number) {
-    const arr = trans ? col.transMeshes : col.opaqueMeshes;
+  private applyBuilder(
+    col: ChunkColumn,
+    sy: number,
+    mb: MeshBuilder,
+    renderClass: 'opaque' | 'cutout' | 'translucent',
+    cx: number,
+    cy: number,
+    cz: number,
+  ) {
+    const arr = renderClass === 'translucent' ? col.transMeshes : renderClass === 'cutout' ? col.cutoutMeshes : col.opaqueMeshes;
+    const material = renderClass === 'translucent' ? this.transparentMaterial : renderClass === 'cutout' ? this.cutoutMaterial : this.material;
     let mesh = arr[sy];
     if (mb.vc === 0) {
       if (mesh) {
@@ -1416,13 +1466,25 @@ export class VoxelWorld {
     }
     const geometry = mb.toGeometry(cx, cy, cz);
     if (!mesh) {
-      mesh = new THREE.Mesh(geometry, trans ? this.transparentMaterial : this.material);
+      mesh = new THREE.Mesh(geometry, material);
       mesh.matrixAutoUpdate = false;
-      mesh.castShadow = true;
+      mesh.castShadow = renderClass !== 'translucent';
       mesh.receiveShadow = true;
       mesh.frustumCulled = true;
-      if (trans) mesh.renderOrder = 1;
-      mesh.userData = { isVoxelChunk: !trans, isVoxelChunkTrans: trans, cx: col.cx, cz: col.cz, sy };
+      if (renderClass === 'translucent') {
+        mesh.layers.set(1);
+        mesh.renderOrder = 10;
+      } else {
+        mesh.layers.set(0);
+      }
+      mesh.userData = {
+        isVoxelChunk: renderClass !== 'translucent',
+        isVoxelChunkCutout: renderClass === 'cutout',
+        isVoxelChunkTrans: renderClass === 'translucent',
+        cx: col.cx,
+        cz: col.cz,
+        sy,
+      };
       this.scene.add(mesh);
       arr[sy] = mesh;
     } else {
@@ -1582,6 +1644,12 @@ export class VoxelWorld {
         this.scene.remove(m);
         m.geometry.dispose();
         col.opaqueMeshes[sy] = null;
+      }
+      const c = col.cutoutMeshes[sy];
+      if (c) {
+        this.scene.remove(c);
+        c.geometry.dispose();
+        col.cutoutMeshes[sy] = null;
       }
       const t = col.transMeshes[sy];
       if (t) {
@@ -1839,6 +1907,7 @@ export class VoxelWorld {
     this.clearAllChunks();
     this.atlasTexture.dispose();
     this.material.dispose();
+    this.cutoutMaterial.dispose();
     this.transparentMaterial.dispose();
   }
 }
