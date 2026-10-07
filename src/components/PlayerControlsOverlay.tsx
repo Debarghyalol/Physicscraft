@@ -31,6 +31,7 @@ const HOTBAR_TEXTURES: Record<VoxelType, { paths: string[]; fallback: string }> 
   [VoxelType.GLOWSTONE]: { paths: ['block/glowstone'], fallback: 'glowstone' },
   [VoxelType.TNT]: { paths: ['block/tnt_side', 'block/tnt'], fallback: 'tnt_side' },
 };
+
 export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
   { type: VoxelType.GRASS, name: 'Grass Block' },
   { type: VoxelType.DIRT, name: 'Dirt' },
@@ -44,109 +45,102 @@ export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
 ];
 
 /**
- * Pixelated 3D Isometric Voxel Block Icon for authentic Minecraft UI
+ * Authentic 3D Isometric Voxel Block Icon with proper Minecraft GUI proportions
  */
 const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
-  // SVG drawing of 3D isometric cube with 3 visible faces
-  // Top face: path "M12 2 L22 8 L12 14 L2 8 Z"
-  // Left face: path "M2 8 L12 14 L12 22 L2 16 Z"
-  // Right face: path "M12 14 L22 8 L22 16 L12 22 Z"
-
   switch (type) {
     case VoxelType.GRASS:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          {/* Top Face (Green grass) */}
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#58a032" />
-          {/* Left Face (Dirt with grass fringe) */}
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#866043" />
-          <polygon points="2,7.8 12,13.6 12,16 2,10.2" fill="#4d8c2c" />
-          {/* Right Face (Dirt with grass fringe, slightly shaded) */}
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#6d4c33" />
-          <polygon points="12,13.6 22,7.8 22,10.2 12,16" fill="#3f7523" />
+          {/* Top Face */}
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#58a032" />
+          {/* Left Face (Dirt + Grass Overlay) */}
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#866043" />
+          <polygon points="4,6.5 12,11 12,14.5 4,10" fill="#4d8c2c" />
+          {/* Right Face (Dirt + Grass Overlay, shaded) */}
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#6d4c33" />
+          <polygon points="12,11 20,6.5 20,10 12,14.5" fill="#3f7523" />
         </svg>
       );
     case VoxelType.DIRT:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#9c7353" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#866043" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#67472e" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#9c7353" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#866043" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#67472e" />
         </svg>
       );
     case VoxelType.STONE:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#8e8e8e" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#7a7a7a" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#5f5f5f" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#8e8e8e" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#7a7a7a" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#5f5f5f" />
         </svg>
       );
     case VoxelType.WOOD:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          {/* Tree Rings on top */}
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#aa8555" />
-          <circle cx="12" cy="7.8" r="2.5" fill="#7d5930" />
-          {/* Bark sides */}
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#674d2b" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#4d391d" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#aa8555" />
+          <ellipse cx="12" cy="6.7" rx="2.2" ry="1.2" fill="#7d5930" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#674d2b" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#4d391d" />
         </svg>
       );
     case VoxelType.LEAVES:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#429e2e" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#328221" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#246416" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#429e2e" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#328221" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#246416" />
         </svg>
       );
     case VoxelType.SAND:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#e8dc9e" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#d8cb8c" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#b9ab6d" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#e8dc9e" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#d8cb8c" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#b9ab6d" />
         </svg>
       );
     case VoxelType.COBBLESTONE:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#787878" stroke="#484848" strokeWidth="0.5" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#626262" stroke="#484848" strokeWidth="0.5" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#4c4c4c" stroke="#363636" strokeWidth="0.5" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#787878" stroke="#484848" strokeWidth="0.5" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#626262" stroke="#484848" strokeWidth="0.5" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#4c4c4c" stroke="#363636" strokeWidth="0.5" />
         </svg>
       );
     case VoxelType.GLASS:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="rgba(220, 240, 255, 0.55)" stroke="#ffffff" strokeWidth="0.8" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="rgba(180, 215, 245, 0.45)" stroke="#ffffff" strokeWidth="0.8" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="rgba(150, 195, 235, 0.45)" stroke="#ffffff" strokeWidth="0.8" />
-          <line x1="8" y1="12" x2="16" y2="18" stroke="#ffffff" strokeWidth="1" strokeLinecap="round" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="rgba(220, 240, 255, 0.55)" stroke="#ffffff" strokeWidth="0.7" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="rgba(180, 215, 245, 0.45)" stroke="#ffffff" strokeWidth="0.7" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="rgba(150, 195, 235, 0.45)" stroke="#ffffff" strokeWidth="0.7" />
+          <line x1="8" y1="11" x2="16" y2="17" stroke="#ffffff" strokeWidth="0.9" strokeLinecap="round" />
         </svg>
       );
     case VoxelType.GLOWSTONE:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#ffe08a" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#d9a441" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#b8832f" />
-          <rect x="9" y="6" width="2" height="2" fill="#fff6c8" />
-          <rect x="5" y="12" width="2" height="2" fill="#fff0a8" />
-          <rect x="16" y="13" width="2" height="2" fill="#f7d36b" />
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#ffe08a" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#d9a441" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#b8832f" />
+          <rect x="9" y="5.5" width="2" height="2" fill="#fff6c8" />
+          <rect x="6" y="12" width="2" height="2" fill="#fff0a8" />
+          <rect x="15" y="13" width="2" height="2" fill="#f7d36b" />
         </svg>
       );
     case VoxelType.TNT:
       return (
         <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
-          <polygon points="12,2 22,7.8 12,13.6 2,7.8" fill="#cc2a20" />
-          <polygon points="2,7.8 12,13.6 12,22 2,16.2" fill="#b0241b" />
-          <polygon points="12,13.6 22,7.8 22,16.2 12,22" fill="#8f1c15" />
-          {/* White TNT band */}
-          <polygon points="2,11.5 12,17.3 12,19 2,13.2" fill="#ffffff" />
-          <polygon points="12,17.3 22,11.5 22,13.2 12,19" fill="#e0e0e0" />
-          <text x="7" y="16.5" fill="#000000" fontSize="3" fontWeight="bold" fontFamily="monospace">TNT</text>
+          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#cc2a20" />
+          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#b0241b" />
+          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#8f1c15" />
+          {/* TNT white band */}
+          <polygon points="4,11.5 12,16 12,18 4,13.5" fill="#ffffff" />
+          <polygon points="12,16 20,11.5 20,13.5 12,18" fill="#e0e0e0" />
+          <text x="6" y="16.5" fill="#000000" fontSize="3" fontWeight="bold" fontFamily="monospace">TNT</text>
         </svg>
       );
     default:
@@ -156,7 +150,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
 
 const CONTROLS_PATH = '/textures/gui/controls';
 
-/** Pixel-art mobile control button (textures from public/textures/gui/controls). */
+/** Pixel-art mobile control button */
 const ControlImg: React.FC<{
   name: string;
   pressed: boolean;
@@ -172,14 +166,17 @@ const ControlImg: React.FC<{
     aria-hidden={!visible}
     tabIndex={visible ? 0 : -1}
     onClick={visible ? onClick : undefined}
-    className={`${className} select-none touch-none p-0 border-0 bg-transparent`}
+    className={`${className} select-none touch-none p-0 border-0 bg-transparent flex items-center justify-center`}
     style={{
       width: size,
       height: size,
+      boxSizing: 'border-box',
       backgroundImage: visible
         ? `url(${CONTROLS_PATH}/${name}${pressed ? '_pressed' : ''}.png)`
         : 'none',
       backgroundSize: '100% 100%',
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'center',
       imageRendering: 'pixelated',
       opacity: visible ? 1 : 0,
       pointerEvents: visible ? 'auto' : 'none',
@@ -253,20 +250,29 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       side = side ?? top;
       top = top ?? side;
 
+      // Ensure grass overlay receives identical grass tint multiplier
       if (type === VoxelType.GRASS) {
-        if (top) top = tintIfGrayscale(top, '#91bd59');
-        if (side) side = tintIfGrayscale(side, '#91bd59');
-        if (side && grassOverlay) {
-          const combined = document.createElement('canvas');
-          combined.width = side.width;
-          combined.height = side.height;
-          const cg = combined.getContext('2d')!;
-          cg.imageSmoothingEnabled = false;
-          cg.drawImage(side, 0, 0);
-          cg.drawImage(grassOverlay, 0, 0, grassOverlay.width, grassOverlay.height, 0, 0, side.width, side.height);
-          side = combined;
+        const grassTint = '#91bd59';
+        if (top) top = tintIfGrayscale(top, grassTint);
+        if (grassOverlay) {
+          const tintedOverlay = tintIfGrayscale(grassOverlay, grassTint);
+          if (side) {
+            const combined = document.createElement('canvas');
+            combined.width = side.width;
+            combined.height = side.height;
+            const cg = combined.getContext('2d')!;
+            cg.imageSmoothingEnabled = false;
+            cg.drawImage(side, 0, 0);
+            cg.drawImage(tintedOverlay, 0, 0, tintedOverlay.width, tintedOverlay.height, 0, 0, side.width, side.height);
+            side = combined;
+          } else {
+            side = tintedOverlay;
+          }
+        } else if (side) {
+          side = tintIfGrayscale(side, grassTint);
         }
       }
+
       if (type === VoxelType.LEAVES) {
         if (side) side = tintIfGrayscale(side, '#77ab2f');
         if (top) top = tintIfGrayscale(top, '#77ab2f');
@@ -310,9 +316,10 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
       };
 
-      drawFace(top, [3, 13], [20, 3], [37, 13], [20, 23], 1.08);
-      drawFace(side, [3, 13], [20, 23], [20, 37], [3, 27], 0.88);
-      drawFace(side, [20, 23], [37, 13], [37, 27], [20, 37], 0.72);
+      // Accurate Minecraft 3D GUI isometric projection coordinates (Unsquashed)
+      drawFace(top, [6, 11], [20, 4], [34, 11], [20, 18], 1.08);
+      drawFace(side, [6, 11], [20, 18], [20, 36], [6, 29], 0.88);
+      drawFace(side, [20, 18], [34, 11], [34, 29], [20, 36], 0.72);
 
       if (alive) setSrc(out.toDataURL('image/png'));
     };
@@ -327,7 +334,7 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
 
   if (!src) {
     return (
-      <div className="flex items-center justify-center" style={{ width: 38, height: 38 }}>
+      <div className="flex items-center justify-center" style={{ width: 36, height: 36 }}>
         <IsometricVoxelIcon type={type} />
       </div>
     );
@@ -339,7 +346,7 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       alt=""
       aria-hidden="true"
       draggable={false}
-      style={{ width: 38, height: 38, imageRendering: 'pixelated', objectFit: 'contain', display: 'block' }}
+      style={{ width: 36, height: 36, imageRendering: 'pixelated', objectFit: 'contain', display: 'block' }}
     />
   );
 };
@@ -409,7 +416,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
 
     const jump = jumpPressed || keysDown.current.has('Space');
     const shift = keysDown.current.has('ShiftLeft') || keysDown.current.has('ShiftRight');
-    // While flying: Shift / C / on-screen button = descend (sprint is disabled)
     const descend = isFlying && (descendPressed || shift || keysDown.current.has('KeyC'));
     const sprint = !isFlying && (isSprinting || shift);
 
@@ -510,14 +516,12 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     const dy = touchY - centerY;
     const dist = Math.hypot(dx, dy);
 
-    if (dist < 18) {
-      // Center zone (Crouch / Sneak toggle)
+    // Center zone threshold (Crouch / Sneak toggle)
+    if (dist < 26) {
       setDpadDir({ forward: 0, right: 0 });
       return;
     }
 
-    // Snap the finger to the nearest of the 8 directions. Equal 45° sectors
-    // make diagonal activation stable while sliding between buttons.
     const angle = Math.atan2(dy, dx);
     const sector = ((Math.round(angle / (Math.PI / 4)) % 8) + 8) % 8;
     let f = 0;
@@ -567,7 +571,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     }
   };
 
-  // Touch handlers for World Interaction & Camera Look (Excludes UI Zones)
+  // Touch handlers for World Interaction & Camera Look
   const handleTouchStart = (e: React.TouchEvent) => {
     const screenW = window.innerWidth;
     const screenH = window.innerHeight;
@@ -580,8 +584,8 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         continue;
       }
 
-      // 2. Deadzone: Ignore touches in bottom-left D-Pad quadrant
-      if (touch.clientX < 190 && touch.clientY > screenH - 220) {
+      // 2. Deadzone: Ignore touches in bottom-left D-Pad area (Expanded to protect top corners)
+      if (touch.clientX < 220 && touch.clientY > screenH - 260) {
         continue;
       }
 
@@ -596,7 +600,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         continue;
       }
 
-      // Valid Game Interaction Zone (Looking, Mining, Placing)
+      // Valid Game Interaction Zone
       if (lookTouchId.current === null) {
         lookTouchId.current = touch.identifier;
         lookStartPos.current = { x: touch.clientX, y: touch.clientY };
@@ -612,7 +616,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         setBreakProgress(0);
 
         const startTime = performance.now();
-        const duration = 280; // 280ms hold threshold for mining
+        const duration = 280;
 
         const tickProgress = () => {
           const elapsed = performance.now() - startTime;
@@ -620,13 +624,11 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           setBreakProgress(p);
 
           if (p >= 1.0) {
-            // MCPE Hold-Break completed!
             isBreakingRef.current = true;
             didBreakRef.current = true;
             onActionMine(targetPos);
             setBreakProgress(0);
 
-            // Repeat breaking while finger remains held
             if (!holdBreakInterval.current) {
               holdBreakInterval.current = window.setInterval(() => {
                 onActionMine(targetPos);
@@ -646,7 +648,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
 
-      // Camera Look Move
       if (touch.identifier === lookTouchId.current) {
         onAimTouchCoords?.({ x: touch.clientX, y: touch.clientY });
         const dx = touch.clientX - lastLookPos.current.x;
@@ -658,13 +659,11 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           touch.clientY - lookStartPos.current.y
         );
 
-        // If finger swiped > 8px, it is camera rotation!
         if (totalMoved > 8) {
           hasMovedRef.current = true;
           cancelHoldBreak();
         }
 
-        // Apply smooth camera rotation
         const touchSensitivity = 0.0042;
         onLookDelta(dx * touchSensitivity, dy * touchSensitivity);
       }
@@ -675,16 +674,11 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
 
-      // Look / Tap End
       if (touch.identifier === lookTouchId.current) {
         lookTouchId.current = null;
         onAimTouchCoords?.(null);
         const duration = performance.now() - touchStartTimeRef.current;
 
-        // Place ONLY if:
-        // - Finger didn't drag camera (!hasMovedRef.current)
-        // - Finger didn't break a block (!didBreakRef.current)
-        // - It was a quick tap (< 240ms)
         if (!hasMovedRef.current && !didBreakRef.current && !isBreakingRef.current && duration < 240) {
           onActionPlace({ x: touch.clientX, y: touch.clientY });
         }
@@ -702,7 +696,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
     >
-      {/* PC ONLY: Center Crosshair (Hidden on mobile) */}
+      {/* PC ONLY: Center Crosshair */}
       {!isMobile && isPointerLocked && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex items-center justify-center">
           <div className="w-5 h-5 relative">
@@ -743,7 +737,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* MCPE-style 8-way D-pad: contiguous 3x3 grid; diagonals appear only while selected. */}
+      {/* MCPE D-Pad: Contiguous 3x3 Grid; all buttons have identical size and stay properly anchored */}
       <div
         ref={dpadContainerRef}
         className="ui-touch-interactive absolute left-3 sm:left-5 bottom-[clamp(4.25rem,9vh,6.5rem)] pointer-events-auto select-none touch-none z-30"
@@ -765,24 +759,22 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           ['down_right', -1, 1, 'Back-Right', 112, 112],
         ] as [string, number | null, number | null, string, number, number][]).map(([name, f, r, title, left, top]) => {
           const isCenter = f === null;
-          const isDiagonal = f !== null && r !== null && f !== 0 && r !== 0;
           const isActive = isCenter
             ? isSneaking
             : dpadDir.forward === f && dpadDir.right === r;
-          const visible = !isDiagonal || isActive;
 
           return (
             <div
               key={name}
               className="absolute"
-              style={{ left, top, width: 56, height: 56, zIndex: isDiagonal ? 3 : 2 }}
+              style={{ left, top, width: 56, height: 56, boxSizing: 'border-box' }}
             >
               <ControlImg
                 name={name}
                 pressed={isActive}
                 size={56}
                 title={title}
-                visible={visible}
+                visible={true}
                 onClick={isCenter ? () => setIsSneaking(!isSneaking) : undefined}
               />
             </div>
@@ -790,9 +782,8 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         })}
       </div>
 
-      {/* OFFICIAL MCPE JUMP & CAMERA CONTROLS (Bottom Right) */}
+      {/* OFFICIAL MCPE JUMP & CAMERA CONTROLS */}
       <div className="ui-touch-interactive absolute bottom-20 sm:bottom-24 right-5 sm:right-8 pointer-events-auto flex flex-col items-center gap-3 z-30">
-        {/* Physics Maker HUD Toggle (Create/Aeronautics Wand) */}
         {onTogglePhysicsMaker && (
           <button
             onClick={(e) => {
@@ -810,7 +801,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           </button>
         )}
 
-        {/* Camera Perspective Toggle */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -822,7 +812,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           <Camera className="w-5 h-5" />
         </button>
 
-        {/* Fly-down button (only while flying) */}
         {isFlying && (
           <div
             onTouchStart={(e) => {
@@ -840,7 +829,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           </div>
         )}
 
-        {/* Fly-up / Jump Button */}
         <div
           onTouchStart={(e) => {
             e.stopPropagation();
@@ -862,7 +850,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       </div>
 
-      {/* AUTHENTIC MINECRAFT 9-SLOT HOTBAR (Uses genuine hotbar.png and hotbar_selection.png) */}
+      {/* AUTHENTIC MINECRAFT 9-SLOT HOTBAR */}
       <div
         className="ui-touch-interactive absolute bottom-2 sm:bottom-3 left-1/2 -translate-x-1/2 pointer-events-auto z-30 select-none max-w-[98vw] overflow-x-auto pb-0.5 scrollbar-none"
         onTouchStart={(e) => e.stopPropagation()}
@@ -879,7 +867,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
             imageRendering: 'pixelated',
           }}
         >
-          {/* Active Hotbar Selection Box Cursor */}
+          {/* Active Hotbar Selection Cursor */}
           {(() => {
             const selectedIdx = Math.max(0, HOTBAR_ITEMS.findIndex((it) => it.type === selectedVoxel));
             return (
@@ -899,7 +887,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
             );
           })()}
 
-          {/* 9 Hotbar Slots with 3D Isometric Voxel Icons */}
+          {/* 9 Hotbar Slots */}
           {HOTBAR_ITEMS.map((item, idx) => {
             return (
               <button
@@ -920,11 +908,9 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                 }}
                 title={`${idx + 1}: ${item.name}`}
               >
-                {/* Resource-pack-aware Minecraft block icon */}
-                <div className="flex items-center justify-center">
+                <div className="flex items-center justify-center w-full h-full">
                   <ResourcePackBlockIcon type={item.type} />
                 </div>
-                {/* Slot index number in Minecraft font */}
                 <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
                   {idx + 1}
                 </span>
