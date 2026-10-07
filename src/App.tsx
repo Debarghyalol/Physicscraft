@@ -247,11 +247,7 @@ export default function App() {
         /* 2. ACTIVE 3D VOXEL WORLD (Started when world is selected) */
         <>
           {/* Top Options Bar (Clean, no floating menu button) */}
-          <TopHeader
-            onOpenSettings={() => setIsSettingsOpen(true)}
-            fps={stats.fps}
-            blockCount={stats.count}
-          />
+          <TopHeader />
 
           {/* 3D Physics Viewport with Rapier 3D + Voxel Streaming + Dynamic Shader Lighting */}
           <Viewport3D
