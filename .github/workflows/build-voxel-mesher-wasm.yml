@@ -1,0 +1,30 @@
+name: Build voxel mesher WASM
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "wasm/voxel-mesher/**"
+
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+
+      - name: Build
+        run: wasm-pack build wasm/voxel-mesher --target web --out-dir ../../public/wasm/voxel-mesher
+
+      - name: Upload WASM package
+        uses: actions/upload-artifact@v4
+        with:
+          name: physicscraft-voxel-mesher-wasm
+          path: public/wasm/voxel-mesher/
