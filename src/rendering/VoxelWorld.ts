@@ -1760,7 +1760,7 @@ export class VoxelWorld {
     const image = this.atlasTexture.image as HTMLCanvasElement | undefined;
     const width = image?.width ?? 16 * 18;
     const height = image?.height ?? 18;
-    const res = height / 1.125; // height = res + 2*(res/8)
+    const res = height * 0.8; // height = res + 2*(res/8)
     const pad = res / 8;
     const stride = res + pad * 2;
 
