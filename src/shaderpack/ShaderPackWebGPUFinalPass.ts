@@ -189,6 +189,65 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
   lightShadow.__nostalgiaFilterInstalled = true;
 }
 
+/**
+ * Port of Nostalgia's screen-space contactShadow.glsl.
+ *
+ * This is deliberately separate from the shadow-map lookup: the shadow map provides
+ * the broad directional shadow, while this short view-space ray closes the small
+ * rasterization gap immediately around voxel casters/receivers.
+ */
+function createNostalgiaContactShadow(
+  sceneDepth: Node,
+  viewPosition: Node,
+  cam: ReturnType<typeof createSceneCameraNodes>,
+  lightDirWorld: Node,
+): Node {
+  const lightDirView = (cam.viewMatrix as any).mul(vec4(lightDirWorld.normalize(), 0.0)).xyz.normalize();
+  const start = viewPosition;
+  const rayLength = (viewPosition.z.abs() as any).max(0.25);
+  const rayEnd = start.add(lightDirView.mul(rayLength));
+
+  const project = (p: any) => {
+    const clip = (cam.projectionMatrix as any).mul(vec4(p, 1.0));
+    const invW = float(1.0).div(clip.w);
+    const ndc = clip.xyz.mul(invW);
+    return vec2(ndc.x.mul(0.5).add(0.5), ndc.y.mul(0.5).add(0.5));
+  };
+
+  const startUv = project(start);
+  const endUv = project(rayEnd);
+  const rayUv = endUv.sub(startUv);
+  const maxRay = rayUv.x.abs().max(rayUv.y.abs());
+  const pixelScale = maxRay.mul(2.0).max(1.0);
+  const dither = uv().x.mul(127.1).add(uv().y.mul(311.7)).sin().mul(43758.5453).fract();
+  const stride = 4.0;
+  const steps = 16;
+
+  const hit = float(0.0).toVar('nostalgiaContactHit');
+  Loop(steps, ({ i }) => {
+    const pixelStep = float(i).mul(stride).add(dither.mul(stride).add(1.0));
+    const t = pixelStep.div(float(steps).mul(stride).mul(pixelScale)).clamp(0.0, 1.0);
+    const rayPoint = start.add(rayEnd.sub(start).mul(t));
+    const sampleUv = project(rayPoint);
+    const inside = sampleUv.x.greaterThanEqual(0.0)
+      .and(sampleUv.x.lessThanEqual(1.0))
+      .and(sampleUv.y.greaterThanEqual(0.0))
+      .and(sampleUv.y.lessThanEqual(1.0));
+
+    const sampleDepth = sceneDepth.sample(sampleUv).x;
+    const sampleView = getViewPosition(sampleUv, sampleDepth, cam.projectionMatrixInverse);
+    // In view space the camera looks down -Z. A depth sample with a less-negative Z
+    // than the ray point is in front of the light ray and therefore occludes it.
+    const depthGap = sampleView.z.sub(rayPoint.z);
+    const tolerance = float(0.015).add(t.mul(0.05));
+    const depthHit = depthGap.greaterThan(tolerance)
+      .and(sampleDepth.lessThan(0.99999));
+    hit.assign(inside.and(depthHit).select(1.0, hit));
+  });
+
+  return hit.oneMinus().clamp(0.0, 1.0) as unknown as Node;
+}
+
 let nostalgiaShadowNode: any = null;
 
 /**
@@ -249,6 +308,14 @@ export function createNostalgiaDeferredLighting(
   const shadowFactor = sunShadowNode
     .context({ shadowPositionWorld: biasedPosition })
     .clamp(0.0, 1.0) as Node;
+  // Nostalgia's contactShadow ray closes the sub-texel/rasterization gap that a
+  // conventional shadow-map PCF lookup cannot resolve around voxel silhouettes.
+  const contactShadow = createNostalgiaContactShadow(
+    sceneDepth,
+    viewPosition,
+    cam,
+    lightDir,
+  );
 
   // --- Voxel light propagation (sky + block light flood fill from VoxelWorld) ---------
   // Same model as VoxelWorld's vanilla shader: sky light is reduced by the day/night
@@ -277,7 +344,7 @@ export function createNostalgiaDeferredLighting(
 
   const skyAmbient = skyColor.mul(skyBrightness).mul(faceShade).mul(0.75);
   const blockLight = blockColor.mul(blockBrightness);
-  const direct = diffuse.mul(lightStrength).mul(0.8).mul(shadowFactor).mul(sunExposure);
+  const direct = diffuse.mul(lightStrength).mul(0.8).mul(shadowFactor).mul(contactShadow).mul(sunExposure);
 
   // Nostalgia's indirectAO.fsh multiplies the *indirect* light (sky + block bounce) by
   // SSAO; direct sunlight is left to the shadow map.
