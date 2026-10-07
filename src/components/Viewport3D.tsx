@@ -135,33 +135,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const camera = new THREE.PerspectiveCamera(graphics.fov, aspect, 0.1, 400);
     cameraRef.current = camera;
 
-    // Match Iris/Nostalgia's three terrain classes at the pass level:
-    //   layer 0 = opaque + alpha-cutout + all normal scene objects
-    //   layer 1 = forward translucent terrain (glass/water/etc.)
-    // The translucent pass is composited after deferred lighting.
-    const opaqueLayers = new THREE.Layers();
-    opaqueLayers.set(0);
-    const translucentLayers = new THREE.Layers();
-    translucentLayers.set(1);
-
+    // WebGPU post-processing is owned by Three's RenderPipeline/TSL stack.
+    // The scene pass is colortex0 for the first shader-pack output adapter.
     const scenePass = pass(scene, camera);
-    scenePass.setLayers(opaqueLayers);
     const sceneGBuffer = activateNostalgiaGBuffer(scenePass);
-
-    const translucentPass = pass(scene, camera);
-    translucentPass.setLayers(translucentLayers);
-    translucentPass.transparent = true;
-    const translucentColor = translucentPass.getTextureNode('output');
-    const translucentDepth = translucentPass.getTextureNode('depth');
-
-    const initialSceneColor = createNostalgiaFinalOutput(
-      sceneGBuffer.color,
-      sceneGBuffer.color,
-      sceneGBuffer.depth,
-      translucentColor,
-      translucentDepth,
-    );
-    const renderPipeline = new RenderPipeline(renderer, initialSceneColor);
+    const renderPipeline = new RenderPipeline(renderer, sceneGBuffer.color);
     const nostalgiaLightDirectionWorld = uniform(new THREE.Vector3(0, 1, 0));
     const nostalgiaLightStrength = uniform(1.0);
     const nostalgiaSkyDim = uniform(0.0);
@@ -277,8 +255,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 deferredColor,
                 sceneGBuffer.color,
                 sceneGBuffer.depth,
-                translucentColor,
-                translucentDepth,
               );
               renderPipeline.outputNode = nostalgiaBeauty;
               renderPipeline.needsUpdate = true;
