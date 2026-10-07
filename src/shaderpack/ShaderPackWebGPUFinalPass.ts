@@ -121,13 +121,19 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
 
   scenePass.setMRT(
     mrt({
+      // Keep the original rendered color separately. The final pass must be able
+      // to return clouds/player/particles unchanged instead of sending them through
+      // voxel deferred lighting.
       output: materialColor,
+      albedo: materialColor,
       gdata: vec4(oct.x, oct.y, packedLightByte, light.z),
     }),
   );
 
   scenePass.getTexture('output').type = UnsignedByteType;
+  scenePass.getTexture('albedo').type = UnsignedByteType;
   scenePass.getTexture('gdata').type = UnsignedByteType;
+
 
   const packed = scenePass.getTextureNode('gdata');
 
@@ -143,7 +149,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
 
   return {
     color: scenePass.getTextureNode('output'),
-    albedo: scenePass.getTextureNode('output'),
+    albedo: scenePass.getTextureNode('albedo'),
     normal: decoded,
     // Recover the exact 0..255 light byte, then unpack its two 4-bit nibbles.
     lightmap: vec4(
