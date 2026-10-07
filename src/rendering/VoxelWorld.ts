@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
@@ -262,7 +263,7 @@ export class VoxelWorld {
   // Terrain render classes mirror Iris/Nostalgia: opaque, alpha-cutout, translucent.
   public material!: THREE.MeshBasicMaterial;
   public cutoutMaterial!: THREE.MeshBasicMaterial;
-  public transparentMaterial!: THREE.MeshBasicMaterial;
+  public transparentMaterial!: THREE.MeshBasicMaterial | MeshBasicNodeMaterial;
   private atlasTexture!: THREE.CanvasTexture;
   private baseAtlasCanvas!: HTMLCanvasElement;
   public shaderUniforms: Record<string, { value: any }> | null = null;
@@ -570,7 +571,10 @@ export class VoxelWorld {
     });
     // Iris TERRAIN_TRANSLUCENT / Nostalgia forward.fsh: real texture alpha is blended
     // after opaque + cutout terrain and does not write depth.
-    this.transparentMaterial = new THREE.MeshBasicMaterial({
+    // WebGPU glass must use the NodeMaterial path. The legacy
+    // MeshBasicMaterial shader hooks are WebGL-only, and transparent terrain
+    // is rendered through the WebGPU MRT scene pass.
+    this.transparentMaterial = new MeshBasicNodeMaterial({
       map: this.atlasTexture,
       vertexColors: true,
       transparent: true,
