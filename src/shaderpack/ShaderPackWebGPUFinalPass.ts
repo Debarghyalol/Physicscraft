@@ -9,6 +9,7 @@ import {
   float,
   mix,
   mrt,
+  floor,
   normalWorld,
   output,
   shadow,
@@ -29,9 +30,11 @@ type NostalgiaScenePass = {
 
 export interface NostalgiaGBuffer {
   color: Node;
+  /** Albedo is the first packed RGBA8 attachment. */
   albedo: Node;
+  /** Decoded world normal reconstructed from octahedral RG8. */
   normal: Node;
-  /** x = sky light 0..1, y = block light 0..1, z = 1 when the surface carries voxel light data. */
+  /** Decoded voxel light: x=sky, y=block, z=1 when voxel light data exists. */
   lightmap: Node;
   depth: Node;
 }
@@ -74,29 +77,72 @@ const voxelLightmap = () => new VoxelLightmapNode() as unknown as Node;
  * final beauty buffer.
  */
 export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): NostalgiaGBuffer {
+  /*
+   * Match Nostalgia's fundamental strategy: keep the geometry buffer compact and
+   * decode only what deferred lighting needs.
+   *
+   * Physicscraft currently needs only:
+   *   - albedo RGB
+   *   - world normal
+   *   - sky/block voxel light
+   *
+   * Pack those into TWO RGBA8 attachments:
+   *
+   *   output/albedo RGBA8:
+   *     RGB = albedo
+   *     A   = unused/material alpha
+   *
+   *   gdata RGBA8:
+   *     RG = octahedral normal
+   *     B  = sky light
+   *     A  = block light
+   *
+   * This avoids the default RGBA16F MRT allocations that caused the WebGPU
+   * 32-bytes-per-sample validation failure.
+   */
+  const n = normalWorld.normalize();
+  const invL1 = float(1.0).div(n.x.abs().add(n.y.abs()).add(n.z.abs()).max(0.000001));
+  const octBase = n.xy.mul(invL1);
+  const folded = vec2(1.0).sub(octBase.yx.abs()).mul(
+    vec2(
+      n.x.greaterThanEqual(0.0).select(1.0, -1.0),
+      n.y.greaterThanEqual(0.0).select(1.0, -1.0),
+    ),
+  );
+  const oct = n.z.lessThan(0.0).select(folded, octBase).mul(0.5).add(0.5);
+
+  const light = voxelLightmap();
+  const sky = light.x;
+  const block = light.y;
+  const hasLight = light.z;
+
   scenePass.setMRT(
     mrt({
-      output,
-      // Use the material's actual texture/color, not diffuseColor. diffuseColor
-      // already contains VoxelWorld's baked face/AO vertex color, so using it as
-      // deferred albedo applies the Minecraft face shading a second time and makes
-      // vertical/underside faces unnaturally black before lighting even runs.
-      albedo: materialColor,
-      // MRT color targets are normalized 0..1. Store the world normal encoded
-      // from [-1,1] to [0,1]; writing normalWorld directly clips negative X/Y/Z
-      // components and destroys the side/bottom-face normals in the deferred pass.
-      normal: normalWorld.mul(0.5).add(0.5),
-      lightmap: voxelLightmap(),
+      output: materialColor,
+      gdata: vec4(oct.x, oct.y, sky, block),
     }),
   );
 
-  scenePass.getTexture('albedo').type = UnsignedByteType;
+  scenePass.getTexture('output').type = UnsignedByteType;
+  scenePass.getTexture('gdata').type = UnsignedByteType;
+
+  const packed = scenePass.getTextureNode('gdata');
+
+  // Decode octahedral normal from the packed RG8 pair.
+  const encoded = packed.xy.mul(2.0).sub(1.0);
+  const z = float(1.0).sub(encoded.x.abs()).sub(encoded.y.abs());
+  const t = z.negate().max(0.0);
+  const decoded = vec3(
+    encoded.x.add(encoded.x.greaterThanEqual(0.0).select(t.negate(), t)),
+    encoded.y.add(encoded.y.greaterThanEqual(0.0).select(t.negate(), t)),
+    z,
+  ).normalize();
 
   return {
     color: scenePass.getTextureNode('output'),
-    albedo: scenePass.getTextureNode('albedo'),
-    normal: scenePass.getTextureNode('normal'),
-    lightmap: scenePass.getTextureNode('lightmap'),
+    albedo: scenePass.getTextureNode('output'),
+    normal: decoded,
+    lightmap: vec4(sky, block, hasLight, 1.0) as unknown as Node,
     depth: scenePass.getTextureNode('depth'),
   };
 }
