@@ -9,7 +9,6 @@ import {
   float,
   mix,
   mrt,
-  floor,
   normalWorld,
   output,
   shadow,
@@ -111,11 +110,6 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
   );
   const oct = n.z.lessThan(0.0).select(folded, octBase).mul(0.5).add(0.5);
 
-  const light = voxelLightmap();
-  const sky = light.x;
-  const block = light.y;
-  const hasLight = light.z;
-
   scenePass.setMRT(
     mrt({
       output: materialColor,
@@ -142,7 +136,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     color: scenePass.getTextureNode('output'),
     albedo: scenePass.getTextureNode('output'),
     normal: decoded,
-    lightmap: vec4(sky, block, hasLight, 1.0) as unknown as Node,
+    lightmap: vec4(packed.z, packed.w, 1.0, 1.0) as unknown as Node,
     depth: scenePass.getTextureNode('depth'),
   };
 }
