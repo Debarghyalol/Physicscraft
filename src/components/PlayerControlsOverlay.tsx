@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PlayerInput } from '../player/PlayerController';
 import { CameraViewMode, VoxelType } from '../types/physics';
 import { Camera, Wrench } from 'lucide-react';
+import { resourcePacks } from '../resourcepack/ResourcePackManager';
 
 export interface PlayerControlsOverlayProps {
   onInputUpdate: (input: PlayerInput) => void;
@@ -19,6 +20,18 @@ export interface PlayerControlsOverlayProps {
   isPhysicsMakerActive?: boolean;
 }
 
+const HOTBAR_TEXTURES: Record<VoxelType, { paths: string[]; fallback: string }> = {
+  [VoxelType.GRASS]: { paths: ['block/grass_block_side', 'block/grass_block'], fallback: 'grass_block_side' },
+  [VoxelType.DIRT]: { paths: ['block/dirt'], fallback: 'dirt' },
+  [VoxelType.STONE]: { paths: ['block/stone'], fallback: 'stone' },
+  [VoxelType.WOOD]: { paths: ['block/oak_log', 'block/oak_log_side'], fallback: 'oak_log' },
+  [VoxelType.LEAVES]: { paths: ['block/oak_leaves'], fallback: 'oak_leaves' },
+  [VoxelType.SAND]: { paths: ['block/sand'], fallback: 'sand' },
+  [VoxelType.COBBLESTONE]: { paths: ['block/cobblestone'], fallback: 'cobblestone' },
+  [VoxelType.GLASS]: { paths: ['block/glass'], fallback: 'glass' },
+  [VoxelType.GLOWSTONE]: { paths: ['block/glowstone'], fallback: 'glowstone' },
+  [VoxelType.TNT]: { paths: ['block/tnt_side', 'block/tnt'], fallback: 'tnt_side' },
+};
 export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
   { type: VoxelType.GRASS, name: 'Grass Block' },
   { type: VoxelType.DIRT, name: 'Dirt' },
@@ -152,21 +165,66 @@ const ControlImg: React.FC<{
   className?: string;
   title?: string;
   onClick?: () => void;
-}> = ({ name, pressed, size, className = '', title, onClick }) => (
+  visible?: boolean;
+}> = ({ name, pressed, size, className = '', title, onClick, visible = true }) => (
   <button
     type="button"
-    title={title}
-    onClick={onClick}
+    title={visible ? title : undefined}
+    aria-hidden={!visible}
+    tabIndex={visible ? 0 : -1}
+    onClick={visible ? onClick : undefined}
     className={`${className} select-none touch-none p-0 border-0 bg-transparent`}
     style={{
       width: size,
       height: size,
-      backgroundImage: `url(${CONTROLS_PATH}/${name}${pressed ? '_pressed' : ''}.png)`,
+      backgroundImage: visible
+        ? `url(${CONTROLS_PATH}/${name}${pressed ? '_pressed' : ''}.png)`
+        : 'none',
       backgroundSize: '100% 100%',
       imageRendering: 'pixelated',
+      opacity: visible ? 1 : 0,
+      pointerEvents: visible ? 'auto' : 'none',
     }}
   />
 );
+
+const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = async () => {
+      const entry = HOTBAR_TEXTURES[type];
+      if (!entry) return;
+      const canvas = await resourcePacks.getTexture(entry.paths);
+      if (alive) setSrc(canvas ? canvas.toDataURL('image/png') : null);
+    };
+    refresh();
+    const unsubscribe = resourcePacks.subscribe(refresh);
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [type]);
+
+  const fallback = HOTBAR_TEXTURES[type]?.fallback;
+  return (
+    <span
+      aria-hidden="true"
+      className="block shrink-0"
+      style={{
+        width: 32,
+        height: 32,
+        backgroundImage: `url(${src ?? `/textures/block/${fallback}.png`})`,
+        backgroundSize: 'contain',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        imageRendering: 'pixelated',
+        filter: 'drop-shadow(1px 2px 1px rgba(0,0,0,0.65))',
+      }}
+    />
+  );
+};
 
 export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onInputUpdate,
@@ -571,13 +629,13 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
       {/* OFFICIAL MCPE CROSS D-PAD (Bottom Left) */}
       <div
         ref={dpadContainerRef}
-        className="ui-touch-interactive absolute bottom-18 sm:bottom-22 left-4 sm:left-6 pointer-events-auto select-none touch-none z-30"
+        className="ui-touch-interactive absolute left-3 sm:left-5 bottom-[clamp(4.25rem,9vh,6.5rem)] pointer-events-auto select-none touch-none z-30"
         onTouchStart={handleDpadTouchStart}
         onTouchMove={handleDpadTouchMove}
         onTouchEnd={handleDpadTouchEnd}
         onTouchCancel={handleDpadTouchEnd}
       >
-        <div className="grid grid-cols-3" style={{ width: 132, height: 132 }}>
+        <div className="grid grid-cols-3" style={{ width: 144, height: 144 }}>
           {([
             ['up_left', 1, -1, 'Forward-Left'],
             ['up', 1, 0, 'Move Forward'],
@@ -599,8 +657,17 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                 key={name}
                 name={name}
                 pressed={pressed}
-                size={44}
+                size={48}
                 title={title}
+                visible={
+                  isCenter ||
+                  f === 0 ||
+                  r === 0 ||
+                  (f === 1 && r === -1 && dpadDir.forward > 0 && dpadDir.right < 0) ||
+                  (f === 1 && r === 1 && dpadDir.forward > 0 && dpadDir.right > 0) ||
+                  (f === -1 && r === -1 && dpadDir.forward < 0 && dpadDir.right < 0) ||
+                  (f === -1 && r === 1 && dpadDir.forward < 0 && dpadDir.right > 0)
+                }
                 onClick={isCenter ? () => setIsSneaking(!isSneaking) : undefined}
               />
             );
@@ -707,7 +774,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           className="relative flex items-center shadow-2xl shrink-0"
           style={{
             width: '364px',
-            height: '44px',
+            height: '48px',
             backgroundImage: 'var(--rp-hotbar, url(/textures/gui/hotbar.png))',
             backgroundSize: '100% 100%',
             imageRendering: 'pixelated',
@@ -749,14 +816,14 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                 className="relative flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
                 style={{
                   width: '40px',
-                  height: '40px',
+                  height: '44px',
                   marginLeft: idx === 0 ? '2px' : '0px',
                 }}
                 title={`${idx + 1}: ${item.name}`}
               >
-                {/* 3D Isometric Pixel Art Block Icon */}
-                <div className="flex items-center justify-center drop-shadow-md">
-                  <IsometricVoxelIcon type={item.type} />
+                {/* Resource-pack-aware Minecraft block icon */}
+                <div className="flex items-center justify-center">
+                  <ResourcePackBlockIcon type={item.type} />
                 </div>
                 {/* Slot index number in Minecraft font */}
                 <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
