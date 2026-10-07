@@ -56,7 +56,7 @@ class VoxelLightmapNode extends TSLNode {
     if (geometry && geometry.hasAttribute('aLight')) {
       return vec4(attribute('aLight', 'vec2'), 1.0, 1.0);
     }
-    return vec4(0.0, 0.0, 0.0, 1.0);
+    return vec4(0.0, 0.0, 0.0, 0.0);
   }
 }
 
