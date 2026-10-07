@@ -207,7 +207,16 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
     };
   }, [type]);
 
-  const fallback = HOTBAR_TEXTURES[type]?.fallback;
+  if (!src) {
+    // Keep the built-in icon renderer as the default fallback because the app does not
+    // ship individual block PNGs under public/textures/block.
+    return (
+      <div className="flex items-center justify-center" style={{ width: 32, height: 32 }}>
+        <IsometricVoxelIcon type={type} />
+      </div>
+    );
+  }
+
   return (
     <span
       aria-hidden="true"
@@ -215,7 +224,7 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       style={{
         width: 32,
         height: 32,
-        backgroundImage: `url(${src ?? `/textures/block/${fallback}.png`})`,
+        backgroundImage: `url(${src})`,
         backgroundSize: 'contain',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
