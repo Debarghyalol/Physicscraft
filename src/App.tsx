@@ -211,7 +211,7 @@ export default function App() {
   }, [engine, currentPreset, isMuted, isSettingsOpen, gameState]);
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-black font-sans select-none touch-none">
+    <div className="relative w-[100dvw] h-[100dvh] min-h-[100dvh] overflow-hidden bg-black font-sans select-none touch-none">
       {gameState === 'menu' ? (
         /* 1. AUTHENTIC FULL-SCREEN MINECRAFT MAIN MENU (Game does NOT run until world is opened) */
         <>
@@ -247,7 +247,7 @@ export default function App() {
         /* 2. ACTIVE 3D VOXEL WORLD (Started when world is selected) */
         <>
           {/* Top Options Bar (Clean, no floating menu button) */}
-          <TopHeader />
+          <TopHeader onOpenPauseMenu={() => setIsSettingsOpen(true)} />
 
           {/* 3D Physics Viewport with Rapier 3D + Voxel Streaming + Dynamic Shader Lighting */}
           <Viewport3D
