@@ -187,6 +187,19 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
   lightShadow.__nostalgiaFilterInstalled = true;
 }
 
+let nostalgiaShadowNode: any = null;
+
+/**
+ * Render the sun's shadow map from the real world scene. Call once per frame, before
+ * `renderPipeline.render()`. A no-op until the pipeline has compiled (the shadow render
+ * target is created lazily) or while shadows are disabled.
+ */
+export function updateNostalgiaShadowMap(renderer: any, scene: any, camera: any): void {
+  const node = nostalgiaShadowNode;
+  if (!node || !node.shadowMap || !node.light?.castShadow || renderer.shadowMap?.enabled !== true) return;
+  node.updateShadow({ renderer, scene, camera });
+}
+
 /**
  * Deferred lighting using the actual Nostalgia shadowFiltered() kernel
  * translated to TSL, with Three.js retaining the native shadow-map renderer.
@@ -221,7 +234,15 @@ export function createNostalgiaDeferredLighting(
   // push the lookup along the surface normal, more at grazing angles, to avoid acne on
   // side faces and self-shadowing banding on slopes.
   const biasedPosition = worldPosition.add(normal.mul(float(0.03).add(float(0.07).mul(float(1.0).sub(diffuse)))));
-  const shadowFactor = (shadow(sunLight) as any)
+  // Three's ShadowNode renders its shadow map from `frame.scene` when it is updated. Inside
+  // the post-processing pass that scene is the full-screen quad, so left alone it renders
+  // an EMPTY shadow map every frame and nothing is ever shadowed. Take over the update:
+  // stop the node's own (wrong-scene) update and render the map ourselves each frame from
+  // the real world scene via updateNostalgiaShadowMap().
+  const sunShadowNode = shadow(sunLight) as any;
+  sunLight.shadow.autoUpdate = false;
+  nostalgiaShadowNode = sunShadowNode;
+  const shadowFactor = sunShadowNode
     .context({ shadowPositionWorld: biasedPosition })
     .clamp(0.0, 1.0) as Node;
 

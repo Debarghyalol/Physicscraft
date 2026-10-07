@@ -22,7 +22,7 @@ import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
 import { translateProgram } from '../shaderpack/GlslTranslator';
-import { activateNostalgiaGBuffer, createNostalgiaDeferredLighting, createNostalgiaFinalOutput, isNostalgiaFinalSource } from '../shaderpack/ShaderPackWebGPUFinalPass';
+import { activateNostalgiaGBuffer, createNostalgiaDeferredLighting, createNostalgiaFinalOutput, isNostalgiaFinalSource, updateNostalgiaShadowMap } from '../shaderpack/ShaderPackWebGPUFinalPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -374,6 +374,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       // drawCalls/triangles accumulate forever (and `info.render.calls` is a lifetime
       // counter of render() calls, not draw calls, so it is never what we want).
       renderer.info.reset();
+      // Shadow map must be rendered from the world scene (see updateNostalgiaShadowMap).
+      updateNostalgiaShadowMap(renderer, scene, camera);
       renderPipeline.render();
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
