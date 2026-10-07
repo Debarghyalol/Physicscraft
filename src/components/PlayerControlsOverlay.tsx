@@ -774,7 +774,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                 pressed={isActive}
                 size={56}
                 title={title}
-                visible={true}
+                visible={!isCenter && (f === 1 || f === -1) && (r === 1 || r === -1) ? isActive : true}
                 onClick={isCenter ? () => setIsSneaking(!isSneaking) : undefined}
               />
             </div>
@@ -911,9 +911,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                 <div className="flex items-center justify-center w-full h-full">
                   <ResourcePackBlockIcon type={item.type} />
                 </div>
-                <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
-                  {idx + 1}
-                </span>
               </button>
             );
           })}
