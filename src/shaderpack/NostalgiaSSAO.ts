@@ -5,12 +5,14 @@ import {
   perspectiveDepthToViewZ,
   reference,
   screenCoordinate,
+  texture,
   screenSize,
   uniform,
   uv,
   vec2,
 } from 'three/tsl';
 import type { Node } from 'three/tsl';
+import type { Texture } from 'three';
 
 export interface SceneCameraNodes {
   near: Node;
@@ -41,23 +43,19 @@ const MAX_OCCLUSION_DIST = Math.PI * 2;
 const ANTI_BLEED_EXP = 0.71;
 
 /**
- * Stable low-discrepancy approximation of the pack's blue-noise dither.
+ * Nostalgia's exact ditherBluenoise() source:
  *
- * The pack reads noise2D.png and rotates its sample phase with the TAA frame counter.
- * The shader-pack texture binding layer does not currently expose noisetex to TSL, so
- * this uses a cheap integer hash with frame rotation. TRAA in the final pipeline
- * accumulates these changing samples and rejects history using depth/velocity.
+ *   noise = texelFetch(noisetex, ivec2(gl_FragCoord.xy) & 255, 0).a;
+ *   noise = fract(noise + frameCounter / pi); // when TAA is enabled
+ *
+ * The texture is configured as 256x256 nearest/repeat, so normalized sampling at
+ * pixel centers is equivalent to the pack's integer texelFetch for our full-resolution pass.
  */
-const blueNoiseApprox = (frameCounter: Node) => {
+const blueNoise = (noiseTexture: Texture, frameCounter: Node) => {
   const frag: any = screenCoordinate;
-  const frame: any = frameCounter;
-  const x = frag.x.floor().add(frame.mul(17.0));
-  const y = frag.y.floor().add(frame.mul(31.0));
-  return x.mul(0.06711056)
-    .add(y.mul(0.00583715))
-    .sin()
-    .mul(43758.5453)
-    .fract();
+  const noiseUv = frag.add(0.5).div(256.0).fract();
+  const noise = texture(noiseTexture, noiseUv).a;
+  return noise.add(frameCounter.div(Math.PI)).fract();
 };
 
 const offsetDist = (x: any) => {
@@ -71,6 +69,7 @@ export function createNostalgiaSSAO(
   cam: SceneCameraNodes,
   intensity = 1.0,
   frameCounter: Node = float(0.0),
+  noiseTexture?: Texture,
 ): Node {
   const near: any = cam.near;
   const far: any = cam.far;
@@ -91,7 +90,8 @@ export function createNostalgiaSSAO(
     float(0.75).add(float(1.0).sub(normalUp).abs().mul(0.5)),
   );
 
-  const dither = blueNoiseApprox(frameCounter);
+  if (!noiseTexture) throw new Error('Nostalgia SSAO requires noise2D.png');
+  const dither = blueNoise(noiseTexture, frameCounter);
 
   const fovScale = (cam.projection11 as any).div(1.37);
   const distScale = far.sub(near).mul(depth).add(near).max(5.0);
