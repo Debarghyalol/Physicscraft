@@ -557,7 +557,9 @@ export class VoxelWorld {
       vertexColors: true,
       transparent: false,
       alphaTest: 0.1,
-      side: THREE.FrontSide,
+      // Foliage is a crossed/planar cutout surface in Minecraft. Both sides
+      // must render; back-face culling makes leaves disappear from many angles.
+      side: THREE.DoubleSide,
       depthWrite: true,
     });
     // Iris TERRAIN_TRANSLUCENT / Nostalgia forward.fsh: real texture alpha is blended
@@ -1472,12 +1474,11 @@ export class VoxelWorld {
       mesh.castShadow = renderClass !== 'translucent';
       mesh.receiveShadow = true;
       mesh.frustumCulled = true;
-      if (renderClass === 'translucent') {
-        mesh.layers.set(1);
-        mesh.renderOrder = 10;
-      } else {
-        mesh.layers.set(0);
-      }
+      // Keep all terrain on the active scene layer. Translucent terrain is
+      // ordered after opaque/cutout terrain instead of being hidden on a layer
+      // that the main WebGPU camera/pass does not render.
+      mesh.layers.set(0);
+      mesh.renderOrder = renderClass === 'translucent' ? 10 : 0;
       mesh.userData = {
         isVoxelChunk: renderClass !== 'translucent',
         isVoxelChunkCutout: renderClass === 'cutout',
