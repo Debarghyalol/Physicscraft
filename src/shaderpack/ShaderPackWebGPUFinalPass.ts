@@ -13,7 +13,6 @@ import {
   output,
   shadow,
   texture,
-  time,
   uv,
   vec2,
   vec3,
@@ -124,7 +123,9 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
     const rho = 1.324717957244746;
     const tau = Math.PI * 2.0;
     const iterations = 12;
-    const dither = time.mul(60.0).fract();
+    // Keep the sample pattern stable per screen pixel. A time-varying dither makes the
+    // 12-tap filter crawl every frame and is especially visible on voxel shadow edges.
+    const dither = uv().x.mul(127.1).add(uv().y.mul(311.7)).sin().mul(43758.5453).fract();
 
     // Nostalgia warps the shadow map (shadowmapWarp) both when rendering it and when
     // sampling it. Three renders an unwarped map here, so sampling must use the unwarped
@@ -233,7 +234,9 @@ export function createNostalgiaDeferredLighting(
   // Normal-offset bias (ShadowNode's own normalBias would use the screen quad's normal):
   // push the lookup along the surface normal, more at grazing angles, to avoid acne on
   // side faces and self-shadowing banding on slopes.
-  const biasedPosition = worldPosition.add(normal.mul(float(0.03).add(float(0.07).mul(float(1.0).sub(diffuse)))));
+  // Voxel faces are exactly one block wide. Keep the normal offset tiny so the shadow
+  // remains attached to the caster instead of creating a visible gap at block edges.
+  const biasedPosition = worldPosition.add(normal.mul(0.003));
   // Three's ShadowNode renders its shadow map from `frame.scene` when it is updated. Inside
   // the post-processing pass that scene is the full-screen quad, so left alone it renders
   // an EMPTY shadow map every frame and nothing is ever shadowed. Take over the update:
