@@ -1,4 +1,4 @@
-import { HalfFloatType, UnsignedByteType } from 'three';
+import { UnsignedByteType } from 'three';
 import { Node as TSLNode } from 'three/webgpu';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
@@ -91,14 +91,14 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
    *     RGB = albedo
    *     A   = unused/material alpha
    *
-   *   gdata RGBA16F:
-   *     R,G = octahedral normal at FP16 precision
-   *     B   = two 8-bit light values packed into one FP16-safe word
-   *     A   = reserved
+   *   gdata RGBA8:
+   *     R,G = octahedral normal (8 bits/component)
+   *     B   = sky light 0..15 mapped to 0..255
+   *     A   = block light 0..15 mapped to 0..255
    *
-   * This keeps the normal precision of the original packed G-buffer while
-   * collapsing the two light channels into one. Total color attachment cost
-   * is only 4 + 8 = 12 bytes/pixel.
+   * This is deliberately byte-exact: FP16 cannot preserve an arbitrary
+   * 16-bit packed light word because its mantissa is too small. The voxel
+   * light values are only 4 bits each, so two full bytes are cheap and exact.
    */
   const light = voxelLightmap();
   const n = normalWorld.normalize();
@@ -114,19 +114,18 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
 
   const sky4 = light.x.mul(15.0).add(0.5).floor().clamp(0.0, 15.0);
   const block4 = light.y.mul(15.0).add(0.5).floor().clamp(0.0, 15.0);
-  const packedLight = sky4.add(block4.mul(16.0)).div(65535.0);
+  const skyPacked = sky4.div(15.0);
+  const blockPacked = block4.div(15.0);
 
   scenePass.setMRT(
     mrt({
       output: materialColor,
-      gdata: vec4(oct.x, oct.y, packedLight, light.z),
+      gdata: vec4(oct.x, oct.y, skyPacked, blockPacked),
     }),
   );
 
   scenePass.getTexture('output').type = UnsignedByteType;
-  // Keep the two normal components at FP16 precision like Nostalgia's GData0,
-  // while B carries its compact 2x4-bit voxel-light word.
-  scenePass.getTexture('gdata').type = HalfFloatType;
+  scenePass.getTexture('gdata').type = UnsignedByteType;
 
   const packed = scenePass.getTextureNode('gdata');
 
@@ -135,8 +134,8 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
   const z = float(1.0).sub(encoded.x.abs()).sub(encoded.y.abs());
   const t = z.negate().max(0.0);
   const decoded = vec3(
-    encoded.x.add(encoded.x.greaterThanEqual(0.0).select(t.negate(), t)),
-    encoded.y.add(encoded.y.greaterThanEqual(0.0).select(t.negate(), t)),
+    encoded.x.add(encoded.x.greaterThanEqual(0.0).select(t, t.negate())),
+    encoded.y.add(encoded.y.greaterThanEqual(0.0).select(t, t.negate())),
     z,
   ).normalize();
 
@@ -144,12 +143,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     color: scenePass.getTextureNode('output'),
     albedo: scenePass.getTextureNode('output'),
     normal: decoded,
-    lightmap: vec4(
-      packed.z.mul(65535.0).mod(16.0).div(15.0),
-      packed.z.mul(65535.0).div(16.0).floor().mod(16.0).div(15.0),
-      packed.w,
-      1.0,
-    ) as unknown as Node,
+    lightmap: vec4(packed.z, packed.w, 1.0, 1.0) as unknown as Node,
     depth: scenePass.getTextureNode('depth'),
   };
 }
