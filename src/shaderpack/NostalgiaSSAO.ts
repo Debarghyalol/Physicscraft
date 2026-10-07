@@ -12,14 +12,6 @@ import {
 } from 'three/tsl';
 import type { Node } from 'three/tsl';
 
-/**
- * Scene-camera nodes for full-screen passes.
- *
- * RenderPipeline draws its screen quad with a dummy orthographic camera, so TSL's
- * `cameraWorldMatrix` / `cameraProjectionMatrixInverse` / `cameraNear` ... describe THAT
- * camera inside a post-processing node, not the player's. Three's own GTAO/SSR nodes pass
- * the scene camera explicitly; do the same.
- */
 export interface SceneCameraNodes {
   near: Node;
   far: Node;
@@ -27,7 +19,6 @@ export interface SceneCameraNodes {
   projectionMatrix: Node;
   viewMatrix: Node;
   worldMatrix: Node;
-  /** projectionMatrix[1][1] = 1 / tan(fov / 2) */
   projection11: Node;
 }
 
@@ -43,7 +34,7 @@ export function createSceneCameraNodes(camera: PerspectiveCamera): SceneCameraNo
   };
 }
 
-/** Nostalgia renders at 0.75 scale; its SSAO radius is multiplied by it (lib/internal.glsl). */
+/** Nostalgia renders at 0.75 scale; its SSAO radius is multiplied by it. */
 const RESOLUTION_SCALE = 0.75;
 const SSAO_STEPS = 4;
 const BASE_RADIUS = Math.SQRT2;
@@ -56,13 +47,31 @@ const offsetDist = (x: any) => {
 };
 
 /**
- * TSL port of Nostalgia's `getDSSAO()` (program/deferred/indirectAO.fsh, SSAO by Capt Tatsu
- * / BSL): four depth taps on each side of the pixel along a rotating offset, with an
- * anti-bleed term. Returns a 0..1 occlusion factor (1 = unoccluded) for indirect light.
+ * Stable procedural approximation of Nostalgia's ditherBluenoise().
  *
- * Nostalgia's `depthLinear()` is 2n / (f + n - d(f - n)) on GL window depth; substituting
- * GL's depth mapping reduces to 2 * dist / (dist + far), which is what is used here so it
- * works with WebGPU's [0,1] clip depth.
+ * The actual pack samples a 256x256 blue-noise texture. Until the shader-pack texture
+ * binding layer exposes noisetex to TSL, use a decorrelated integer hash rather than the
+ * previous screen-space gradient hash. It is stable in the static case and does not
+ * introduce frame-to-frame AO crawling.
+ */
+const blueNoiseApprox = () => {
+  const frag: any = screenCoordinate;
+  const x = frag.x.floor();
+  const y = frag.y.floor();
+  return x.mul(0.06711056)
+    .add(y.mul(0.00583715))
+    .sin()
+    .mul(43758.5453)
+    .fract()
+    .mul(0.999);
+};
+
+/**
+ * TSL port of Nostalgia's getDSSAO().
+ *
+ * The important detail here is that an out-of-screen tap is NOT clamped to the nearest
+ * edge texel. Nostalgia samples coord +/- offset directly; clamping those taps changes
+ * the geometry being tested and can create dark AO bands along the screen border.
  */
 export function createNostalgiaSSAO(
   sceneDepth: Node,
@@ -84,14 +93,12 @@ export function createNostalgiaSSAO(
   const rawDepth = depthTex.x;
   const depth = linearize(rawDepth);
 
-  // radius = sqrt2 * (0.75 + |1 - dot(n, up)| * 0.5) * ResolutionScale
+  const normalUp = normal.y.clamp(-1.0, 1.0);
   const radius = float(BASE_RADIUS * RESOLUTION_SCALE).mul(
-    float(0.75).add(float(1.0).sub(normal.y).abs().mul(0.5)),
+    float(0.75).add(float(1.0).sub(normalUp).abs().mul(0.5)),
   );
 
-  // Interleaved gradient noise stands in for the pack's blue-noise texture.
-  const frag: any = screenCoordinate;
-  const dither = frag.x.mul(0.06711056).add(frag.y.mul(0.00583715)).fract().mul(52.9829189).fract();
+  const dither = blueNoiseApprox();
 
   const fovScale = (cam.projection11 as any).div(1.37);
   const distScale = far.sub(near).mul(depth).add(near).max(5.0);
@@ -100,33 +107,63 @@ export function createNostalgiaSSAO(
   const mult = float(0.7).div(radius).mul(far.sub(near));
 
   const tap = (offset: any) => {
-    const sampleUv = coord.add(offset).clamp(0.0, 1.0);
-    const sampleDepth = linearize(depthTex.sample(sampleUv).x);
+    const sampleUv = coord.add(offset);
+    const inside = sampleUv.x.greaterThanEqual(0.0)
+      .and(sampleUv.x.lessThan(1.0))
+      .and(sampleUv.y.greaterThanEqual(0.0))
+      .and(sampleUv.y.lessThan(1.0));
+
+    // Keep invalid taps neutral. This is the closest equivalent to the pack's direct
+    // texture lookup at the viewport boundary without relying on sampler wrap/clamp state.
+    const sampleDepthRaw = depthTex.sample(sampleUv.clamp(0.0, 1.0)).x;
+    const sampleDepth = linearize(sampleDepthRaw);
     const sample0 = depth.sub(sampleDepth).mul(mult);
+
     const antiBleed = float(1.0).sub(
       float(1.0).div(
         float(1.0).add(
-          sampleDepth.sub(depth).abs().mul(far).sub(MAX_OCCLUSION_DIST).max(0.0).mul(ANTI_BLEED_EXP),
+          sampleDepth.sub(depth).abs()
+            .mul(far)
+            .sub(MAX_OCCLUSION_DIST)
+            .max(0.0)
+            .mul(ANTI_BLEED_EXP),
         ),
       ),
     );
-    const angle = mix(float(0.5).sub(sample0).clamp(0.0, 1.0), float(0.5), antiBleed);
-    const dist = mix(sample0.mul(0.25).sub(1.0).clamp(0.0, 1.0), float(0.5), antiBleed);
-    return { angle, dist };
+
+    const angle = mix(
+      float(0.5).sub(sample0).clamp(0.0, 1.0),
+      float(0.5),
+      antiBleed,
+    );
+    const dist = mix(
+      sample0.mul(0.25).sub(1.0).clamp(0.0, 1.0),
+      float(0.5),
+      antiBleed,
+    );
+
+    return {
+      angle: inside.select(angle, 0.5),
+      dist: inside.select(dist, 0.5),
+    };
   };
 
   let ao: any = float(0.0);
   let currStep: any = dither.mul(0.2).add(0.2);
+
   for (let i = 0; i < SSAO_STEPS; i++) {
     const offset = offsetDist(currStep).mul(scale);
     const a = tap(offset);
     const b = tap(offset.negate());
+
+    // Exact structure of Nostalgia:
+    // ao += clamp(angle(+/-) + dist(+/-), 0, 1)
     ao = ao.add(a.angle.add(b.angle).add(a.dist).add(b.dist).clamp(0.0, 1.0));
     currStep = currStep.add(0.2);
   }
+
   ao = ao.div(SSAO_STEPS);
 
-  // Sky / cleared depth is not occluded. mix(1, ao, intensity) like the pack.
   const isLand = rawDepth.lessThan(0.99999);
   return isLand.select(mix(float(1.0), ao, float(intensity)), float(1.0)) as unknown as Node;
 }
