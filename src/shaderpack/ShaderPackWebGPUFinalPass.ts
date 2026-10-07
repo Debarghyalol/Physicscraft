@@ -14,7 +14,6 @@ import {
   shadow,
   texture,
   uv,
-  velocity,
   vec2,
   vec3,
   vec4,
@@ -35,7 +34,6 @@ export interface NostalgiaGBuffer {
   /** x = sky light 0..1, y = block light 0..1, z = 1 when the surface carries voxel light data. */
   lightmap: Node;
   depth: Node;
-  velocity: Node;
 }
 
 /**
@@ -89,7 +87,6 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
       // components and destroys the side/bottom-face normals in the deferred pass.
       normal: normalWorld.mul(0.5).add(0.5),
       lightmap: voxelLightmap(),
-      velocity,
     }),
   );
 
@@ -101,7 +98,6 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     normal: scenePass.getTextureNode('normal'),
     lightmap: scenePass.getTextureNode('lightmap'),
     depth: scenePass.getTextureNode('depth'),
-    velocity: scenePass.getTextureNode('velocity'),
   };
 }
 
