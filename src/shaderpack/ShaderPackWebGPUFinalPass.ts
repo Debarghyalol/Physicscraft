@@ -64,6 +64,22 @@ class VoxelLightmapNode extends TSLNode {
 
 const voxelLightmap = () => new VoxelLightmapNode() as unknown as Node;
 
+class VoxelMaterialClassNode extends TSLNode {
+  constructor() {
+    super('float');
+  }
+
+  setup(builder: any) {
+    const geometry = builder.geometry;
+    if (geometry && geometry.hasAttribute('aMaterialClass')) {
+      return attribute('aMaterialClass', 'float');
+    }
+    return float(0.0);
+  }
+}
+
+const voxelMaterialClass = () => new VoxelMaterialClassNode() as unknown as Node;
+
 /**
  * Reproduce Nostalgia's gbuffers_terrain.fsh attachment layout with native
  * WebGPU MRT.
@@ -103,6 +119,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
    * light values are only 4 bits each, so two full bytes are cheap and exact.
    */
   const light = voxelLightmap();
+  const materialClass = voxelMaterialClass();
   const n = normalWorld.normalize();
   const invL1 = float(1.0).div(n.x.abs().add(n.y.abs()).add(n.z.abs()).max(0.000001));
   const octBase = n.xy.mul(invL1);
@@ -128,7 +145,16 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
       // voxel deferred lighting.
       output: materialColor,
       albedo: materialColor,
-      gdata: vec4(oct.x, oct.y, packedLightByte, light.z),
+      // Encode voxel-light presence and the terrain render class in one exact
+      // byte-like channel: code = lightPresent*2 + translucentClass.
+      // This survives the RGBA8 MRT and lets the final pass restore translucent
+      // terrain after deferred voxel lighting.
+      gdata: vec4(
+        oct.x,
+        oct.y,
+        packedLightByte,
+        light.z.mul(2.0).add(materialClass).div(3.0),
+      ),
     }),
   );
 
@@ -157,7 +183,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     lightmap: vec4(
       packed.z.mul(255.0).add(0.5).floor().mod(16.0).div(15.0),
       packed.z.mul(255.0).add(0.5).floor().div(16.0).floor().mod(16.0).div(15.0),
-      packed.w,
+      packed.w.mul(3.0).add(0.5).floor().div(2.0).floor().clamp(0.0, 1.0),
       1.0,
     ) as unknown as Node,
     gdata: packed,
@@ -478,7 +504,12 @@ export function createNostalgiaFinalOutput(
   // Its depth is compared against the opaque depth here so glass behind a solid wall
   // cannot leak through the deferred image.
   const background = sceneDepth.greaterThanEqual(0.99999);
-  const baseColor = background.select(originalSceneColor, deferredColor);
+  const classCode = gdata
+    ? gdata.w.mul(3.0).add(0.5).floor().mod(2.0)
+    : float(0.0);
+  const isTranslucent = classCode.greaterThan(0.5);
+  const deferredOrForward = isTranslucent.select(originalSceneColor, deferredColor);
+  const baseColor = background.select(originalSceneColor, deferredOrForward);
 
   if (!translucentColor || !translucentDepth) {
     return sharpen(baseColor, 0.5, false);
