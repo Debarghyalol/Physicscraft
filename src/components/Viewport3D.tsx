@@ -607,7 +607,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onActionMine={handleActionMine}
         onActionPlace={handleActionPlace}
         onToggleViewMode={onToggleViewMode}
-        onToggleInventory={() => setInventoryOpen((open) => !open)}
         isFlying={isFlying}
         viewMode={viewMode}
         selectedVoxel={selectedVoxel}
