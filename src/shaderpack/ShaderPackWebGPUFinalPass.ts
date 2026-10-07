@@ -14,6 +14,7 @@ import {
   shadow,
   texture,
   uv,
+  velocity,
   vec2,
   vec3,
   vec4,
@@ -34,6 +35,7 @@ export interface NostalgiaGBuffer {
   /** x = sky light 0..1, y = block light 0..1, z = 1 when the surface carries voxel light data. */
   lightmap: Node;
   depth: Node;
+  velocity: Node;
 }
 
 /**
@@ -87,6 +89,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
       // components and destroys the side/bottom-face normals in the deferred pass.
       normal: normalWorld.mul(0.5).add(0.5),
       lightmap: voxelLightmap(),
+      velocity,
     }),
   );
 
@@ -276,6 +279,7 @@ export function createNostalgiaDeferredLighting(
   skyDim: Node,
   sunLight: DirectionalLight,
   camera: PerspectiveCamera,
+  frameCounter: Node = float(0.0),
 ): Node {
   // Decode the 0..1 G-buffer normal back into a unit world-space vector.
   const normal = sceneNormal.xyz.mul(2.0).sub(1.0).normalize();
@@ -349,7 +353,7 @@ export function createNostalgiaDeferredLighting(
 
   // Nostalgia's indirectAO.fsh multiplies the *indirect* light (sky + block bounce) by
   // SSAO; direct sunlight is left to the shadow map.
-  const ambientOcclusion = createNostalgiaSSAO(sceneDepth, normal, cam, 1.0);
+  const ambientOcclusion = createNostalgiaSSAO(sceneDepth, normal, cam, 1.0, frameCounter);
   const indirect = skyAmbient.add(blockLight).mul(ambientOcclusion);
 
   const lighting = vec3(direct, direct, direct).add(indirect).max(0.002).min(1.5);
