@@ -35,6 +35,8 @@ export interface NostalgiaGBuffer {
   normal: Node;
   /** Decoded voxel light: x=sky, y=block, z=1 when the packed light word is valid. */
   lightmap: Node;
+  /** Packed G-buffer texture, retained for depth-aware screen-space light filtering. */
+  gdata: Node;
   depth: Node;
 }
 
@@ -158,6 +160,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
       packed.w,
       1.0,
     ) as unknown as Node,
+    gdata: packed,
     depth: scenePass.getTextureNode('depth'),
   };
 }
@@ -331,6 +334,7 @@ export function createNostalgiaDeferredLighting(
   albedo: Node,
   sceneNormal: Node,
   sceneLightmap: Node,
+  sceneGData: Node,
   sceneDepth: Node,
   lightDirectionWorld: Node,
   lightStrength: Node,
@@ -391,10 +395,45 @@ export function createNostalgiaDeferredLighting(
   const skyLevel = rawSky.sub(skyDim.mul(11.0 / 15.0)).max(0.0);
   const mcLight = (l: any) => l.div(l.mul(-3.0).add(4.0)); // l / (4 - 3l)
   const skyBrightness = mcLight(skyLevel).pow(2.2);
-  const blockBrightness = mcLight(rawBlock).pow(2.2);
+
+  // Nostalgia's actual block-light path is not the Minecraft gamma curve used for
+  // sky light. It keeps the lightmap intensity linear, then applies a warm
+  // blackbody-like light color. At the pack's default 2600 K / 1.5 multiplier,
+  // this is approximately the following AP1-space color.
+  const blockColor = vec3(1.3977, 1.4983, 0.4397);
+
+  // Start from the exact interpolated voxel light, then do a small depth-aware
+  // screen-space gather. This approximates the soft local spill produced by
+  // Nostalgia's SSPT+SVGF path without bleeding light through nearby cave walls.
+  const blockTap = (offset: any) => {
+    const p = uv().add(offset);
+    const inside = p.x.greaterThanEqual(0.0)
+      .and(p.x.lessThanEqual(1.0))
+      .and(p.y.greaterThanEqual(0.0))
+      .and(p.y.lessThanEqual(1.0));
+    const g = sceneGData.sample(p.clamp(0.0, 1.0));
+    const tapBlock = g.z.mul(255.0).add(0.5).floor().div(16.0).floor().mod(16.0).div(15.0);
+    const tapDepth = sceneDepth.sample(p.clamp(0.0, 1.0)).x;
+    const depthWeight = float(1.0).sub(
+      tapDepth.sub(sceneDepth.x).abs().mul(80.0).clamp(0.0, 1.0),
+    );
+    return inside.select(tapBlock.mul(depthWeight), 0.0);
+  };
+
+  const localBlock = rawBlock
+    .mul(0.40)
+    .add(blockTap(vec2(0.0015, 0.0)).mul(0.10))
+    .add(blockTap(vec2(-0.0015, 0.0)).mul(0.10))
+    .add(blockTap(vec2(0.0, 0.0015)).mul(0.10))
+    .add(blockTap(vec2(0.0, -0.0015)).mul(0.10))
+    .add(blockTap(vec2(0.0011, 0.0011)).mul(0.05))
+    .add(blockTap(vec2(-0.0011, 0.0011)).mul(0.05))
+    .add(blockTap(vec2(0.0011, -0.0011)).mul(0.05))
+    .add(blockTap(vec2(-0.0011, -0.0011)).mul(0.05));
+
+  const blockBrightness = localBlock;
   const moonTint = (skyDim as any).smoothstep(0.05, 1.0);
   const skyColor = mix(vec3(1.0, 1.0, 1.0), vec3(0.52, 0.68, 1.0), moonTint);
-  const blockColor = vec3(1.0, 0.82, 0.6);
 
   // Direct sun only reaches surfaces that actually see the sky. The shadow map has a
   // finite frustum, so without this gate surfaces under a roof or in a cave can still be
@@ -407,7 +446,8 @@ export function createNostalgiaDeferredLighting(
   const faceShade = float(0.55).add(skyExposure.mul(0.45));
 
   const skyAmbient = skyColor.mul(skyBrightness).mul(faceShade).mul(0.75);
-  const blockLight = blockColor.mul(blockBrightness);
+  const blockColorAdjusted = mix(blockColor.normalize(), vec3(1.0), blockBrightness.sqrt());
+  const blockLight = blockBrightness.mul(blockColorAdjusted);
   const direct = diffuse.mul(lightStrength).mul(0.8).mul(shadowFactor).mul(contactShadow).mul(sunExposure);
 
   // Nostalgia's indirectAO.fsh multiplies the *indirect* light (sky + block bounce) by
