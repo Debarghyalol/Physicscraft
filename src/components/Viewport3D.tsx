@@ -142,6 +142,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const renderPipeline = new RenderPipeline(renderer, sceneGBuffer.color);
     const nostalgiaLightDirectionWorld = uniform(new THREE.Vector3(0, 1, 0));
     const nostalgiaLightStrength = uniform(1.0);
+    const nostalgiaSkyDim = uniform(0.0);
 
     // 2. WebGPU canvas configuration
     const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
@@ -223,9 +224,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
               const deferredColor = createNostalgiaDeferredLighting(
                 sceneGBuffer.albedo,
                 sceneGBuffer.normal,
+                sceneGBuffer.lightmap,
                 sceneGBuffer.depth,
                 nostalgiaLightDirectionWorld,
                 nostalgiaLightStrength,
+                nostalgiaSkyDim,
                 envManager.sunLight,
               );
               renderPipeline.outputNode = createNostalgiaFinalOutput(
@@ -337,6 +340,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         envManager.update(delta, playerPos);
         const skyDim = 1 - envManager.minecraftSky.getDaylight();
         engine.voxelWorld.setSkyDim(skyDim);
+        nostalgiaSkyDim.value = skyDim;
         // Keep voxel base colors neutral. Moonlight tint is applied only to the sky-light
         // channel in VoxelWorld's shader; tinting the whole material made surfaces look bright.
         // Steve is lit by the flood-fill light at his position (caves are dark, glowstone lights him up)

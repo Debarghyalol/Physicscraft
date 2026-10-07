@@ -1,12 +1,15 @@
 import { UnsignedByteType } from 'three';
+import { Node as TSLNode } from 'three/webgpu';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
   Loop,
+  attribute,
   cameraProjectionMatrixInverse,
   cameraWorldMatrix,
   getViewPosition,
   materialColor,
   float,
+  mix,
   mrt,
   normalWorld,
   output,
@@ -15,6 +18,7 @@ import {
   time,
   uv,
   vec2,
+  vec3,
   vec4,
 } from 'three/tsl';
 import type { DirectionalLight } from 'three';
@@ -29,8 +33,34 @@ export interface NostalgiaGBuffer {
   color: Node;
   albedo: Node;
   normal: Node;
+  /** x = sky light 0..1, y = block light 0..1, z = 1 when the surface carries voxel light data. */
+  lightmap: Node;
   depth: Node;
 }
+
+/**
+ * Per-surface voxel light (the `aLight` vertex attribute written by VoxelWorld's flood-fill
+ * lighting). Geometry without that attribute (player model, clouds, particles) emits
+ * zeros with z = 0, so the deferred pass treats it as fully sky-lit instead of black.
+ *
+ * A custom node (not `attribute()` directly) so geometry lacking the attribute does not
+ * log a missing-attribute warning per material.
+ */
+class VoxelLightmapNode extends TSLNode {
+  constructor() {
+    super('vec4');
+  }
+
+  setup(builder: any) {
+    const geometry = builder.geometry;
+    if (geometry && geometry.hasAttribute('aLight')) {
+      return vec4(attribute('aLight', 'vec2'), 1.0, 1.0);
+    }
+    return vec4(0.0, 0.0, 0.0, 1.0);
+  }
+}
+
+const voxelLightmap = () => new VoxelLightmapNode() as unknown as Node;
 
 /**
  * Reproduce Nostalgia's gbuffers_terrain.fsh attachment layout with native
@@ -58,6 +88,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
       // from [-1,1] to [0,1]; writing normalWorld directly clips negative X/Y/Z
       // components and destroys the side/bottom-face normals in the deferred pass.
       normal: normalWorld.mul(0.5).add(0.5),
+      lightmap: voxelLightmap(),
     }),
   );
 
@@ -67,6 +98,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     color: scenePass.getTextureNode('output'),
     albedo: scenePass.getTextureNode('albedo'),
     normal: scenePass.getTextureNode('normal'),
+    lightmap: scenePass.getTextureNode('lightmap'),
     depth: scenePass.getTextureNode('depth'),
   };
 }
@@ -163,9 +195,11 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
 export function createNostalgiaDeferredLighting(
   albedo: Node,
   sceneNormal: Node,
+  sceneLightmap: Node,
   sceneDepth: Node,
   lightDirectionWorld: Node,
   lightStrength: Node,
+  skyDim: Node,
   sunLight: DirectionalLight,
 ): Node {
   // Decode the 0..1 G-buffer normal back into a unit world-space vector.
@@ -186,18 +220,36 @@ export function createNostalgiaDeferredLighting(
     .context({ shadowPositionWorld: worldPosition })
     .clamp(0.0, 1.0) as Node;
 
-  // The custom deferred node bypasses Three's HemisphereLight evaluation, so supply a
-  // sky-ambient term here. Nostalgia is a path-traced pack: its indirect light is a
-  // sky gather weighted by lightmap sky-light, so vertical and downward faces still
-  // receive a large share of sky light (they are not near-black). Approximate that with
-  // a hemispherical term that falls from 1.0 (up) to ~0.78 (sides) to 0.55 (down),
-  // scaled by the current sun/moon intensity so it follows the day/night cycle.
+  // --- Voxel light propagation (sky + block light flood fill from VoxelWorld) ---------
+  // Same model as VoxelWorld's vanilla shader: sky light is reduced by the day/night
+  // cycle, both channels go through Minecraft's non-linear curve, then are converted to
+  // linear energy (pow 2.2). Surfaces without voxel light data count as fully sky-lit.
+  const hasLight = sceneLightmap.z;
+  const rawSky = mix(float(1.0), sceneLightmap.x, hasLight);
+  const rawBlock = sceneLightmap.y.mul(hasLight);
+  const skyLevel = rawSky.sub(skyDim.mul(11.0 / 15.0)).max(0.0);
+  const mcLight = (l: any) => l.div(l.mul(-3.0).add(4.0)); // l / (4 - 3l)
+  const skyBrightness = mcLight(skyLevel).pow(2.2);
+  const blockBrightness = mcLight(rawBlock).pow(2.2);
+  const moonTint = (skyDim as any).smoothstep(0.05, 1.0);
+  const skyColor = mix(vec3(1.0, 1.0, 1.0), vec3(0.52, 0.68, 1.0), moonTint);
+  const blockColor = vec3(1.0, 0.82, 0.6);
+
+  // Direct sun only reaches surfaces that actually see the sky. The shadow map has a
+  // finite frustum, so without this gate surfaces under a roof or in a cave can still be
+  // sun-lit. Sky light is 15 (=1.0) only in open air; it drops under overhangs.
+  const sunExposure = (rawSky as any).smoothstep(0.7, 0.95);
+
+  // Hemispherical face term for sky ambient (up 1.0 / sides ~0.78 / down 0.55), standing
+  // in for Nostalgia's sky-gather indirect light.
   const skyExposure = normal.y.mul(0.5).add(0.5).clamp(0.0, 1.0);
   const faceShade = float(0.55).add(skyExposure.mul(0.45));
-  const skyAmbient = faceShade.mul(0.75).mul(lightStrength.max(0.18));
 
-  const direct = diffuse.mul(lightStrength).mul(0.8).mul(shadowFactor);
-  const lighting = direct.add(skyAmbient).clamp(0.0, 1.5);
+  const skyAmbient = skyColor.mul(skyBrightness).mul(faceShade).mul(0.75);
+  const blockLight = blockColor.mul(blockBrightness);
+  const direct = diffuse.mul(lightStrength).mul(0.8).mul(shadowFactor).mul(sunExposure);
+
+  const lighting = vec3(direct, direct, direct).add(skyAmbient).add(blockLight).max(0.002).min(1.5);
 
   return albedo.mul(lighting);
 }
