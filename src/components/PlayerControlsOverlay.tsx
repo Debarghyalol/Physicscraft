@@ -192,14 +192,114 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
 
   useEffect(() => {
     let alive = true;
-    const refresh = async () => {
+
+    const tintIfGrayscale = (input: HTMLCanvasElement, tint: string) => {
+      const c = document.createElement('canvas');
+      c.width = input.width;
+      c.height = input.height;
+      const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(input, 0, 0);
+
+      const sample = ctx.getImageData(0, 0, c.width, c.height);
+      let colorPixels = 0;
+      let opaquePixels = 0;
+      for (let i = 0; i < sample.data.length; i += 4) {
+        if (sample.data[i + 3] < 16) continue;
+        opaquePixels++;
+        const max = Math.max(sample.data[i], sample.data[i + 1], sample.data[i + 2]);
+        const min = Math.min(sample.data[i], sample.data[i + 1], sample.data[i + 2]);
+        if (max - min > 14) colorPixels++;
+      }
+      if (!opaquePixels || colorPixels / opaquePixels > 0.18) return c;
+
+      const tinted = document.createElement('canvas');
+      tinted.width = c.width;
+      tinted.height = c.height;
+      const tc = tinted.getContext('2d')!;
+      tc.imageSmoothingEnabled = false;
+      tc.drawImage(c, 0, 0);
+      tc.globalCompositeOperation = 'multiply';
+      tc.fillStyle = tint;
+      tc.fillRect(0, 0, c.width, c.height);
+      tc.globalCompositeOperation = 'destination-in';
+      tc.drawImage(c, 0, 0);
+      return tinted;
+    };
+
+    const load = async () => {
       const entry = HOTBAR_TEXTURES[type];
       if (!entry) return;
-      const canvas = await resourcePacks.getTexture(entry.paths);
-      if (alive) setSrc(canvas ? canvas.toDataURL('image/png') : null);
+
+      const get = async (paths: string[]) => resourcePacks.getTexture(paths);
+      let top = await get(
+        type === VoxelType.GRASS ? ['block/grass_block_top'] :
+        type === VoxelType.WOOD ? ['block/oak_log_top'] :
+        entry.paths
+      );
+      let side = await get(
+        type === VoxelType.GRASS ? ['block/grass_block_side'] :
+        type === VoxelType.WOOD ? ['block/oak_log', 'block/oak_log_side'] :
+        entry.paths
+      );
+
+      if (!top && !side) {
+        if (alive) setSrc(null);
+        return;
+      }
+      side = side ?? top;
+      top = top ?? side;
+
+      if (type === VoxelType.GRASS && top) top = tintIfGrayscale(top, '#91bd59');
+      if (type === VoxelType.LEAVES && side) side = tintIfGrayscale(side, '#77ab2f');
+
+      const out = document.createElement('canvas');
+      out.width = 40;
+      out.height = 40;
+      const ctx = out.getContext('2d')!;
+      ctx.imageSmoothingEnabled = false;
+
+      const drawFace = (
+        image: HTMLCanvasElement,
+        p0: [number, number],
+        p1: [number, number],
+        p2: [number, number],
+        p3: [number, number],
+        brightness = 1
+      ) => {
+        const w = image.width;
+        const h = image.height;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(...p0);
+        ctx.lineTo(...p1);
+        ctx.lineTo(...p2);
+        ctx.lineTo(...p3);
+        ctx.closePath();
+        ctx.clip();
+        ctx.filter = brightness === 1 ? 'none' : 'brightness(' + brightness + ')';
+        ctx.setTransform(
+          (p1[0] - p0[0]) / w,
+          (p1[1] - p0[1]) / w,
+          (p3[0] - p0[0]) / h,
+          (p3[1] - p0[1]) / h,
+          p0[0],
+          p0[1]
+        );
+        ctx.drawImage(image, 0, 0, w, h);
+        ctx.restore();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      };
+
+      drawFace(top, [3, 13], [20, 3], [37, 13], [20, 23], 1.08);
+      drawFace(side, [3, 13], [20, 23], [20, 37], [3, 27], 0.88);
+      drawFace(side, [20, 23], [37, 13], [37, 27], [20, 37], 0.72);
+
+      if (alive) setSrc(out.toDataURL('image/png'));
     };
-    void refresh();
-    const unsubscribe = resourcePacks.subscribe(() => { void refresh(); });
+
+    void load();
+    const unsubscribe = resourcePacks.subscribe(() => { void load(); });
     return () => {
       alive = false;
       unsubscribe();
@@ -208,52 +308,20 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
 
   if (!src) {
     return (
-      <div className="flex items-center justify-center" style={{ width: 34, height: 34 }}>
+      <div className="flex items-center justify-center" style={{ width: 38, height: 38 }}>
         <IsometricVoxelIcon type={type} />
       </div>
     );
   }
 
-  // Render the real resource-pack texture as a small isometric cube rather than
-  // a flat square. The side faces are darker to restore Minecraft-style depth.
-  const faceStyle: React.CSSProperties = {
-    position: 'absolute',
-    inset: 0,
-    backgroundImage: 'url(' + src + ')',
-    backgroundSize: '100% 100%',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-    imageRendering: 'pixelated',
-    backfaceVisibility: 'hidden',
-  };
-
   return (
-    <div
+    <img
+      src={src}
+      alt=""
       aria-hidden="true"
-      style={{
-        width: 34,
-        height: 34,
-        perspective: 90,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'visible',
-      }}
-    >
-      <div
-        style={{
-          position: 'relative',
-          width: 24,
-          height: 24,
-          transform: 'rotateX(-28deg) rotateY(45deg) scale(0.92)',
-          transformStyle: 'preserve-3d',
-        }}
-      >
-        <div style={{ ...faceStyle, transform: 'translateZ(12px)', filter: 'saturate(1.15) contrast(1.08) brightness(0.98)' }} />
-        <div style={{ ...faceStyle, transform: 'rotateY(90deg) translateZ(12px)', filter: 'saturate(1.15) contrast(1.08) brightness(0.76)' }} />
-        <div style={{ ...faceStyle, transform: 'rotateX(90deg) translateZ(12px)', filter: 'saturate(1.15) contrast(1.08) brightness(1.08)' }} />
-      </div>
-    </div>
+      draggable={false}
+      style={{ width: 38, height: 38, imageRendering: 'pixelated', objectFit: 'contain', display: 'block' }}
+    />
   );
 };
 
@@ -656,7 +724,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* MOBILE D-PAD: five always-visible directions + one active diagonal */}
+      {/* MCPE-style 8-way D-pad. Diagonals live in the four gaps. */}
       <div
         ref={dpadContainerRef}
         className="ui-touch-interactive absolute left-3 sm:left-5 bottom-[clamp(4.25rem,9vh,6.5rem)] pointer-events-auto select-none touch-none z-30"
@@ -667,35 +735,33 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         onTouchCancel={handleDpadTouchEnd}
       >
         {([
-          ['up', 1, 0, 'Move Forward', 59, 0, 50],
-          ['left', 0, -1, 'Strafe Left', 0, 59, 50],
-          ['sneak_dpad', null, null, 'Sneak / Crouch', 59, 59, 50],
-          ['right', 0, 1, 'Strafe Right', 118, 59, 50],
-          ['down', -1, 0, 'Move Backward', 59, 118, 50],
-          ['up_left', 1, -1, 'Forward-Left', 12, 12, 38],
-          ['up_right', 1, 1, 'Forward-Right', 118, 12, 38],
-          ['down_left', -1, -1, 'Back-Left', 12, 118, 38],
-          ['down_right', -1, 1, 'Back-Right', 118, 118, 38],
+          ['up', 1, 0, 'Move Forward', 56, 0, 56],
+          ['left', 0, -1, 'Strafe Left', 0, 56, 56],
+          ['sneak_dpad', null, null, 'Sneak / Crouch', 56, 56, 56],
+          ['right', 0, 1, 'Strafe Right', 112, 56, 56],
+          ['down', -1, 0, 'Move Backward', 56, 112, 56],
+          ['up_left', 1, -1, 'Forward-Left', 8, 8, 40],
+          ['up_right', 1, 1, 'Forward-Right', 120, 8, 40],
+          ['down_left', -1, -1, 'Back-Left', 8, 120, 40],
+          ['down_right', -1, 1, 'Back-Right', 120, 120, 40],
         ] as [string, number | null, number | null, string, number, number, number][]).map(([name, f, r, title, left, top, size]) => {
           const isCenter = f === null;
-          const isDiagonal = !isCenter && f !== 0 && r !== 0;
           const isActive = isCenter
             ? isSneaking
             : dpadDir.forward === f && dpadDir.right === r;
-          const visible = !isDiagonal || isActive;
 
           return (
             <div
               key={name}
               className="absolute"
-              style={{ left, top, width: size, height: size, zIndex: isDiagonal ? 2 : 1 }}
+              style={{ left, top, width: size, height: size, zIndex: 2 }}
             >
               <ControlImg
                 name={name}
                 pressed={isActive}
                 size={size}
                 title={title}
-                visible={visible}
+                visible
                 onClick={isCenter ? () => setIsSneaking(!isSneaking) : undefined}
               />
             </div>
