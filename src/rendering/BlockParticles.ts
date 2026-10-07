@@ -59,8 +59,14 @@ export class BlockParticles {
     const colorNode = instancedBufferAttribute(this.colorAttribute, 'vec3');
     const sizeNode = instancedBufferAttribute(this.sizeAttribute, 'float');
 
+    // Instanced attributes are vertex-stage inputs. Pass the per-particle
+    // texture rectangle and tint through varyings before sampling in the
+    // fragment stage; otherwise WebGPU can produce white/undefined particles.
+    const rectVarying = rectNode.toVarying('vParticleRect');
+    const colorVarying = colorNode.toVarying('vParticleColor');
+
     this.mapNode = uniformTexture(this.voxelWorld.material.map);
-    const particleUV = uv().mul(rectNode.zw).add(rectNode.xy);
+    const particleUV = uv().mul(rectVarying.zw).add(rectVarying.xy);
     const sampled = texture(this.mapNode, particleUV);
 
     this.material = new SpriteNodeMaterial({
@@ -71,7 +77,7 @@ export class BlockParticles {
     });
     this.material.positionNode = positionNode;
     this.material.scaleNode = vec2(sizeNode);
-    this.material.colorNode = sampled.rgb.mul(colorNode);
+    this.material.colorNode = sampled.rgb.mul(colorVarying);
     this.material.opacityNode = sampled.a;
     this.material.toneMapped = false;
 
