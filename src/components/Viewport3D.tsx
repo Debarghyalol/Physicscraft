@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
 import { pass, uniform, float } from 'three/tsl';
-import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { PhysicsEngine } from '../physics/PhysicsEngine';
 import {
   ActiveTool,
@@ -256,15 +255,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 sceneGBuffer.color,
                 sceneGBuffer.depth,
               );
-              const nostalgiaTemporal = traa(
-                nostalgiaBeauty,
-                sceneGBuffer.depth,
-                sceneGBuffer.velocity,
-                camera,
-              );
-              nostalgiaTemporal.currentFrameWeight = 0.08;
-              nostalgiaTemporal.depthThreshold = 0.001;
-              renderPipeline.outputNode = nostalgiaTemporal;
+              renderPipeline.outputNode = nostalgiaBeauty;
               renderPipeline.needsUpdate = true;
               finalAdapter = true;
             }
