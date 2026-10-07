@@ -1376,20 +1376,16 @@ export class VoxelWorld {
             for (let f = 0; f < 6; f++) {
               if (f === 3 && wy <= WORLD_MIN_Y) continue;
               const nb = B[pi + FACE_OFF[f]];
-              // Opaque and cutout blocks occlude neighbouring faces; translucent glass
-              // keeps a face against every non-air neighbour so it remains visible through
-              // the surface. Two adjacent glass blocks do not generate an internal face.
-              // Leaves are alpha-cutout and double-sided. Keep all six faces,
-              // including faces touching other leaves, so the foliage silhouette does
-              // not disappear where leaf volumes meet. Opaque terrain still culls
-              // against solid neighbours, while glass keeps its forward-rendered faces.
-              if (
-                renderClass === 'translucent'
-                  ? nb !== 0
-                  : renderClass === 'cutout'
-                    ? false
-                    : !(nb === 0 || nb === VoxelType.GLASS)
-              ) continue;
+              // Minecraft-style face visibility. Geometry occlusion is separate from
+              // material back-face culling: leaves are DoubleSide, but adjacent leaf
+              // voxels should still share one hidden internal face.
+              const neighbourOccludes =
+                renderClass === 'cutout'
+                  ? nb === VoxelType.LEAVES
+                  : renderClass === 'translucent'
+                    ? nb === VoxelType.GLASS
+                    : nb !== 0 && nb !== VoxelType.GLASS && nb !== VoxelType.LEAVES;
+              if (neighbourOccludes) continue;
 
               const tileCol = this.getVoxelFaceTile(voxel, f)[0];
               const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
