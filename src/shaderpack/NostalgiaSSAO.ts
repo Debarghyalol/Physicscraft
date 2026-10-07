@@ -34,50 +34,43 @@ export function createSceneCameraNodes(camera: PerspectiveCamera): SceneCameraNo
   };
 }
 
-/** Nostalgia renders at 0.75 scale; its SSAO radius is multiplied by it. */
 const RESOLUTION_SCALE = 0.75;
 const SSAO_STEPS = 4;
 const BASE_RADIUS = Math.SQRT2;
 const MAX_OCCLUSION_DIST = Math.PI * 2;
 const ANTI_BLEED_EXP = 0.71;
 
+/**
+ * Stable low-discrepancy approximation of the pack's blue-noise dither.
+ *
+ * The pack reads noise2D.png and rotates its sample phase with the TAA frame counter.
+ * The shader-pack texture binding layer does not currently expose noisetex to TSL, so
+ * this uses a cheap integer hash with frame rotation. TRAA in the final pipeline
+ * accumulates these changing samples and rejects history using depth/velocity.
+ */
+const blueNoiseApprox = (frameCounter: Node) => {
+  const frag: any = screenCoordinate;
+  const frame: any = frameCounter;
+  const x = frag.x.floor().add(frame.mul(17.0));
+  const y = frag.y.floor().add(frame.mul(31.0));
+  return x.mul(0.06711056)
+    .add(y.mul(0.00583715))
+    .sin()
+    .mul(43758.5453)
+    .fract();
+};
+
 const offsetDist = (x: any) => {
   const n = x.mul(8.0).fract().mul(Math.PI);
   return vec2(n.cos(), n.sin()).mul(x);
 };
 
-/**
- * Stable procedural approximation of Nostalgia's ditherBluenoise().
- *
- * The actual pack samples a 256x256 blue-noise texture. Until the shader-pack texture
- * binding layer exposes noisetex to TSL, use a decorrelated integer hash rather than the
- * previous screen-space gradient hash. It is stable in the static case and does not
- * introduce frame-to-frame AO crawling.
- */
-const blueNoiseApprox = () => {
-  const frag: any = screenCoordinate;
-  const x = frag.x.floor();
-  const y = frag.y.floor();
-  return x.mul(0.06711056)
-    .add(y.mul(0.00583715))
-    .sin()
-    .mul(43758.5453)
-    .fract()
-    .mul(0.999);
-};
-
-/**
- * TSL port of Nostalgia's getDSSAO().
- *
- * The important detail here is that an out-of-screen tap is NOT clamped to the nearest
- * edge texel. Nostalgia samples coord +/- offset directly; clamping those taps changes
- * the geometry being tested and can create dark AO bands along the screen border.
- */
 export function createNostalgiaSSAO(
   sceneDepth: Node,
   worldNormal: Node,
   cam: SceneCameraNodes,
   intensity = 1.0,
+  frameCounter: Node = float(0.0),
 ): Node {
   const near: any = cam.near;
   const far: any = cam.far;
@@ -98,7 +91,7 @@ export function createNostalgiaSSAO(
     float(0.75).add(float(1.0).sub(normalUp).abs().mul(0.5)),
   );
 
-  const dither = blueNoiseApprox();
+  const dither = blueNoiseApprox(frameCounter);
 
   const fovScale = (cam.projection11 as any).div(1.37);
   const distScale = far.sub(near).mul(depth).add(near).max(5.0);
@@ -113,8 +106,6 @@ export function createNostalgiaSSAO(
       .and(sampleUv.y.greaterThanEqual(0.0))
       .and(sampleUv.y.lessThan(1.0));
 
-    // Keep invalid taps neutral. This is the closest equivalent to the pack's direct
-    // texture lookup at the viewport boundary without relying on sampler wrap/clamp state.
     const sampleDepthRaw = depthTex.sample(sampleUv.clamp(0.0, 1.0)).x;
     const sampleDepth = linearize(sampleDepthRaw);
     const sample0 = depth.sub(sampleDepth).mul(mult);
@@ -131,16 +122,8 @@ export function createNostalgiaSSAO(
       ),
     );
 
-    const angle = mix(
-      float(0.5).sub(sample0).clamp(0.0, 1.0),
-      float(0.5),
-      antiBleed,
-    );
-    const dist = mix(
-      sample0.mul(0.25).sub(1.0).clamp(0.0, 1.0),
-      float(0.5),
-      antiBleed,
-    );
+    const angle = mix(float(0.5).sub(sample0).clamp(0.0, 1.0), float(0.5), antiBleed);
+    const dist = mix(sample0.mul(0.25).sub(1.0).clamp(0.0, 1.0), float(0.5), antiBleed);
 
     return {
       angle: inside.select(angle, 0.5),
@@ -155,9 +138,6 @@ export function createNostalgiaSSAO(
     const offset = offsetDist(currStep).mul(scale);
     const a = tap(offset);
     const b = tap(offset.negate());
-
-    // Exact structure of Nostalgia:
-    // ao += clamp(angle(+/-) + dist(+/-), 0, 1)
     ao = ao.add(a.angle.add(b.angle).add(a.dist).add(b.dist).clamp(0.0, 1.0));
     currStep = currStep.add(0.2);
   }
