@@ -114,13 +114,15 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
 
   const sky4 = light.x.mul(15.0).add(0.5).floor().clamp(0.0, 15.0);
   const block4 = light.y.mul(15.0).add(0.5).floor().clamp(0.0, 15.0);
-  const skyPacked = sky4.div(15.0);
-  const blockPacked = block4.div(15.0);
+  // One exact byte can carry both 4-bit light levels; alpha carries whether
+  // this geometry actually has the voxel-light attribute. This is important for
+  // clouds/player/particles, which must bypass voxel deferred lighting.
+  const packedLightByte = sky4.add(block4.mul(16.0)).div(255.0);
 
   scenePass.setMRT(
     mrt({
       output: materialColor,
-      gdata: vec4(oct.x, oct.y, skyPacked, blockPacked),
+      gdata: vec4(oct.x, oct.y, packedLightByte, light.z),
     }),
   );
 
@@ -143,7 +145,13 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     color: scenePass.getTextureNode('output'),
     albedo: scenePass.getTextureNode('output'),
     normal: decoded,
-    lightmap: vec4(packed.z, packed.w, 1.0, 1.0) as unknown as Node,
+    // Recover the exact 0..255 light byte, then unpack its two 4-bit nibbles.
+    lightmap: vec4(
+      packed.z.mul(255.0).add(0.5).floor().mod(16.0).div(15.0),
+      packed.z.mul(255.0).add(0.5).floor().div(16.0).floor().mod(16.0).div(15.0),
+      packed.w,
+      1.0,
+    ) as unknown as Node,
     depth: scenePass.getTextureNode('depth'),
   };
 }
@@ -403,7 +411,9 @@ export function createNostalgiaDeferredLighting(
 
   const lighting = vec3(direct, direct, direct).add(indirect).max(0.002).min(1.5);
 
-  return albedo.mul(lighting);
+  // Geometry without voxel lighting data (clouds, player, particles) must not
+  // be forced through the voxel deferred-lighting model.
+  return (sceneLightmap.z.greaterThan(0.5)).select(albedo.mul(lighting), albedo);
 }
 
 /**
