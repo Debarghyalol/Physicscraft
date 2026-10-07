@@ -47,8 +47,8 @@ export const SKY_PRESETS: Record<SkyPreset, EnvironmentSettings> = {
 const SHADOW_HALF_EXTENT = 64;
 /** Distance of the shadow camera from the frustum centre along the light direction. */
 const SHADOW_LIGHT_OFFSET = 160;
-/** Nostalgia: shadowIntervalSize = 2. */
-const SHADOW_INTERVAL = 2;
+/** One shadow-map texel in world units: 128-block frustum / 2048 texels. */
+const SHADOW_INTERVAL = SHADOW_HALF_EXTENT * 2 / 2048;
 const shadowBasis = new THREE.Matrix4();
 const shadowZero = new THREE.Vector3();
 const shadowUp = new THREE.Vector3(0, 1, 0);
@@ -97,7 +97,9 @@ export class EnvironmentManager {
     this.sunLight.shadow.camera.right = shadowD;
     this.sunLight.shadow.camera.top = shadowD;
     this.sunLight.shadow.camera.bottom = -shadowD;
-    this.sunLight.shadow.bias = -0.0003;
+    // Keep depth bias neutral; the deferred lookup applies a tiny voxel-scale normal offset.
+    // A negative bias can detach the shadow from block silhouettes.
+    this.sunLight.shadow.bias = 0;
 
     // Let the active Three.js renderer own the shadow render target.
     // WebGPURenderer uses its native depth target; do not install a
@@ -181,10 +183,9 @@ export class EnvironmentManager {
   }
 
   /**
-   * Snap the shadow frustum centre to a grid in light space (Nostalgia's
-   * shadowIntervalSize = 2). Without this the shadow map re-rasterises at sub-texel
-   * offsets every frame as the player moves and shadow edges crawl/shimmer.
-   * 2 blocks is a whole number of texels at the current map size and extent.
+   * Snap the shadow frustum centre to one shadow-map texel in light space. This prevents
+   * sub-texel shadow-map movement while avoiding the 2-block jumps that were excessive
+   * for the current unwarped 2048x2048 / 128-block shadow frustum.
    */
   private snapShadowCenter(pos: THREE.Vector3, sunDir: THREE.Vector3): THREE.Vector3 {
     // Same orientation the shadow camera will use (lookAt from the light to the target).
