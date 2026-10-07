@@ -67,7 +67,7 @@ export class BlockParticles {
 
     this.mapNode = uniformTexture(this.voxelWorld.material.map);
     const particleUV = uv().mul(rectVarying.zw).add(rectVarying.xy);
-    const sampled = texture(this.mapNode, particleUV);
+    const sampled = this.mapNode.sample(particleUV);
 
     this.material = new SpriteNodeMaterial({
       transparent: true,
