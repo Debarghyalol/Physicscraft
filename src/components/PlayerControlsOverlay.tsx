@@ -11,7 +11,6 @@ export interface PlayerControlsOverlayProps {
   onActionMine: (coords?: { x: number; y: number }) => void;
   onActionPlace: (coords?: { x: number; y: number }) => void;
   onToggleViewMode: () => void;
-  onToggleInventory?: () => void;
   isFlying?: boolean;
   viewMode: CameraViewMode;
   selectedVoxel: VoxelType;
@@ -242,7 +241,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onActionMine,
   onActionPlace,
   onToggleViewMode,
-  onToggleInventory,
   selectedVoxel,
   onSelectVoxel,
   onTogglePhysicsMaker,
@@ -635,53 +633,51 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* OFFICIAL MCPE CROSS D-PAD (Bottom Left) */}
+      {/* MOBILE D-PAD: five always-visible directions + one active diagonal */}
       <div
         ref={dpadContainerRef}
         className="ui-touch-interactive absolute left-3 sm:left-5 bottom-[clamp(4.25rem,9vh,6.5rem)] pointer-events-auto select-none touch-none z-30"
+        style={{ width: 168, height: 168 }}
         onTouchStart={handleDpadTouchStart}
         onTouchMove={handleDpadTouchMove}
         onTouchEnd={handleDpadTouchEnd}
         onTouchCancel={handleDpadTouchEnd}
       >
-        <div className="grid grid-cols-3" style={{ width: 144, height: 144 }}>
-          {([
-            ['up_left', 1, -1, 'Forward-Left'],
-            ['up', 1, 0, 'Move Forward'],
-            ['up_right', 1, 1, 'Forward-Right'],
-            ['left', 0, -1, 'Strafe Left'],
-            ['sneak_dpad', null, null, 'Sneak / Crouch'],
-            ['right', 0, 1, 'Strafe Right'],
-            ['down_left', -1, -1, 'Back-Left'],
-            ['down', -1, 0, 'Move Backward'],
-            ['down_right', -1, 1, 'Back-Right'],
-          ] as [string, number | null, number | null, string][]).map(([name, f, r, title]) => {
-            const isCenter = f === null;
-            // Diagonals light up only on the exact diagonal; straight keys light up on the exact axis.
-            const pressed = isCenter
-              ? isSneaking
-              : dpadDir.forward === f && dpadDir.right === r;
-            return (
+        {([
+          ['up', 1, 0, 'Move Forward', 59, 0, 50],
+          ['left', 0, -1, 'Strafe Left', 0, 59, 50],
+          ['sneak_dpad', null, null, 'Sneak / Crouch', 59, 59, 50],
+          ['right', 0, 1, 'Strafe Right', 118, 59, 50],
+          ['down', -1, 0, 'Move Backward', 59, 118, 50],
+          ['up_left', 1, -1, 'Forward-Left', 12, 12, 38],
+          ['up_right', 1, 1, 'Forward-Right', 118, 12, 38],
+          ['down_left', -1, -1, 'Back-Left', 12, 118, 38],
+          ['down_right', -1, 1, 'Back-Right', 118, 118, 38],
+        ] as [string, number | null, number | null, string, number, number, number][]).map(([name, f, r, title, left, top, size]) => {
+          const isCenter = f === null;
+          const isDiagonal = !isCenter && f !== 0 && r !== 0;
+          const isActive = isCenter
+            ? isSneaking
+            : dpadDir.forward === f && dpadDir.right === r;
+          const visible = !isDiagonal || isActive;
+
+          return (
+            <div
+              key={name}
+              className="absolute"
+              style={{ left, top, width: size, height: size, zIndex: isDiagonal ? 2 : 1 }}
+            >
               <ControlImg
-                key={name}
                 name={name}
-                pressed={pressed}
-                size={48}
+                pressed={isActive}
+                size={size}
                 title={title}
-                visible={
-                  isCenter ||
-                  f === 0 ||
-                  r === 0 ||
-                  (f === 1 && r === -1 && dpadDir.forward > 0 && dpadDir.right < 0) ||
-                  (f === 1 && r === 1 && dpadDir.forward > 0 && dpadDir.right > 0) ||
-                  (f === -1 && r === -1 && dpadDir.forward < 0 && dpadDir.right < 0) ||
-                  (f === -1 && r === 1 && dpadDir.forward < 0 && dpadDir.right > 0)
-                }
+                visible={visible}
                 onClick={isCenter ? () => setIsSneaking(!isSneaking) : undefined}
               />
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* OFFICIAL MCPE JUMP & CAMERA CONTROLS (Bottom Right) */}
@@ -755,22 +751,6 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           />
         </div>
       </div>
-
-      {/* Mobile inventory button */}
-      {isMobile && onToggleInventory && (
-        <button
-          type="button"
-          className="ui-touch-interactive mcpe-action-btn absolute top-3 right-3 z-40 w-12 h-12 flex items-center justify-center text-white text-xl font-bold shadow-2xl"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleInventory();
-          }}
-          aria-label="Open inventory"
-          title="Inventory"
-        >
-          🎒
-        </button>
-      )}
 
       {/* AUTHENTIC MINECRAFT 9-SLOT HOTBAR (Uses genuine hotbar.png and hotbar_selection.png) */}
       <div
