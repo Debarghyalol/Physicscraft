@@ -255,6 +255,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 deferredColor,
                 sceneGBuffer.color,
                 sceneGBuffer.depth,
+                sceneGBuffer.gdata,
               );
               renderPipeline.outputNode = nostalgiaBeauty;
               renderPipeline.needsUpdate = true;
