@@ -217,8 +217,9 @@ function createNostalgiaContactShadow(
   const startUv = project(start);
   const endUv = project(rayEnd);
   const rayUv = endUv.sub(startUv);
-  const maxRay = rayUv.x.abs().max(rayUv.y.abs());
-  const pixelScale = maxRay.mul(2.0).max(1.0);
+  // The pack normalizes its projected ray to screen pixels, then advances four pixels
+  // per iteration. Sampling the full projected ray here gives the same short contact
+  // ray without making its reach depend on the ray's screen-space length.
   const dither = uv().x.mul(127.1).add(uv().y.mul(311.7)).sin().mul(43758.5453).fract();
   const stride = 4.0;
   const steps = 16;
@@ -226,7 +227,7 @@ function createNostalgiaContactShadow(
   const hit = float(0.0).toVar('nostalgiaContactHit');
   Loop(steps, ({ i }) => {
     const pixelStep = float(i).mul(stride).add(dither.mul(stride).add(1.0));
-    const t = pixelStep.div(float(steps).mul(stride).mul(pixelScale)).clamp(0.0, 1.0);
+    const t = pixelStep.div(float(steps).mul(stride)).clamp(0.0, 1.0);
     const rayPoint = start.add(rayEnd.sub(start).mul(t));
     const sampleUv = project(rayPoint);
     const inside = sampleUv.x.greaterThanEqual(0.0)
