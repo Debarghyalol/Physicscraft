@@ -230,6 +230,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 nostalgiaLightStrength,
                 nostalgiaSkyDim,
                 envManager.sunLight,
+                camera,
               );
               renderPipeline.outputNode = createNostalgiaFinalOutput(
                 deferredColor,
@@ -368,6 +369,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
       // Render through the WebGPU render graph. Shader-pack stages will be
       // composed here as TSL nodes instead of WebGL fullscreen passes.
+      // Three only resets per-frame render stats inside its own setAnimationLoop; this app
+      // drives its own requestAnimationFrame loop, so reset them here. Without this,
+      // drawCalls/triangles accumulate forever (and `info.render.calls` is a lifetime
+      // counter of render() calls, not draw calls, so it is never what we want).
+      renderer.info.reset();
       renderPipeline.render();
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
@@ -390,7 +396,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
           generationMs: engine.voxelWorld.consumeDebugGenerationTime(),
           chunks: engine.voxelWorld.chunks.size,
           meshes,
-          drawCalls: info.render.calls,
+          drawCalls: info.render.drawCalls,
           triangles: info.render.triangles,
           geometries: info.memory.geometries,
           textures: info.memory.textures,

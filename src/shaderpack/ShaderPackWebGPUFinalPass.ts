@@ -4,8 +4,6 @@ import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
   Loop,
   attribute,
-  cameraProjectionMatrixInverse,
-  cameraWorldMatrix,
   getViewPosition,
   materialColor,
   float,
@@ -21,7 +19,8 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
-import type { DirectionalLight } from 'three';
+import type { DirectionalLight, PerspectiveCamera } from 'three';
+import { createNostalgiaSSAO, createSceneCameraNodes } from './NostalgiaSSAO';
 import type { Node } from 'three/tsl';
 
 type NostalgiaScenePass = {
@@ -127,12 +126,12 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
     const iterations = 12;
     const dither = time.mul(60.0).fract();
 
-    // Nostalgia's shadowmapWarp() works around the centered shadow-map domain.
-    // ShadowNode has already performed the light projection and normalization.
-    const centered = shadowCoord.xy.mul(2.0).sub(1.0);
-    const distortion = centered.mul(1.169).length().mul(0.85).add(0.15);
-    const warped = centered.div(distortion);
-    const uv = warped.mul(0.5).add(0.5);
+    // Nostalgia warps the shadow map (shadowmapWarp) both when rendering it and when
+    // sampling it. Three renders an unwarped map here, so sampling must use the unwarped
+    // coordinate too: warping only the lookup shifts/magnifies every shadow (at the
+    // centre of the map it scaled coordinates by ~6.7x). Resolution is instead tuned
+    // through the shadow frustum size (see EnvironmentManager).
+    const uv = shadowCoord.xy;
 
     // getShadowRegular() clamps the filter to at least two shadow pixels.
     // DirectionalLightShadow.radius is used as the runtime sigma control.
@@ -201,6 +200,7 @@ export function createNostalgiaDeferredLighting(
   lightStrength: Node,
   skyDim: Node,
   sunLight: DirectionalLight,
+  camera: PerspectiveCamera,
 ): Node {
   // Decode the 0..1 G-buffer normal back into a unit world-space vector.
   const normal = sceneNormal.xyz.mul(2.0).sub(1.0).normalize();
@@ -214,10 +214,15 @@ export function createNostalgiaDeferredLighting(
   // the same (meaningless) shadow lookup. Reconstruct the real world position of the
   // scene pixel from the depth buffer and hand it to the ShadowNode through the build
   // context (`shadowPositionWorld`), which Three honours for deferred use.
-  const viewPosition = getViewPosition(uv(), sceneDepth.x, cameraProjectionMatrixInverse);
-  const worldPosition = cameraWorldMatrix.mul(vec4(viewPosition, 1.0)).xyz;
+  const cam = createSceneCameraNodes(camera);
+  const viewPosition = getViewPosition(uv(), sceneDepth.x, cam.projectionMatrixInverse);
+  const worldPosition = (cam.worldMatrix as any).mul(vec4(viewPosition, 1.0)).xyz;
+  // Normal-offset bias (ShadowNode's own normalBias would use the screen quad's normal):
+  // push the lookup along the surface normal, more at grazing angles, to avoid acne on
+  // side faces and self-shadowing banding on slopes.
+  const biasedPosition = worldPosition.add(normal.mul(float(0.03).add(float(0.07).mul(float(1.0).sub(diffuse)))));
   const shadowFactor = (shadow(sunLight) as any)
-    .context({ shadowPositionWorld: worldPosition })
+    .context({ shadowPositionWorld: biasedPosition })
     .clamp(0.0, 1.0) as Node;
 
   // --- Voxel light propagation (sky + block light flood fill from VoxelWorld) ---------
@@ -249,7 +254,12 @@ export function createNostalgiaDeferredLighting(
   const blockLight = blockColor.mul(blockBrightness);
   const direct = diffuse.mul(lightStrength).mul(0.8).mul(shadowFactor).mul(sunExposure);
 
-  const lighting = vec3(direct, direct, direct).add(skyAmbient).add(blockLight).max(0.002).min(1.5);
+  // Nostalgia's indirectAO.fsh multiplies the *indirect* light (sky + block bounce) by
+  // SSAO; direct sunlight is left to the shadow map.
+  const ambientOcclusion = createNostalgiaSSAO(sceneDepth, normal, cam, 1.0);
+  const indirect = skyAmbient.add(blockLight).mul(ambientOcclusion);
+
+  const lighting = vec3(direct, direct, direct).add(indirect).max(0.002).min(1.5);
 
   return albedo.mul(lighting);
 }
