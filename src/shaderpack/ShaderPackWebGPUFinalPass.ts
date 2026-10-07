@@ -19,7 +19,7 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
-import type { DirectionalLight, PerspectiveCamera } from 'three';
+import type { DirectionalLight, PerspectiveCamera, Texture } from 'three';
 import { createNostalgiaSSAO, createSceneCameraNodes } from './NostalgiaSSAO';
 import type { Node } from 'three/tsl';
 
@@ -280,6 +280,7 @@ export function createNostalgiaDeferredLighting(
   sunLight: DirectionalLight,
   camera: PerspectiveCamera,
   frameCounter: Node = float(0.0),
+  noiseTexture?: Texture,
 ): Node {
   // Decode the 0..1 G-buffer normal back into a unit world-space vector.
   const normal = sceneNormal.xyz.mul(2.0).sub(1.0).normalize();
@@ -353,7 +354,7 @@ export function createNostalgiaDeferredLighting(
 
   // Nostalgia's indirectAO.fsh multiplies the *indirect* light (sky + block bounce) by
   // SSAO; direct sunlight is left to the shadow map.
-  const ambientOcclusion = createNostalgiaSSAO(sceneDepth, normal, cam, 1.0, frameCounter);
+  const ambientOcclusion = createNostalgiaSSAO(sceneDepth, normal, cam, 1.0, frameCounter, noiseTexture);
   const indirect = skyAmbient.add(blockLight).mul(ambientOcclusion);
 
   const lighting = vec3(direct, direct, direct).add(indirect).max(0.002).min(1.5);
