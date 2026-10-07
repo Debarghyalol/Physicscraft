@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
 import { pass, uniform, float } from 'three/tsl';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { PhysicsEngine } from '../physics/PhysicsEngine';
 import {
   ActiveTool,
@@ -114,7 +115,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     const initializeRenderer = async () => {
       const renderer = new WebGPURenderer({
-        antialias: true,
+        antialias: false,
         powerPreference: 'high-performance',
       });
       await renderer.init();
@@ -143,6 +144,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     const nostalgiaLightDirectionWorld = uniform(new THREE.Vector3(0, 1, 0));
     const nostalgiaLightStrength = uniform(1.0);
     const nostalgiaSkyDim = uniform(0.0);
+    const nostalgiaFrameCounter = uniform(0.0);
 
     // 2. WebGPU canvas configuration
     const pixelRatio = Math.min(window.devicePixelRatio, 1.75);
@@ -231,12 +233,22 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 nostalgiaSkyDim,
                 envManager.sunLight,
                 camera,
+                nostalgiaFrameCounter,
               );
-              renderPipeline.outputNode = createNostalgiaFinalOutput(
+              const nostalgiaBeauty = createNostalgiaFinalOutput(
                 deferredColor,
                 sceneGBuffer.color,
                 sceneGBuffer.depth,
               );
+              const nostalgiaTemporal = traa(
+                nostalgiaBeauty,
+                sceneGBuffer.depth,
+                sceneGBuffer.velocity,
+                camera,
+              );
+              nostalgiaTemporal.currentFrameWeight = 0.08;
+              nostalgiaTemporal.depthThreshold = 0.001;
+              renderPipeline.outputNode = nostalgiaTemporal;
               renderPipeline.needsUpdate = true;
               finalAdapter = true;
             }
@@ -360,6 +372,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       nostalgiaWorldLight.normalize();
       nostalgiaLightDirectionWorld.value.copy(nostalgiaWorldLight);
       nostalgiaLightStrength.value = Math.max(0.0, envManager.sunLight.intensity);
+      nostalgiaFrameCounter.value += 1.0;
       
       // Capture the exact world-space camera look vector for the F3 diagnostics.
       // Three.js cameras look along their local -Z axis, and getWorldDirection()
