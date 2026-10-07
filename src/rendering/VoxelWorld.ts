@@ -1379,11 +1379,15 @@ export class VoxelWorld {
               // Opaque and cutout blocks occlude neighbouring faces; translucent glass
               // keeps a face against every non-air neighbour so it remains visible through
               // the surface. Two adjacent glass blocks do not generate an internal face.
+              // Leaves are alpha-cutout and double-sided. Keep all six faces,
+              // including faces touching other leaves, so the foliage silhouette does
+              // not disappear where leaf volumes meet. Opaque terrain still culls
+              // against solid neighbours, while glass keeps its forward-rendered faces.
               if (
                 renderClass === 'translucent'
                   ? nb !== 0
                   : renderClass === 'cutout'
-                    ? nb === VoxelType.LEAVES
+                    ? false
                     : !(nb === 0 || nb === VoxelType.GLASS)
               ) continue;
 
