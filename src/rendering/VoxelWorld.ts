@@ -246,6 +246,7 @@ export class VoxelWorld {
   private padCols: Array<ChunkColumn | undefined> = new Array(9);
   private bufOpaque = new MeshBuilder(4096);
   private bufTrans = new MeshBuilder(256);
+  private bufCutout = new MeshBuilder(256);
   private aoScratch = new Uint8Array(4);
   private skyScratch = new Float32Array(4);
   private blkScratch = new Float32Array(4);
@@ -1335,10 +1336,10 @@ export class VoxelWorld {
     const count = col.counts[sy];
     const op = this.bufOpaque;
     const tr = this.bufTrans;
+    const cut = this.bufCutout;
     // Cutout geometry is intentionally kept separate from opaque geometry so its
     // alpha-test material can participate in the same depth/G-buffer pass without
     // becoming blended transparency.
-    const cut = new MeshBuilder(256);
     op.reset();
     tr.reset();
     cut.reset();
