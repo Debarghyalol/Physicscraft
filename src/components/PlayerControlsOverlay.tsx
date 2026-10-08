@@ -190,40 +190,6 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
   useEffect(() => {
     let alive = true;
 
-    const tintIfGrayscale = (input: HTMLCanvasElement, tint: string) => {
-      const c = document.createElement('canvas');
-      c.width = input.width;
-      c.height = input.height;
-      const ctx = c.getContext('2d')!;
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(input, 0, 0);
-
-      const sample = ctx.getImageData(0, 0, c.width, c.height);
-      let colorPixels = 0;
-      let opaquePixels = 0;
-      for (let i = 0; i < sample.data.length; i += 4) {
-        if (sample.data[i + 3] < 16) continue;
-        opaquePixels++;
-        const max = Math.max(sample.data[i], sample.data[i + 1], sample.data[i + 2]);
-        const min = Math.min(sample.data[i], sample.data[i + 1], sample.data[i + 2]);
-        if (max - min > 14) colorPixels++;
-      }
-      if (!opaquePixels || colorPixels / opaquePixels > 0.18) return c;
-
-      const tinted = document.createElement('canvas');
-      tinted.width = c.width;
-      tinted.height = c.height;
-      const tc = tinted.getContext('2d')!;
-      tc.imageSmoothingEnabled = false;
-      tc.drawImage(c, 0, 0);
-      tc.globalCompositeOperation = 'multiply';
-      tc.fillStyle = tint;
-      tc.fillRect(0, 0, c.width, c.height);
-      tc.globalCompositeOperation = 'destination-in';
-      tc.drawImage(c, 0, 0);
-      return tinted;
-    };
-
     const load = async () => {
       const entry = HOTBAR_TEXTURES[type];
       if (!entry) return;
@@ -239,89 +205,17 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
         type === VoxelType.WOOD ? ['block/oak_log', 'block/oak_log_side'] :
         entry.paths
       );
-      const grassOverlay = type === VoxelType.GRASS
-        ? await get(['block/grass_block_side_overlay'])
-        : null;
 
       if (!top && !side) {
         if (alive) setSrc(null);
         return;
       }
-      side = side ?? top;
-      top = top ?? side;
 
-      // Ensure grass overlay receives identical grass tint multiplier
-      if (type === VoxelType.GRASS) {
-        const grassTint = '#91bd59';
-        if (top) top = tintIfGrayscale(top, grassTint);
-        if (grassOverlay) {
-          const tintedOverlay = tintIfGrayscale(grassOverlay, grassTint);
-          if (side) {
-            const combined = document.createElement('canvas');
-            combined.width = side.width;
-            combined.height = side.height;
-            const cg = combined.getContext('2d')!;
-            cg.imageSmoothingEnabled = false;
-            cg.drawImage(side, 0, 0);
-            cg.drawImage(tintedOverlay, 0, 0, tintedOverlay.width, tintedOverlay.height, 0, 0, side.width, side.height);
-            side = combined;
-          } else {
-            side = tintedOverlay;
-          }
-        } else if (side) {
-          side = tintIfGrayscale(side, grassTint);
-        }
-      }
-
-      if (type === VoxelType.LEAVES) {
-        if (side) side = tintIfGrayscale(side, '#77ab2f');
-        if (top) top = tintIfGrayscale(top, '#77ab2f');
-      }
-
-      const out = document.createElement('canvas');
-      out.width = 40;
-      out.height = 40;
-      const ctx = out.getContext('2d')!;
-      ctx.imageSmoothingEnabled = false;
-
-      const drawFace = (
-        image: HTMLCanvasElement,
-        p0: [number, number],
-        p1: [number, number],
-        p2: [number, number],
-        p3: [number, number],
-        brightness = 1
-      ) => {
-        const w = image.width;
-        const h = image.height;
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(...p0);
-        ctx.lineTo(...p1);
-        ctx.lineTo(...p2);
-        ctx.lineTo(...p3);
-        ctx.closePath();
-        ctx.clip();
-        ctx.filter = brightness === 1 ? 'none' : 'brightness(' + brightness + ')';
-        ctx.setTransform(
-          (p1[0] - p0[0]) / w,
-          (p1[1] - p0[1]) / w,
-          (p3[0] - p0[0]) / h,
-          (p3[1] - p0[1]) / h,
-          p0[0],
-          p0[1]
-        );
-        ctx.drawImage(image, 0, 0, w, h);
-        ctx.restore();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-      };
-
-      // Accurate Minecraft 3D GUI isometric projection coordinates (Unsquashed)
-      drawFace(top, [6, 11], [20, 4], [34, 11], [20, 18], 1.08);
-      drawFace(side, [6, 11], [20, 18], [20, 36], [6, 29], 0.88);
-      drawFace(side, [20, 18], [34, 11], [34, 29], [20, 36], 0.72);
-
-      if (alive) setSrc(out.toDataURL('image/png'));
+      // Keep the actual resource-pack canvas as the source image. Do not redraw it
+      // through a transformed 2D canvas: that path was producing blank/white GUI
+      // textures on some WebGPU/browser combinations.
+      const source = side ?? top;
+      if (alive) setSrc(source ? source.toDataURL('image/png') : null);
     };
 
     void load();
@@ -340,14 +234,45 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
     );
   }
 
+  const faceStyle: React.CSSProperties = {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    objectFit: 'fill',
+    imageRendering: 'pixelated',
+    display: 'block',
+    pointerEvents: 'none',
+    backfaceVisibility: 'hidden',
+  };
+
   return (
-    <img
-      src={src}
-      alt=""
+    <div
       aria-hidden="true"
-      draggable={false}
-      style={{ width: 36, height: 36, imageRendering: 'pixelated', objectFit: 'contain', display: 'block' }}
-    />
+      style={{
+        position: 'relative',
+        width: 36,
+        height: 36,
+        perspective: 90,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'visible',
+      }}
+    >
+      <div
+        style={{
+          position: 'relative',
+          width: 24,
+          height: 24,
+          transform: 'rotateX(-28deg) rotateY(45deg) scale(0.92)',
+          transformStyle: 'preserve-3d',
+        }}
+      >
+        <img src={src} alt="" style={{ ...faceStyle, transform: 'translateZ(12px)', filter: 'saturate(1.08) contrast(1.04) brightness(0.98)' }} />
+        <img src={src} alt="" style={{ ...faceStyle, transform: 'rotateY(90deg) translateZ(12px)', filter: 'saturate(1.08) contrast(1.04) brightness(0.76)' }} />
+        <img src={src} alt="" style={{ ...faceStyle, transform: 'rotateX(90deg) translateZ(12px)', filter: 'saturate(1.08) contrast(1.04) brightness(1.08)' }} />
+      </div>
+    </div>
   );
 };
 
