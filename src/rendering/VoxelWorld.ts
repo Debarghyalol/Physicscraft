@@ -80,7 +80,7 @@ const FACE_INFO: FaceVertexInfo[][] = FACE_VERTS.map((verts, f) => {
   const n = FACE_NORMALS[f];
   const axis = n.findIndex((v) => v !== 0);
   const tangents = [0, 1, 2].filter((a) => a !== axis);
-    return verts.map((p) => {
+  return verts.map((p) => {
     const s1 = [0, 0, 0];
     const s2 = [0, 0, 0];
     s1[tangents[0]] = p[tangents[0]] ? 1 : -1;
@@ -701,22 +701,36 @@ export class VoxelWorld {
     baseCtx.imageSmoothingEnabled = false;
     if (source) baseCtx.drawImage(source, 0, 0, source.width, source.width, 0, 0, res, res);
     else baseCtx.drawImage(this.baseAtlasCanvas, GLASS_TILE_COL * 16, 0, 16, 16, 0, 0, res, res);
+
     const frame = Math.max(1, Math.round(res / 16));
     const src = baseCtx.getImageData(0, 0, res, res);
     const variants: HTMLCanvasElement[] = [];
+
     for (let mask = 0; mask < 16; mask++) {
       const out = new ImageData(res, res);
-      for (let y = 0; y < res; y++) for (let x = 0; x < res; x++) {
-        let sx = x, sy = y;
-        if ((mask & GLASS_CONNECT_U_MIN) !== 0 && x < frame) sx = frame;
-        else if ((mask & GLASS_CONNECT_U_MAX) !== 0 && x >= res - frame) sx = res - frame - 1;
-        if ((mask & GLASS_CONNECT_V_MIN) !== 0 && y >= res - frame) sy = res - frame - 1;
-        else if ((mask & GLASS_CONNECT_V_MAX) !== 0 && y < frame) sy = frame;
-        const from = (sy * res + sx) * 4, to = (y * res + x) * 4;
-        out.data[to] = src.data[from]; out.data[to+1] = src.data[from+1]; out.data[to+2] = src.data[from+2]; out.data[to+3] = src.data[from+3];
+      for (let y = 0; y < res; y++) {
+        for (let x = 0; x < res; x++) {
+          let sx = x;
+          let sy = y;
+          // UV v-min is the bottom of the canvas because CanvasTexture is vertically flipped.
+          if ((mask & GLASS_CONNECT_U_MIN) !== 0 && x < frame) sx = frame;
+          else if ((mask & GLASS_CONNECT_U_MAX) !== 0 && x >= res - frame) sx = res - frame - 1;
+          if ((mask & GLASS_CONNECT_V_MIN) !== 0 && y >= res - frame) sy = res - frame - 1;
+          else if ((mask & GLASS_CONNECT_V_MAX) !== 0 && y < frame) sy = frame;
+
+          const from = (sy * res + sx) * 4;
+          const to = (y * res + x) * 4;
+          out.data[to] = src.data[from];
+          out.data[to + 1] = src.data[from + 1];
+          out.data[to + 2] = src.data[from + 2];
+          out.data[to + 3] = src.data[from + 3];
+        }
       }
-      const variant = document.createElement('canvas'); variant.width=res; variant.height=res;
-      variant.getContext('2d')!.putImageData(out,0,0); variants.push(variant);
+      const variant = document.createElement('canvas');
+      variant.width = res;
+      variant.height = res;
+      variant.getContext('2d')!.putImageData(out, 0, 0);
+      variants.push(variant);
     }
     return variants;
   }
@@ -741,11 +755,11 @@ export class VoxelWorld {
         if (img) ctx.drawImage(img, 0, 0, img.width, img.width, x, y, res, res);
         else if (row === 0) ctx.drawImage(this.baseAtlasCanvas, col * 16, 0, 16, 16, x, y, res, res);
         else ctx.drawImage(this.baseAtlasCanvas, GLASS_TILE_COL * 16, 0, 16, 16, x, y, res, res);
-      // extrude edges into the gutter (left/right first, then full rows for the corners)
-      ctx.drawImage(canvas, x, y, 1, res, x - pad, y, pad, res);
-      ctx.drawImage(canvas, x + res - 1, y, 1, res, x + res, y, pad, res);
-      ctx.drawImage(canvas, x - pad, y, stride, 1, x - pad, y - pad, stride, pad);
-      ctx.drawImage(canvas, x - pad, y + res - 1, stride, 1, x - pad, y + res, stride, pad);
+        // extrude edges into the gutter (left/right first, then full rows for the corners)
+        ctx.drawImage(canvas, x, y, 1, res, x - pad, y, pad, res);
+        ctx.drawImage(canvas, x + res - 1, y, 1, res, x + res, y, pad, res);
+        ctx.drawImage(canvas, x - pad, y, stride, 1, x - pad, y - pad, stride, pad);
+        ctx.drawImage(canvas, x - pad, y + res - 1, stride, 1, x - pad, y + res, stride, pad);
     }
     const tex = new THREE.CanvasTexture(canvas);
     tex.magFilter = THREE.NearestFilter;
@@ -1961,10 +1975,9 @@ export class VoxelWorld {
       tiles.add(`${col},${row}`);
     }
 
-    // The atlas is not 16 tiles wide in UV space: every tile has an extruded
-    // gutter (res / 8) on both sides. The old particle UV calculation assumed
-    // a 16x16 no-gutter atlas, so break particles sampled unrelated/white atlas
-    // pixels instead of the broken block texture.
+    // The atlas is not a no-gutter grid: every tile has an extruded gutter
+    // (res / 8) on all sides. Convert physical canvas coordinates back through
+    // CanvasTexture's vertical flip so particles sample the intended tile.
     const image = this.atlasTexture.image as HTMLCanvasElement | undefined;
     const width = image?.width ?? ATLAS_COLS * 18;
     const height = image?.height ?? ATLAS_ROWS * 18;
