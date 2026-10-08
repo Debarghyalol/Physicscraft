@@ -189,37 +189,14 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
 
   useEffect(() => {
     let alive = true;
-
-    const load = async () => {
+    const refresh = async () => {
       const entry = HOTBAR_TEXTURES[type];
       if (!entry) return;
-
-      const get = async (paths: string[]) => resourcePacks.getTexture(paths);
-      let top = await get(
-        type === VoxelType.GRASS ? ['block/grass_block_top'] :
-        type === VoxelType.WOOD ? ['block/oak_log_top'] :
-        entry.paths
-      );
-      let side = await get(
-        type === VoxelType.GRASS ? ['block/grass_block_side'] :
-        type === VoxelType.WOOD ? ['block/oak_log', 'block/oak_log_side'] :
-        entry.paths
-      );
-
-      if (!top && !side) {
-        if (alive) setSrc(null);
-        return;
-      }
-
-      // Keep the actual resource-pack canvas as the source image. Do not redraw it
-      // through a transformed 2D canvas: that path was producing blank/white GUI
-      // textures on some WebGPU/browser combinations.
-      const source = side ?? top;
-      if (alive) setSrc(source ? source.toDataURL('image/png') : null);
+      const canvas = await resourcePacks.getTexture(entry.paths);
+      if (alive) setSrc(canvas ? canvas.toDataURL('image/png') : null);
     };
-
-    void load();
-    const unsubscribe = resourcePacks.subscribe(() => { void load(); });
+    refresh();
+    const unsubscribe = resourcePacks.subscribe(refresh);
     return () => {
       alive = false;
       unsubscribe();
@@ -227,52 +204,30 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
   }, [type]);
 
   if (!src) {
+    // Keep the built-in icon renderer as the default fallback because the app does not
+    // ship individual block PNGs under public/textures/block.
     return (
-      <div className="flex items-center justify-center" style={{ width: 36, height: 36 }}>
+      <div className="flex items-center justify-center" style={{ width: 32, height: 32 }}>
         <IsometricVoxelIcon type={type} />
       </div>
     );
   }
 
-  const faceStyle: React.CSSProperties = {
-    position: 'absolute',
-    width: 24,
-    height: 24,
-    objectFit: 'fill',
-    imageRendering: 'pixelated',
-    display: 'block',
-    pointerEvents: 'none',
-    backfaceVisibility: 'hidden',
-  };
-
   return (
-    <div
+    <span
       aria-hidden="true"
+      className="block shrink-0"
       style={{
-        position: 'relative',
-        width: 36,
-        height: 36,
-        perspective: 90,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'visible',
+        width: 32,
+        height: 32,
+        backgroundImage: `url(${src})`,
+        backgroundSize: 'contain',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        imageRendering: 'pixelated',
+        filter: 'drop-shadow(1px 2px 1px rgba(0,0,0,0.65))',
       }}
-    >
-      <div
-        style={{
-          position: 'relative',
-          width: 24,
-          height: 24,
-          transform: 'rotateX(-28deg) rotateY(45deg) scale(0.92)',
-          transformStyle: 'preserve-3d',
-        }}
-      >
-        <img src={src} alt="" style={{ ...faceStyle, transform: 'translateZ(12px)', filter: 'saturate(1.08) contrast(1.04) brightness(0.98)' }} />
-        <img src={src} alt="" style={{ ...faceStyle, transform: 'rotateY(90deg) translateZ(12px)', filter: 'saturate(1.08) contrast(1.04) brightness(0.76)' }} />
-        <img src={src} alt="" style={{ ...faceStyle, transform: 'rotateX(90deg) translateZ(12px)', filter: 'saturate(1.08) contrast(1.04) brightness(1.08)' }} />
-      </div>
-    </div>
+    />
   );
 };
 
