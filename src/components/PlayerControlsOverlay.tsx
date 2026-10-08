@@ -213,19 +213,36 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
     );
   }
 
+  // Render resource-pack textures as the same isometric 3D block used by the built-in icons.
+  // A raw <img> would make custom-pack icons flat 2D squares.
+  const isoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <defs>
+      <pattern id="tex" patternUnits="userSpaceOnUse" width="32" height="32">
+        <image href="${src}" x="0" y="0" width="32" height="32" preserveAspectRatio="none"/>
+      </pattern>
+      <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="1" dy="1.5" stdDeviation=".7" flood-opacity=".55"/>
+      </filter>
+    </defs>
+    <g filter="url(#shadow)">
+      <polygon points="16,2 29,8.5 16,15 3,8.5" fill="url(#tex)"/>
+      <polygon points="3,8.5 16,15 16,30 3,23.5" fill="url(#tex)" style="filter:brightness(.88)"/>
+      <polygon points="16,15 29,8.5 29,23.5 16,30" fill="url(#tex)" style="filter:brightness(.72)"/>
+    </g>
+  </svg>`;
+  const isoSrc = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(isoSvg)}`;
+
   return (
-    <span
+    <img
       aria-hidden="true"
       className="block shrink-0"
+      src={isoSrc}
+      alt=""
+      draggable={false}
       style={{
         width: 32,
         height: 32,
-        backgroundImage: `url(${src})`,
-        backgroundSize: 'contain',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
         imageRendering: 'pixelated',
-        filter: 'drop-shadow(1px 2px 1px rgba(0,0,0,0.65))',
       }}
     />
   );
