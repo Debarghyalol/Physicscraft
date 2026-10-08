@@ -1991,7 +1991,12 @@ export class VoxelWorld {
       const x1 = col * stride + pad + res * ATLAS_INNER_MAX;
       const y0 = row * stride + pad + res * ATLAS_INNER_MIN_V;
       const y1 = row * stride + pad + res * ATLAS_INNER_MAX_V;
-      return [x0 / width, 1 - y1 / height, x1 / width, 1 - y0 / height] as [number, number, number, number];
+      return [
+        x0 / width,
+        1 - y1 / height,
+        x1 / width,
+        1 - y0 / height,
+      ] as [number, number, number, number];
     });
   }
 
