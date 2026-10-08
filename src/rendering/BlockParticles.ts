@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { VoxelType } from '../types/physics';
 import { VoxelWorld } from './VoxelWorld';
 import { SpriteNodeMaterial } from 'three/webgpu';
-import { instancedBufferAttribute, texture, uniformTexture, uv, vec2 } from 'three/tsl';
+import { instancedBufferAttribute, mrt, texture, uniformTexture, uv, vec2, vec4 } from 'three/tsl';
 
 /**
  * Minecraft-style block break particles.
@@ -77,9 +77,19 @@ export class BlockParticles {
     });
     this.material.positionNode = positionNode;
     this.material.scaleNode = vec2(sizeNode);
-    this.material.colorNode = sampled.rgb.mul(colorVarying);
+    const particleColor = sampled.rgb.mul(colorVarying);
+    this.material.colorNode = particleColor;
     this.material.opacityNode = sampled.a;
     this.material.toneMapped = false;
+
+    // The scene pass writes `materialColor` (= material.color * material.map) into the
+    // `output` and `albedo` G-buffer attachments. This sprite has no `map` (it samples the
+    // atlas through colorNode), so that was always plain white. Override both attachments
+    // with the real particle colour. Alpha 1: texels below alphaTest are already discarded.
+    // `gdata` is left to the pass default: particles have no voxel-light attribute, so the
+    // final pass returns `albedo` unlit, i.e. exactly this already light-tinted colour.
+    const particleOut = vec4(particleColor, 1.0);
+    this.material.mrtNode = mrt({ output: particleOut, albedo: particleOut });
 
     this.points = new THREE.Sprite(this.material);
     this.points.count = MAX_PARTICLES;

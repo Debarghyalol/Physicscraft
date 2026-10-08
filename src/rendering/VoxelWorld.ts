@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { BlendMode, MeshBasicNodeMaterial } from 'three/webgpu';
+import { float, materialColor, mrt, uniform as tslUniform, vec4 } from 'three/tsl';
+import { voxelLightmap } from '../shaderpack/ShaderPackWebGPUFinalPass';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
@@ -273,6 +275,8 @@ export class VoxelWorld {
     return this.atlasTexture;
   }
   private lightUniforms = { uSkyDim: { value: 0 } };
+  /** TSL mirror of uSkyDim, used by the glass MRT output (node materials ignore onBeforeCompile). */
+  private skyDimNode = tslUniform(0);
   public currentUnderground: number = 0.0;
 
   constructor(scene: THREE.Scene) {
@@ -587,6 +591,43 @@ export class VoxelWorld {
     this.patchLightShader(this.material);
     this.patchLightShader(this.cutoutMaterial);
     this.patchLightShader(this.transparentMaterial);
+    this.transparentMaterial.mrtNode = this.createGlassMRT();
+  }
+
+  /**
+   * Glass must not touch the deferred terrain G-buffer. Overwriting `albedo`/`gdata`
+   * made glass pixels (and the terrain behind them) skip deferred lighting, and the
+   * unlit `output` attachment was substituted instead, so glass came out black/flat.
+   *
+   * Instead glass writes only to its own `glass` attachment (cleared to 0, normal-blended
+   * so layers accumulate premultiplied). The final pass composites it over the lit image.
+   * The other attachments are written with alpha 0, which is a no-op under the material's
+   * normal blending on both the WebGPU and WebGL2-fallback backends.
+   */
+  private createGlassMRT() {
+    // x=sky, y=block, z=1 only when the geometry has the aLight attribute. Dynamic
+    // contraption glass (PhysicsEngine) shares this material but has no voxel light, so it
+    // falls back to fully lit instead of being treated as pitch black.
+    const light = voxelLightmap() as any;
+    // Same non-linear light curve + gamma as the vanilla voxel shader (l / (4 - 3l)).
+    const curve = (l: any) => l.div(l.mul(-3.0).add(4.0));
+    const skyLevel = light.x.sub(this.skyDimNode.mul(SKY_DIM_LEVELS / 15)).max(0.0);
+    const voxelLit = curve(skyLevel).pow(2.2).max(curve(light.y).pow(2.2)).max(0.03);
+    const lit = light.z.greaterThan(0.5).select(voxelLit, float(1.0));
+
+    // materialColor = material.color * atlas map (rgba): pane tint with real texture alpha.
+    // vec4() is a no-op for the (runtime) vec4 and pads alpha=1 if the map were ever absent.
+    const tex = vec4(materialColor as any) as any;
+    const glass = vec4(tex.rgb.mul(lit), tex.a);
+    const untouched = vec4(0.0, 0.0, 0.0, 0.0);
+
+    const node = mrt({ output: untouched, albedo: untouched, gdata: untouched, glass });
+    // Non-"output" attachments default to NoBlending; glass needs the material's blending
+    // on every attachment so the alpha-0 writes above leave terrain data intact.
+    node.setBlendMode('albedo', new BlendMode(THREE.MaterialBlending));
+    node.setBlendMode('gdata', new BlendMode(THREE.MaterialBlending));
+    node.setBlendMode('glass', new BlendMode(THREE.MaterialBlending));
+    return node;
   }
 
   private patchLightShader(mat: THREE.MeshBasicMaterial) {
@@ -747,6 +788,7 @@ export class VoxelWorld {
   /** 0 = noon, 1 = midnight: how much sky light is removed by the day/night cycle. */
   public setSkyDim(v: number) {
     this.lightUniforms.uSkyDim.value = v;
+    this.skyDimNode.value = v;
   }
 
   /** Day/night world tint (voxel materials are unlit, so multiply their colour) */

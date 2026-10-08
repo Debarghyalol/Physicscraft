@@ -24,6 +24,7 @@ import type { Node } from 'three/tsl';
 
 type NostalgiaScenePass = {
   setMRT: (configuration: ReturnType<typeof mrt>) => unknown;
+  getTexture: (name: string) => Texture;
   getTextureNode: (name: string) => Node;
 };
 
@@ -37,7 +38,20 @@ export interface NostalgiaGBuffer {
   lightmap: Node;
   /** Packed G-buffer texture, retained for depth-aware screen-space light filtering. */
   gdata: Node;
+  /**
+   * Forward-translucent layer (glass): premultiplied rgb + accumulated alpha, depth-tested
+   * against opaque terrain but kept out of the deferred G-buffer. Composite it over the lit
+   * image with compositeNostalgiaGlass().
+   */
+  glass: Node;
   depth: Node;
+}
+
+/** Composite the translucent glass layer (premultiplied) over an already-lit scene colour. */
+export function compositeNostalgiaGlass(base: Node, glass: Node): Node {
+  const b = base as any;
+  const g = glass as any;
+  return vec4(b.rgb.mul(g.a.clamp(0.0, 1.0).oneMinus()).add(g.rgb), b.a) as unknown as Node;
 }
 
 /**
@@ -62,7 +76,7 @@ class VoxelLightmapNode extends TSLNode {
   }
 }
 
-const voxelLightmap = () => new VoxelLightmapNode() as unknown as Node;
+export const voxelLightmap = () => new VoxelLightmapNode() as unknown as Node;
 
 class VoxelMaterialClassNode extends TSLNode {
   constructor() {
@@ -138,29 +152,37 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
   // clouds/player/particles, which must bypass voxel deferred lighting.
   const packedLightByte = sky4.add(block4.mul(16.0)).div(255.0);
 
-  scenePass.setMRT(
-    mrt({
-      // Keep the original rendered color separately. The final pass must be able
-      // to return clouds/player/particles unchanged instead of sending them through
-      // voxel deferred lighting.
-      output: materialColor,
-      albedo: materialColor,
-      // Encode voxel-light presence and the terrain render class in one exact
-      // byte-like channel: code = lightPresent*2 + translucentClass.
-      // This survives the RGBA8 MRT and lets the final pass restore translucent
-      // terrain after deferred voxel lighting.
-      gdata: vec4(
-        oct.x,
-        oct.y,
-        packedLightByte,
-        light.z.mul(2.0).add(materialClass).div(3.0),
-      ),
-    }),
-  );
+  const gbufferMRT = mrt({
+    // Keep the original rendered color separately. The final pass must be able
+    // to return clouds/player/particles unchanged instead of sending them through
+    // voxel deferred lighting.
+    //
+    // NOTE: `materialColor` is only `material.color * material.map`. A material that
+    // shades through a custom colorNode (e.g. block-break particles) must override
+    // `output`/`albedo` through its own `material.mrtNode`, otherwise it writes white.
+    output: materialColor,
+    albedo: materialColor,
+    // Encode voxel-light presence and the terrain render class in one exact
+    // byte-like channel: code = lightPresent*2 + translucentClass.
+    gdata: vec4(
+      oct.x,
+      oct.y,
+      packedLightByte,
+      light.z.mul(2.0).add(materialClass).div(3.0),
+    ),
+    // Glass layer. Everything except glass writes 0 here (NoBlending overwrite), and
+    // glass materials override it through their own mrtNode with normal blending.
+    glass: vec4(0.0, 0.0, 0.0, 0.0),
+  });
+  // Without an explicit clear colour the renderer's default clear (scene background,
+  // possibly alpha 1) would be applied to the glass attachment.
+  (gbufferMRT as any).setClearColor('glass', 0x000000, 0);
+  scenePass.setMRT(gbufferMRT);
 
   scenePass.getTexture('output').type = UnsignedByteType;
   scenePass.getTexture('albedo').type = UnsignedByteType;
   scenePass.getTexture('gdata').type = UnsignedByteType;
+  scenePass.getTexture('glass').type = UnsignedByteType;
 
 
   const packed = scenePass.getTextureNode('gdata');
@@ -187,6 +209,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
       1.0,
     ) as unknown as Node,
     gdata: packed,
+    glass: scenePass.getTextureNode('glass'),
     depth: scenePass.getTextureNode('depth'),
   };
 }
@@ -496,31 +519,22 @@ export function createNostalgiaFinalOutput(
   originalSceneColor: Node,
   sceneDepth: Node,
   sceneGData?: Node,
-  translucentColor?: Node,
-  translucentDepth?: Node,
+  glass?: Node,
 ): Node {
   // The Iris/Nostalgia ordering is:
   //   solid + cutout -> deferred G-buffer -> lighting -> forward translucent -> final.
-  // The translucent pass is rendered on its own layer with depthWrite disabled.
-  // Its depth is compared against the opaque depth here so glass behind a solid wall
-  // cannot leak through the deferred image.
+  // Glass is drawn depth-tested (no depth write) into its own `glass` attachment during
+  // the scene pass, so it is already clipped against opaque terrain. It is blended over
+  // the *lit* image here; it no longer replaces terrain pixels with the unlit output.
   const background = sceneDepth.greaterThanEqual(0.99999);
   const classCode = sceneGData
     ? sceneGData.w.mul(3.0).add(0.5).floor().mod(2.0)
     : float(0.0);
-  const isTranslucent = classCode.greaterThan(0.5);
-  const deferredOrForward = isTranslucent.select(originalSceneColor, deferredColor);
+  const isForward = classCode.greaterThan(0.5);
+  const deferredOrForward = isForward.select(originalSceneColor, deferredColor);
   const baseColor = background.select(originalSceneColor, deferredOrForward);
 
-  if (!translucentColor || !translucentDepth) {
-    return sharpen(baseColor, 0.5, false);
-  }
-
-  const alpha = translucentColor.a.clamp(0.0, 1.0);
-  const inFront = translucentDepth.lessThan(sceneDepth.add(0.0001));
-  const visible = alpha.greaterThan(0.001).and(inFront);
-  const blended = mix(baseColor, translucentColor, alpha);
-  const sceneColor = visible.select(blended, baseColor);
+  const sceneColor = glass ? compositeNostalgiaGlass(baseColor, glass) : baseColor;
   return sharpen(sceneColor, 0.5, false);
 }
 

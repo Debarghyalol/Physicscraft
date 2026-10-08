@@ -22,7 +22,7 @@ import { ViewportFrameOverlay } from './ViewportFrameOverlay';
 import { DebugOverlay, DebugFrameSample } from './DebugOverlay';
 import { shaderPacks } from '../shaderpack/ShaderPackManager';
 import { translateProgram } from '../shaderpack/GlslTranslator';
-import { activateNostalgiaGBuffer, createNostalgiaDeferredLighting, createNostalgiaFinalOutput, isNostalgiaFinalSource, updateNostalgiaShadowMap } from '../shaderpack/ShaderPackWebGPUFinalPass';
+import { activateNostalgiaGBuffer, compositeNostalgiaGlass, createNostalgiaDeferredLighting, createNostalgiaFinalOutput, isNostalgiaFinalSource, updateNostalgiaShadowMap } from '../shaderpack/ShaderPackWebGPUFinalPass';
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
@@ -139,7 +139,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     // The scene pass is colortex0 for the first shader-pack output adapter.
     const scenePass = pass(scene, camera);
     const sceneGBuffer = activateNostalgiaGBuffer(scenePass);
-    const renderPipeline = new RenderPipeline(renderer, sceneGBuffer.color);
+    // Fallback output (no shader-pack adapter): unlit colour with the glass layer on top.
+    const renderPipeline = new RenderPipeline(
+      renderer,
+      compositeNostalgiaGlass(sceneGBuffer.color, sceneGBuffer.glass),
+    );
     const nostalgiaLightDirectionWorld = uniform(new THREE.Vector3(0, 1, 0));
     const nostalgiaLightStrength = uniform(1.0);
     const nostalgiaSkyDim = uniform(0.0);
@@ -256,6 +260,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
                 sceneGBuffer.color,
                 sceneGBuffer.depth,
                 sceneGBuffer.gdata,
+                sceneGBuffer.glass,
               );
               renderPipeline.outputNode = nostalgiaBeauty;
               renderPipeline.needsUpdate = true;
