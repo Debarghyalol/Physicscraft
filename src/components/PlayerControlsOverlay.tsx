@@ -189,13 +189,99 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
 
   useEffect(() => {
     let alive = true;
+
     const refresh = async () => {
       const entry = HOTBAR_TEXTURES[type];
       if (!entry) return;
-      const canvas = await resourcePacks.getTexture(entry.paths);
-      if (alive) setSrc(canvas ? canvas.toDataURL('image/png') : null);
+
+      const sideTexture = await resourcePacks.getTexture(entry.paths);
+      if (!alive) return;
+
+      if (!sideTexture) {
+        setSrc(null);
+        return;
+      }
+
+      // Build the icon on a real canvas instead of nesting an <image> inside SVG.
+      // The old SVG approach made custom-pack textures render as a flat square on
+      // some mobile browsers because the data-URL image was not sampled reliably.
+      const topTexture = entry.paths.length > 1
+        ? await resourcePacks.getTexture([entry.paths[1]])
+        : sideTexture;
+      if (!alive) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 40;
+      canvas.height = 40;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        setSrc(null);
+        return;
+      }
+
+      ctx.imageSmoothingEnabled = false;
+
+      const drawFace = (
+        texture: HTMLCanvasElement,
+        a: [number, number],
+        b: [number, number],
+        c: [number, number],
+      ) => {
+        // Map the source square onto a parallelogram/diamond using an affine transform.
+        const ax = a[0], ay = a[1];
+        const bx = b[0], by = b[1];
+        const cx = c[0], cy = c[1];
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(bx + cx - ax, by + cy - ay);
+        ctx.lineTo(cx, cy);
+        ctx.closePath();
+        ctx.clip();
+
+        ctx.setTransform(
+          bx - ax, by - ay,
+          cx - ax, cy - ay,
+          ax, ay,
+        );
+        ctx.drawImage(texture, 0, 0, texture.width, texture.height, 0, 0, 1, 1);
+        ctx.restore();
+      };
+
+      // Top face: lighter, using the block's dedicated top texture when available.
+      drawFace(topTexture, [20, 2], [36, 10], [4, 10]);
+
+      // Left and right faces use the side texture, with Minecraft-like directional
+      // shading. The texture itself remains crisp; only a translucent shade is added.
+      drawFace(sideTexture, [4, 10], [20, 18], [4, 32]);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.beginPath();
+      ctx.moveTo(4, 10);
+      ctx.lineTo(20, 18);
+      ctx.lineTo(20, 40);
+      ctx.lineTo(4, 32);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      drawFace(sideTexture, [20, 18], [36, 10], [20, 40]);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.26)';
+      ctx.beginPath();
+      ctx.moveTo(20, 18);
+      ctx.lineTo(36, 10);
+      ctx.lineTo(36, 32);
+      ctx.lineTo(20, 40);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      setSrc(canvas.toDataURL('image/png'));
     };
-    refresh();
+
+    void refresh();
     const unsubscribe = resourcePacks.subscribe(refresh);
     return () => {
       alive = false;
@@ -204,8 +290,6 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
   }, [type]);
 
   if (!src) {
-    // Keep the built-in icon renderer as the default fallback because the app does not
-    // ship individual block PNGs under public/textures/block.
     return (
       <div className="flex items-center justify-center" style={{ width: 32, height: 32 }}>
         <IsometricVoxelIcon type={type} />
@@ -213,35 +297,16 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
     );
   }
 
-  // Render resource-pack textures as the same isometric 3D block used by the built-in icons.
-  // A raw <img> would make custom-pack icons flat 2D squares.
-  const isoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-    <defs>
-      <pattern id="tex" patternUnits="userSpaceOnUse" width="32" height="32">
-        <image href="${src}" x="0" y="0" width="32" height="32" preserveAspectRatio="none"/>
-      </pattern>
-      <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-        <feDropShadow dx="1" dy="1.5" stdDeviation=".7" flood-opacity=".55"/>
-      </filter>
-    </defs>
-    <g filter="url(#shadow)">
-      <polygon points="16,2 29,8.5 16,15 3,8.5" fill="url(#tex)"/>
-      <polygon points="3,8.5 16,15 16,30 3,23.5" fill="url(#tex)" style="filter:brightness(.88)"/>
-      <polygon points="16,15 29,8.5 29,23.5 16,30" fill="url(#tex)" style="filter:brightness(.72)"/>
-    </g>
-  </svg>`;
-  const isoSrc = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(isoSvg)}`;
-
   return (
     <img
       aria-hidden="true"
       className="block shrink-0"
-      src={isoSrc}
+      src={src}
       alt=""
       draggable={false}
       style={{
-        width: 32,
-        height: 32,
+        width: 40,
+        height: 40,
         imageRendering: 'pixelated',
       }}
     />
