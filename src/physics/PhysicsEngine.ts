@@ -15,7 +15,7 @@ import {
 import { MATERIAL_CONFIGS, getThreeMaterial } from './materials';
 import { soundManager } from '../audio/SoundEffects';
 import { SoftBody } from './SoftBody';
-import { VoxelWorld } from '../rendering/VoxelWorld';
+import { ATLAS_ROWS, VoxelWorld } from '../rendering/VoxelWorld';
 import { PlayerController, PlayerInput } from '../player/PlayerController';
 import { SelectionBoxRenderer } from '../rendering/SelectionBoxRenderer';
 import { BlockParticles } from '../rendering/BlockParticles';
@@ -884,6 +884,7 @@ export class PhysicsEngine {
   public createContraptionBlockMesh(voxelType: VoxelType): THREE.Mesh {
     const geo = new THREE.BoxGeometry(1, 1, 1);
     const tileW = 1.0 / 16.0;
+    const tileH = 1.0 / ATLAS_ROWS;
 
     const uvs: number[] = [];
     const colors: number[] = [];
@@ -893,8 +894,8 @@ export class PhysicsEngine {
       const [tileCol, tileRow] = (this.voxelWorld as any).getVoxelFaceTile(voxelType, face);
       const u0 = tileCol * tileW;
       const u1 = u0 + tileW;
-      const v0 = 1.0 - (tileRow + 1) * tileW;
-      const v1 = 1.0 - tileRow * tileW;
+      const v0 = 1.0 - (tileRow + 1) * tileH;
+      const v1 = 1.0 - tileRow * tileH;
 
       uvs.push(
         u0, v1,
