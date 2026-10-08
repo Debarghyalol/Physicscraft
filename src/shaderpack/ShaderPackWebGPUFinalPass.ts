@@ -269,7 +269,8 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
       const frac = pixel.fract();
       const texel = vec2(1.0).div(mapSize);
 
-      const shadowDepth = shadowCoord.z.sub(0.0005);\n      const s00 = texture(depthTexture, base).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
+      const shadowDepth = shadowCoord.z.sub(0.0005);
+      const s00 = texture(depthTexture, base).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
       const s10 = texture(depthTexture, base.add(vec2(1.0, 0.0).mul(texel))).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
       const s01 = texture(depthTexture, base.add(vec2(0.0, 1.0).mul(texel))).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
       const s11 = texture(depthTexture, base.add(vec2(1.0, 1.0).mul(texel))).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
