@@ -48,10 +48,19 @@ for (let f = 0; f < 6; f++) for (let a = 0; a < 4; a++) SHADE_LINEAR[f * 4 + a] 
 // Atlas layout: every tile is surrounded by an edge-extruded gutter (10% of the cell on each side),
 // so sampling just outside a face (MSAA / rounding) never bleeds in a neighbouring tile or empty
 // space -> no more dark seams between blocks. The ratio is resolution independent.
+export const ATLAS_COLS = 16;
+export const ATLAS_ROWS = 2;
 const ATLAS_INNER_MIN = 0.1;
 const ATLAS_INNER_MAX = 0.9;
 const ATLAS_INNER_MIN_V = 0.1;
 const ATLAS_INNER_MAX_V = 0.9;
+
+const GLASS_TILE_COL = 12;
+const GLASS_CONNECTED_ROW = 1;
+const GLASS_CONNECT_U_MIN = 1;
+const GLASS_CONNECT_U_MAX = 2;
+const GLASS_CONNECT_V_MIN = 4;
+const GLASS_CONNECT_V_MAX = 8;
 
 interface FaceVertexInfo {
   px: number; py: number; pz: number;
@@ -66,24 +75,36 @@ const FACE_VERTS: number[][][] = [
   [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]], // -Z
 ];
 const FACE_NORMALS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+const padOffset = (v: readonly number[]) => v[0] + v[2] * PAD + v[1] * PAD_Y;
 const FACE_INFO: FaceVertexInfo[][] = FACE_VERTS.map((verts, f) => {
   const n = FACE_NORMALS[f];
   const axis = n.findIndex((v) => v !== 0);
   const tangents = [0, 1, 2].filter((a) => a !== axis);
-  const toOff = (v: number[]) => v[0] + v[2] * PAD + v[1] * PAD_Y;
-  return verts.map((p) => {
+    return verts.map((p) => {
     const s1 = [0, 0, 0];
     const s2 = [0, 0, 0];
     s1[tangents[0]] = p[tangents[0]] ? 1 : -1;
     s2[tangents[1]] = p[tangents[1]] ? 1 : -1;
     return {
       px: p[0], py: p[1], pz: p[2],
-      oCenter: toOff(n),
-      o1: toOff([n[0] + s1[0], n[1] + s1[1], n[2] + s1[2]]),
-      o2: toOff([n[0] + s2[0], n[1] + s2[1], n[2] + s2[2]]),
-      oC: toOff([n[0] + s1[0] + s2[0], n[1] + s1[1] + s2[1], n[2] + s1[2] + s2[2]]),
+      oCenter: padOffset(n),
+      o1: padOffset([n[0] + s1[0], n[1] + s1[1], n[2] + s1[2]]),
+      o2: padOffset([n[0] + s2[0], n[1] + s2[1], n[2] + s2[2]]),
+      oC: padOffset([n[0] + s1[0] + s2[0], n[1] + s1[1] + s2[1], n[2] + s1[2] + s2[2]]),
     };
   });
+});
+
+/**
+ * Coplanar neighbours at each face's UV edges: [u-min, u-max, v-min, v-max].
+ * Glass uses these to select a borderless edge only where another glass block continues the pane.
+ */
+const GLASS_FACE_EDGE_NEIGHBORS = FACE_VERTS.map((verts) => {
+  const du = verts[1].map((v, i) => v - verts[0][i]);
+  const dv = verts[2].map((v, i) => v - verts[1][i]);
+  const negU = du.map((v) => -v);
+  const negV = dv.map((v) => -v);
+  return [padOffset(negU), padOffset(du), padOffset(negV), padOffset(dv)] as const;
 });
 
 /** Growable typed-array geometry builder (reused between subchunk builds, no per-face allocations). */
@@ -551,7 +572,10 @@ export class VoxelWorld {
     });
 
     this.baseAtlasCanvas = canvas;
-    this.atlasTexture = this.composeAtlas(16, () => null);
+    const connectedGlass = this.createConnectedGlassVariants(16, null);
+    this.atlasTexture = this.composeAtlas(16, (col, row) =>
+      row === GLASS_CONNECTED_ROW ? connectedGlass[col] : null
+    );
 
     // Minecraft-style materials. A small shader patch adds per-vertex sky + block light
     // (separate channels so the day/night cycle can dim only the sky light, no remeshing).
@@ -664,27 +688,63 @@ export class VoxelWorld {
   }
 
   /**
-   * Build the block atlas: 16 tiles in a row, each with an edge-extruded gutter of res/8 px.
-   * `tileImg(col)` returns a pack texture for that tile or null to use the built-in default.
+   * Generate all 16 four-edge glass variants from the active glass texture.
+   * A connected edge is replaced with the pixels immediately inward from that edge instead of
+   * being cleared, so arbitrary transparent, opaque, stylised and HD glass textures keep their
+   * own fill while their frame disappears between touching glass blocks.
    */
-  private composeAtlas(res: number, tileImg: (col: number) => HTMLCanvasElement | null): THREE.CanvasTexture {
+  private createConnectedGlassVariants(res: number, source: HTMLCanvasElement | null): HTMLCanvasElement[] {
+    const base = document.createElement('canvas');
+    base.width = res;
+    base.height = res;
+    const baseCtx = base.getContext('2d', { willReadFrequently: true })!;
+    baseCtx.imageSmoothingEnabled = false;
+    if (source) baseCtx.drawImage(source, 0, 0, source.width, source.width, 0, 0, res, res);
+    else baseCtx.drawImage(this.baseAtlasCanvas, GLASS_TILE_COL * 16, 0, 16, 16, 0, 0, res, res);
+    const frame = Math.max(1, Math.round(res / 16));
+    const src = baseCtx.getImageData(0, 0, res, res);
+    const variants: HTMLCanvasElement[] = [];
+    for (let mask = 0; mask < 16; mask++) {
+      const out = new ImageData(res, res);
+      for (let y = 0; y < res; y++) for (let x = 0; x < res; x++) {
+        let sx = x, sy = y;
+        if ((mask & GLASS_CONNECT_U_MIN) !== 0 && x < frame) sx = frame;
+        else if ((mask & GLASS_CONNECT_U_MAX) !== 0 && x >= res - frame) sx = res - frame - 1;
+        if ((mask & GLASS_CONNECT_V_MIN) !== 0 && y >= res - frame) sy = res - frame - 1;
+        else if ((mask & GLASS_CONNECT_V_MAX) !== 0 && y < frame) sy = frame;
+        const from = (sy * res + sx) * 4, to = (y * res + x) * 4;
+        out.data[to] = src.data[from]; out.data[to+1] = src.data[from+1]; out.data[to+2] = src.data[from+2]; out.data[to+3] = src.data[from+3];
+      }
+      const variant = document.createElement('canvas'); variant.width=res; variant.height=res;
+      variant.getContext('2d')!.putImageData(out,0,0); variants.push(variant);
+    }
+    return variants;
+  }
+
+  /**
+   * Build the block atlas: 16 columns x 2 rows, each with an edge-extruded gutter of res/8 px.
+   * Row 0 contains regular block tiles; row 1 contains the generated connected-glass variants.
+   */
+  private composeAtlas(res: number, tileImg: (col: number, row: number) => HTMLCanvasElement | null): THREE.CanvasTexture {
     const pad = res / 8;
     const stride = res + pad * 2;
     const canvas = document.createElement('canvas');
-    canvas.width = stride * 16;
-    canvas.height = stride;
+    canvas.width = stride * ATLAS_COLS;
+    canvas.height = stride * ATLAS_ROWS;
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
-    for (let col = 0; col < 16; col++) {
-      const x = col * stride + pad;
-      const y = pad;
-      const img = tileImg(col);
-      if (img) ctx.drawImage(img, 0, 0, img.width, img.width, x, y, res, res);
-      else ctx.drawImage(this.baseAtlasCanvas, col * 16, 0, 16, 16, x, y, res, res);
+    for (let row = 0; row < ATLAS_ROWS; row++) {
+      for (let col = 0; col < ATLAS_COLS; col++) {
+        const x = col * stride + pad;
+        const y = row * stride + pad;
+        const img = tileImg(col, row);
+        if (img) ctx.drawImage(img, 0, 0, img.width, img.width, x, y, res, res);
+        else if (row === 0) ctx.drawImage(this.baseAtlasCanvas, col * 16, 0, 16, 16, x, y, res, res);
+        else ctx.drawImage(this.baseAtlasCanvas, GLASS_TILE_COL * 16, 0, 16, 16, x, y, res, res);
       // extrude edges into the gutter (left/right first, then full rows for the corners)
       ctx.drawImage(canvas, x, y, 1, res, x - pad, y, pad, res);
       ctx.drawImage(canvas, x + res - 1, y, 1, res, x + res, y, pad, res);
-      ctx.drawImage(canvas, x - pad, y, stride, 1, x - pad, 0, stride, pad);
+      ctx.drawImage(canvas, x - pad, y, stride, 1, x - pad, y - pad, stride, pad);
       ctx.drawImage(canvas, x - pad, y + res - 1, stride, 1, x - pad, y + res, stride, pad);
     }
     const tex = new THREE.CanvasTexture(canvas);
@@ -770,7 +830,10 @@ export class VoxelWorld {
       prepared.set(t.col, c);
     }
 
-    const tex = this.composeAtlas(res, (col) => prepared.get(col) ?? null);
+    const connectedGlass = this.createConnectedGlassVariants(res, prepared.get(GLASS_TILE_COL) ?? null);
+    const tex = this.composeAtlas(res, (col, row) =>
+      row === GLASS_CONNECTED_ROW ? connectedGlass[col] : prepared.get(col) ?? null
+    );
     const old = this.atlasTexture;
     this.atlasTexture = tex;
     this.material.map = tex;
@@ -810,6 +873,17 @@ export class VoxelWorld {
     }
   }
 
+  /** Pick one of the 16 generated glass variants from the coplanar glass around this face. */
+  private getConnectedGlassFaceTile(blocks: Uint8Array, pi: number, faceIndex: number): [number, number] {
+    const edge = GLASS_FACE_EDGE_NEIGHBORS[faceIndex];
+    let mask = 0;
+    if (blocks[pi + edge[0]] === VoxelType.GLASS) mask |= GLASS_CONNECT_U_MIN;
+    if (blocks[pi + edge[1]] === VoxelType.GLASS) mask |= GLASS_CONNECT_U_MAX;
+    if (blocks[pi + edge[2]] === VoxelType.GLASS) mask |= GLASS_CONNECT_V_MIN;
+    if (blocks[pi + edge[3]] === VoxelType.GLASS) mask |= GLASS_CONNECT_V_MAX;
+    return [mask, GLASS_CONNECTED_ROW];
+  }
+
   private getVoxelFaceTile(voxel: VoxelType, faceIndex: number): [number, number] {
     // faceIndex: 0: +X, 1: -X, 2: +Y (Top), 3: -Y (Bottom), 4: +Z, 5: -Z
     switch (voxel) {
@@ -837,7 +911,7 @@ export class VoxelWorld {
       case VoxelType.GOLD:
         return [11, 0];
       case VoxelType.GLASS:
-        return [12, 0];
+        return [GLASS_TILE_COL, 0];
       case VoxelType.GLOWSTONE:
         return [13, 0];
       case VoxelType.JUKEBOX:
@@ -1430,9 +1504,14 @@ export class VoxelWorld {
                     : nb !== 0 && nb !== VoxelType.GLASS && nb !== VoxelType.LEAVES;
               if (neighbourOccludes) continue;
 
-              const tileCol = this.getVoxelFaceTile(voxel, f)[0];
-              const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
-              const u1 = (tileCol + ATLAS_INNER_MAX) / 16;
+              const [tileCol, tileRow] = voxel === VoxelType.GLASS
+                ? this.getConnectedGlassFaceTile(B, pi, f)
+                : this.getVoxelFaceTile(voxel, f);
+              const u0 = (tileCol + ATLAS_INNER_MIN) / ATLAS_COLS;
+              const u1 = (tileCol + ATLAS_INNER_MAX) / ATLAS_COLS;
+              // CanvasTexture is vertically flipped, so atlas row 0 is the top UV half.
+              const v0 = 1 - (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS;
+              const v1 = 1 - (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS;
               const infos = FACE_INFO[f];
 
               mb.ensure(1);
@@ -1477,7 +1556,7 @@ export class VoxelWorld {
                 mb.lit[o * 2] = sky;
                 mb.lit[o * 2 + 1] = blk;
                 mb.uv[o * 2] = k === 0 || k === 3 ? u0 : u1;
-                mb.uv[o * 2 + 1] = k < 2 ? ATLAS_INNER_MIN_V : ATLAS_INNER_MAX_V;
+                mb.uv[o * 2 + 1] = k < 2 ? v0 : v1;
               }
 
               if (b0 + b2 > b1 + b3) {
@@ -1876,26 +1955,31 @@ export class VoxelWorld {
    * so particles follow resource packs automatically.
    */
   public getBlockTileRects(voxel: VoxelType): Array<[number, number, number, number]> {
-    const cols = new Set<number>();
-    for (let face = 0; face < 6; face++) cols.add(this.getVoxelFaceTile(voxel, face)[0]);
+    const tiles = new Set<string>();
+    for (let face = 0; face < 6; face++) {
+      const [col, row] = this.getVoxelFaceTile(voxel, face);
+      tiles.add(`${col},${row}`);
+    }
 
     // The atlas is not 16 tiles wide in UV space: every tile has an extruded
     // gutter (res / 8) on both sides. The old particle UV calculation assumed
     // a 16x16 no-gutter atlas, so break particles sampled unrelated/white atlas
     // pixels instead of the broken block texture.
     const image = this.atlasTexture.image as HTMLCanvasElement | undefined;
-    const width = image?.width ?? 16 * 18;
-    const height = image?.height ?? 18;
-    const res = height * 0.8; // height = res + 2*(res/8)
+    const width = image?.width ?? ATLAS_COLS * 18;
+    const height = image?.height ?? ATLAS_ROWS * 18;
+    const res = (height / ATLAS_ROWS) * 0.8; // row height = res + 2*(res/8)
     const pad = res / 8;
     const stride = res + pad * 2;
 
-    return [...cols].map((col) => [
-      (col * stride + pad + res * ATLAS_INNER_MIN / 1) / width,
-      (pad + res * ATLAS_INNER_MIN_V) / height,
-      (col * stride + pad + res * ATLAS_INNER_MAX / 1) / width,
-      (pad + res * ATLAS_INNER_MAX_V) / height,
-    ]);
+    return [...tiles].map((key) => {
+      const [col, row] = key.split(',').map(Number);
+      const x0 = col * stride + pad + res * ATLAS_INNER_MIN;
+      const x1 = col * stride + pad + res * ATLAS_INNER_MAX;
+      const y0 = row * stride + pad + res * ATLAS_INNER_MIN_V;
+      const y1 = row * stride + pad + res * ATLAS_INNER_MAX_V;
+      return [x0 / width, 1 - y1 / height, x1 / width, 1 - y0 / height] as [number, number, number, number];
+    });
   }
 
   private static readonly NEIGHBOR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
