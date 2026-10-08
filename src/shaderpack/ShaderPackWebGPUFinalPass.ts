@@ -269,10 +269,10 @@ function installNostalgiaShadowFilter(sunLight: DirectionalLight): void {
       const frac = pixel.fract();
       const texel = vec2(1.0).div(mapSize);
 
-      const s00 = texture(depthTexture, base).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
-      const s10 = texture(depthTexture, base.add(vec2(1.0, 0.0).mul(texel))).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
-      const s01 = texture(depthTexture, base.add(vec2(0.0, 1.0).mul(texel))).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
-      const s11 = texture(depthTexture, base.add(vec2(1.0, 1.0).mul(texel))).x.greaterThanEqual(shadowCoord.z).select(1.0, 0.0);
+      const shadowDepth = shadowCoord.z.sub(0.0005);\n      const s00 = texture(depthTexture, base).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
+      const s10 = texture(depthTexture, base.add(vec2(1.0, 0.0).mul(texel))).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
+      const s01 = texture(depthTexture, base.add(vec2(0.0, 1.0).mul(texel))).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
+      const s11 = texture(depthTexture, base.add(vec2(1.0, 1.0).mul(texel))).x.greaterThanEqual(shadowDepth).select(1.0, 0.0);
 
       const row0 = s00.mul(frac.x.oneMinus()).add(s10.mul(frac.x));
       const row1 = s01.mul(frac.x.oneMinus()).add(s11.mul(frac.x));
@@ -408,7 +408,7 @@ export function createNostalgiaDeferredLighting(
   // side faces and self-shadowing banding on slopes.
   // Voxel faces are exactly one block wide. Keep the normal offset tiny so the shadow
   // remains attached to the caster instead of creating a visible gap at block edges.
-  const biasedPosition = worldPosition.add(normal.mul(0.003));
+  const biasedPosition = worldPosition;
   // Three's ShadowNode renders its shadow map from `frame.scene` when it is updated. Inside
   // the post-processing pass that scene is the full-screen quad, so left alone it renders
   // an EMPTY shadow map every frame and nothing is ever shadowed. Take over the update:
@@ -422,12 +422,10 @@ export function createNostalgiaDeferredLighting(
     .clamp(0.0, 1.0) as Node;
   // Nostalgia's contactShadow ray closes the sub-texel/rasterization gap that a
   // conventional shadow-map PCF lookup cannot resolve around voxel silhouettes.
-  const contactShadow = createNostalgiaContactShadow(
-    sceneDepth,
-    viewPosition,
-    cam,
-    lightDir,
-  );
+  // Do not multiply direct sunlight by the screen-space contact shadow here.
+  // Contact shadows are camera-dependent; on voxel edges they can alternate as the
+  // depth sample moves by a pixel, which made the block shadow visibly crawl/flicker.
+  const contactShadow = float(1.0);
 
   // --- Voxel light propagation (sky + block light flood fill from VoxelWorld) ---------
   // Same model as VoxelWorld's vanilla shader: sky light is reduced by the day/night
