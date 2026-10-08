@@ -1424,9 +1424,9 @@ export class VoxelWorld {
               // voxels should still share one hidden internal face.
               const neighbourOccludes =
                 renderClass === 'cutout'
-                  ? nb === VoxelType.LEAVES
+                  ? nb !== 0 && nb !== VoxelType.LEAVES
                   : renderClass === 'translucent'
-                    ? nb === VoxelType.GLASS
+                    ? nb !== 0 && nb !== VoxelType.GLASS
                     : nb !== 0 && nb !== VoxelType.GLASS && nb !== VoxelType.LEAVES;
               if (neighbourOccludes) continue;
 
