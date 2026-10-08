@@ -1,5 +1,5 @@
-import { UnsignedByteType } from 'three';
-import { Node as TSLNode } from 'three/webgpu';
+import { MaterialBlending, UnsignedByteType } from 'three';
+import { BlendMode, Node as TSLNode } from 'three/webgpu';
 import { sharpen } from 'three/addons/tsl/display/SharpenNode.js';
 import {
   Loop,
@@ -78,22 +78,6 @@ class VoxelLightmapNode extends TSLNode {
 
 export const voxelLightmap = () => new VoxelLightmapNode() as unknown as Node;
 
-class VoxelMaterialClassNode extends TSLNode {
-  constructor() {
-    super('float');
-  }
-
-  setup(builder: any) {
-    const geometry = builder.geometry;
-    if (geometry && geometry.hasAttribute('aMaterialClass')) {
-      return attribute('aMaterialClass', 'float');
-    }
-    return float(0.0);
-  }
-}
-
-const voxelMaterialClass = () => new VoxelMaterialClassNode() as unknown as Node;
-
 /**
  * Reproduce Nostalgia's gbuffers_terrain.fsh attachment layout with native
  * WebGPU MRT.
@@ -133,7 +117,6 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
    * light values are only 4 bits each, so two full bytes are cheap and exact.
    */
   const light = voxelLightmap();
-  const materialClass = voxelMaterialClass();
   const n = normalWorld.normalize();
   const invL1 = float(1.0).div(n.x.abs().add(n.y.abs()).add(n.z.abs()).max(0.000001));
   const octBase = n.xy.mul(invL1);
@@ -162,21 +145,33 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     // `output`/`albedo` through its own `material.mrtNode`, otherwise it writes white.
     output: materialColor,
     albedo: materialColor,
-    // Encode voxel-light presence and the terrain render class in one exact
-    // byte-like channel: code = lightPresent*2 + translucentClass.
+    // Alpha = "has voxel light": 0.5 for lit voxel terrain, 1.0 for everything else
+    // (clouds, player, particles...). It is deliberately 1.0 for unlit geometry: gdata is
+    // blended with the material's blending (see below), so every transparent unlit material
+    // must write alpha 1 to still overwrite the G-buffer. Only glass writes alpha 0 here.
     gdata: vec4(
       oct.x,
       oct.y,
       packedLightByte,
-      light.z.mul(2.0).add(materialClass).div(3.0),
+      float(1.0).sub(light.z.mul(0.5)),
     ),
-    // Glass layer. Everything except glass writes 0 here (NoBlending overwrite), and
-    // glass materials override it through their own mrtNode with normal blending.
+    // Glass layer. Everything except glass writes 0 here; glass materials override it
+    // through their own mrtNode and accumulate with normal blending.
     glass: vec4(0.0, 0.0, 0.0, 0.0),
   });
   // Without an explicit clear colour the renderer's default clear (scene background,
   // possibly alpha 1) would be applied to the glass attachment.
   (gbufferMRT as any).setClearColor('glass', 0x000000, 0);
+  // IMPORTANT: three reads per-attachment blend modes from THIS pass-level MRT only; a
+  // material's own mrtNode can override shader outputs but NOT blending. By default every
+  // attachment except `output` is NoBlending (plain overwrite), which let glass overwrite
+  // the terrain's albedo/gdata with its zeros, so the deferred pass lit those pixels black.
+  // MaterialBlending = "use the drawing material's blending": opaque/cutout materials are
+  // unblended (still overwrite), transparent unlit materials write alpha 1 (still
+  // overwrite), and glass writes alpha 0 on albedo/gdata (leaves them untouched).
+  gbufferMRT.setBlendMode('albedo', new BlendMode(MaterialBlending));
+  gbufferMRT.setBlendMode('gdata', new BlendMode(MaterialBlending));
+  gbufferMRT.setBlendMode('glass', new BlendMode(MaterialBlending));
   scenePass.setMRT(gbufferMRT);
 
   scenePass.getTexture('output').type = UnsignedByteType;
@@ -205,7 +200,7 @@ export function activateNostalgiaGBuffer(scenePass: NostalgiaScenePass): Nostalg
     lightmap: vec4(
       packed.z.mul(255.0).add(0.5).floor().mod(16.0).div(15.0),
       packed.z.mul(255.0).add(0.5).floor().div(16.0).floor().mod(16.0).div(15.0),
-      packed.w.mul(3.0).add(0.5).floor().div(2.0).floor().clamp(0.0, 1.0),
+      packed.w.lessThan(0.75).select(1.0, 0.0),
       1.0,
     ) as unknown as Node,
     gdata: packed,
@@ -518,7 +513,6 @@ export function createNostalgiaFinalOutput(
   deferredColor: Node,
   originalSceneColor: Node,
   sceneDepth: Node,
-  sceneGData?: Node,
   glass?: Node,
 ): Node {
   // The Iris/Nostalgia ordering is:
@@ -527,12 +521,7 @@ export function createNostalgiaFinalOutput(
   // the scene pass, so it is already clipped against opaque terrain. It is blended over
   // the *lit* image here; it no longer replaces terrain pixels with the unlit output.
   const background = sceneDepth.greaterThanEqual(0.99999);
-  const classCode = sceneGData
-    ? sceneGData.w.mul(3.0).add(0.5).floor().mod(2.0)
-    : float(0.0);
-  const isForward = classCode.greaterThan(0.5);
-  const deferredOrForward = isForward.select(originalSceneColor, deferredColor);
-  const baseColor = background.select(originalSceneColor, deferredOrForward);
+  const baseColor = background.select(originalSceneColor, deferredColor);
 
   const sceneColor = glass ? compositeNostalgiaGlass(baseColor, glass) : baseColor;
   return sharpen(sceneColor, 0.5, false);

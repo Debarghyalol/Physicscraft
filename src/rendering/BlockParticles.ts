@@ -86,8 +86,9 @@ export class BlockParticles {
     // `output` and `albedo` G-buffer attachments. This sprite has no `map` (it samples the
     // atlas through colorNode), so that was always plain white. Override both attachments
     // with the real particle colour. Alpha 1: texels below alphaTest are already discarded.
-    // `gdata` is left to the pass default: particles have no voxel-light attribute, so the
-    // final pass returns `albedo` unlit, i.e. exactly this already light-tinted colour.
+    // `gdata` is left to the pass default: particles have no voxel-light attribute, so it
+    // is written with alpha 1 (overwrite, "no voxel light") and the final pass returns
+    // `albedo` unlit, i.e. exactly this already light-tinted colour.
     const particleOut = vec4(particleColor, 1.0);
     this.material.mrtNode = mrt({ output: particleOut, albedo: particleOut });
 

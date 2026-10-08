@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BlendMode, MeshBasicNodeMaterial } from 'three/webgpu';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
 import { float, materialColor, mrt, uniform as tslUniform, vec4 } from 'three/tsl';
 import { voxelLightmap } from '../shaderpack/ShaderPackWebGPUFinalPass';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
@@ -621,13 +621,10 @@ export class VoxelWorld {
     const glass = vec4(tex.rgb.mul(lit), tex.a);
     const untouched = vec4(0.0, 0.0, 0.0, 0.0);
 
-    const node = mrt({ output: untouched, albedo: untouched, gdata: untouched, glass });
-    // Non-"output" attachments default to NoBlending; glass needs the material's blending
-    // on every attachment so the alpha-0 writes above leave terrain data intact.
-    node.setBlendMode('albedo', new BlendMode(THREE.MaterialBlending));
-    node.setBlendMode('gdata', new BlendMode(THREE.MaterialBlending));
-    node.setBlendMode('glass', new BlendMode(THREE.MaterialBlending));
-    return node;
+    // NOTE: three takes blend modes from the pass-level MRT (activateNostalgiaGBuffer),
+    // not from a material's mrtNode, so the "alpha 0 = untouched" trick relies on the pass
+    // setting MaterialBlending for albedo/gdata/glass.
+    return mrt({ output: untouched, albedo: untouched, gdata: untouched, glass });
   }
 
   private patchLightShader(mat: THREE.MeshBasicMaterial) {
