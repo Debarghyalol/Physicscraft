@@ -583,7 +583,7 @@ export class VoxelWorld {
       vertexColors: true,
       transparent: true,
       opacity: 1.0,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       depthTest: true,
       depthWrite: false,
       blending: THREE.NormalBlending,
