@@ -3,6 +3,7 @@ import { PlayerInput } from '../player/PlayerController';
 import { CameraViewMode, VoxelType } from '../types/physics';
 import { Camera, Wrench } from 'lucide-react';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
+import { getBlockIconFaces, renderIsometricBlockIcon } from '../resourcepack/blockIconFaces';
 
 export interface PlayerControlsOverlayProps {
   onInputUpdate: (input: PlayerInput) => void;
@@ -18,19 +19,6 @@ export interface PlayerControlsOverlayProps {
   onTogglePhysicsMaker?: () => void;
   isPhysicsMakerActive?: boolean;
 }
-
-const HOTBAR_TEXTURES: Record<VoxelType, { paths: string[]; fallback: string }> = {
-  [VoxelType.GRASS]: { paths: ['block/grass_block_side', 'block/grass_block'], fallback: 'grass_block_side' },
-  [VoxelType.DIRT]: { paths: ['block/dirt'], fallback: 'dirt' },
-  [VoxelType.STONE]: { paths: ['block/stone'], fallback: 'stone' },
-  [VoxelType.WOOD]: { paths: ['block/oak_log', 'block/oak_log_side'], fallback: 'oak_log' },
-  [VoxelType.LEAVES]: { paths: ['block/oak_leaves'], fallback: 'oak_leaves' },
-  [VoxelType.SAND]: { paths: ['block/sand'], fallback: 'sand' },
-  [VoxelType.COBBLESTONE]: { paths: ['block/cobblestone'], fallback: 'cobblestone' },
-  [VoxelType.GLASS]: { paths: ['block/glass'], fallback: 'glass' },
-  [VoxelType.GLOWSTONE]: { paths: ['block/glowstone'], fallback: 'glowstone' },
-  [VoxelType.TNT]: { paths: ['block/tnt_side', 'block/tnt'], fallback: 'tnt_side' },
-};
 
 export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
   { type: VoxelType.GRASS, name: 'Grass Block' },
@@ -51,7 +39,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
   switch (type) {
     case VoxelType.GRASS:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           {/* Top Face */}
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#58a032" />
           {/* Left Face (Dirt + Grass Overlay) */}
@@ -64,7 +52,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.DIRT:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#9c7353" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#866043" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#67472e" />
@@ -72,7 +60,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.STONE:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#8e8e8e" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#7a7a7a" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#5f5f5f" />
@@ -80,7 +68,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.WOOD:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#aa8555" />
           <ellipse cx="12" cy="6.7" rx="2.2" ry="1.2" fill="#7d5930" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#674d2b" />
@@ -89,7 +77,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.LEAVES:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#429e2e" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#328221" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#246416" />
@@ -97,7 +85,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.SAND:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#e8dc9e" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#d8cb8c" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#b9ab6d" />
@@ -105,7 +93,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.COBBLESTONE:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#787878" stroke="#484848" strokeWidth="0.5" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#626262" stroke="#484848" strokeWidth="0.5" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#4c4c4c" stroke="#363636" strokeWidth="0.5" />
@@ -113,7 +101,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.GLASS:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="rgba(220, 240, 255, 0.55)" stroke="#ffffff" strokeWidth="0.7" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="rgba(180, 215, 245, 0.45)" stroke="#ffffff" strokeWidth="0.7" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="rgba(150, 195, 235, 0.45)" stroke="#ffffff" strokeWidth="0.7" />
@@ -122,7 +110,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.GLOWSTONE:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#ffe08a" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#d9a441" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#b8832f" />
@@ -133,7 +121,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       );
     case VoxelType.TNT:
       return (
-        <svg viewBox="0 0 24 24" className="w-6 h-6 shape-rendering-crispEdges">
+        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
           <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#cc2a20" />
           <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#b0241b" />
           <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#8f1c15" />
@@ -144,7 +132,7 @@ const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
         </svg>
       );
     default:
-      return <div className="w-5 h-5 bg-neutral-500 rounded-xs" />;
+      return <div className="w-6 h-6 bg-neutral-500 rounded-xs" />;
   }
 };
 
@@ -184,6 +172,9 @@ const ControlImg: React.FC<{
   />
 );
 
+/** Size of a hotbar item at GUI scale 2 (a 16px item). The cube fills this box exactly. */
+const HOTBAR_ICON_SIZE = 32;
+
 const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
   const [src, setSrc] = useState<string | null>(null);
 
@@ -191,94 +182,14 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
     let alive = true;
 
     const refresh = async () => {
-      const entry = HOTBAR_TEXTURES[type];
-      if (!entry) return;
-
-      const sideTexture = await resourcePacks.getTexture(entry.paths);
-      if (!alive) return;
-
-      if (!sideTexture) {
-        setSrc(null);
-        return;
+      try {
+        // Same textures and biome tints the world uses, so icons match placed blocks.
+        const faces = await getBlockIconFaces(type);
+        if (!alive) return;
+        setSrc(faces ? renderIsometricBlockIcon(faces, HOTBAR_ICON_SIZE).toDataURL('image/png') : null);
+      } catch {
+        if (alive) setSrc(null);
       }
-
-      // Build the icon on a real canvas instead of nesting an <image> inside SVG.
-      // The old SVG approach made custom-pack textures render as a flat square on
-      // some mobile browsers because the data-URL image was not sampled reliably.
-      const topTexture = entry.paths.length > 1
-        ? await resourcePacks.getTexture([entry.paths[1]])
-        : sideTexture;
-      if (!alive) return;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = 40;
-      canvas.height = 40;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        setSrc(null);
-        return;
-      }
-
-      ctx.imageSmoothingEnabled = false;
-
-      const drawFace = (
-        texture: HTMLCanvasElement,
-        a: [number, number],
-        b: [number, number],
-        c: [number, number],
-      ) => {
-        // Map the source square onto a parallelogram/diamond using an affine transform.
-        const ax = a[0], ay = a[1];
-        const bx = b[0], by = b[1];
-        const cx = c[0], cy = c[1];
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(bx, by);
-        ctx.lineTo(bx + cx - ax, by + cy - ay);
-        ctx.lineTo(cx, cy);
-        ctx.closePath();
-        ctx.clip();
-
-        ctx.setTransform(
-          bx - ax, by - ay,
-          cx - ax, cy - ay,
-          ax, ay,
-        );
-        ctx.drawImage(texture, 0, 0, texture.width, texture.height, 0, 0, 1, 1);
-        ctx.restore();
-      };
-
-      // Top face: lighter, using the block's dedicated top texture when available.
-      drawFace(topTexture, [20, 2], [36, 10], [4, 10]);
-
-      // Left and right faces use the side texture, with Minecraft-like directional
-      // shading. The texture itself remains crisp; only a translucent shade is added.
-      drawFace(sideTexture, [4, 10], [20, 18], [4, 32]);
-      ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx.beginPath();
-      ctx.moveTo(4, 10);
-      ctx.lineTo(20, 18);
-      ctx.lineTo(20, 40);
-      ctx.lineTo(4, 32);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      drawFace(sideTexture, [20, 18], [36, 10], [20, 40]);
-      ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.26)';
-      ctx.beginPath();
-      ctx.moveTo(20, 18);
-      ctx.lineTo(36, 10);
-      ctx.lineTo(36, 32);
-      ctx.lineTo(20, 40);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      setSrc(canvas.toDataURL('image/png'));
     };
 
     void refresh();
@@ -291,7 +202,7 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
 
   if (!src) {
     return (
-      <div className="flex items-center justify-center" style={{ width: 32, height: 32 }}>
+      <div className="flex items-center justify-center" style={{ width: HOTBAR_ICON_SIZE, height: HOTBAR_ICON_SIZE }}>
         <IsometricVoxelIcon type={type} />
       </div>
     );
@@ -305,8 +216,8 @@ const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
       alt=""
       draggable={false}
       style={{
-        width: 40,
-        height: 40,
+        width: HOTBAR_ICON_SIZE,
+        height: HOTBAR_ICON_SIZE,
         imageRendering: 'pixelated',
       }}
     />
@@ -823,7 +734,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           className="relative flex items-center shadow-2xl shrink-0"
           style={{
             width: '364px',
-            height: '48px',
+            height: '44px',
             backgroundImage: 'var(--rp-hotbar, url(/textures/gui/hotbar.png))',
             backgroundSize: '100% 100%',
             imageRendering: 'pixelated',
@@ -837,7 +748,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
                 className="absolute pointer-events-none transition-all duration-100 ease-out"
                 style={{
                   width: '48px',
-                  height: '48px',
+                  height: '46px',
                   left: `${selectedIdx * 40 - 2}px`,
                   top: '-2px',
                   backgroundImage: 'var(--rp-hotbar-selection, url(/textures/gui/hotbar_selection.png))',

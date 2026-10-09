@@ -29,6 +29,18 @@ interface LoadedPack extends ResourcePackInfo {
 const DB_NAME = 'physicscraft-resourcepacks';
 const STORE = 'packs';
 
+/**
+ * The pack that ships with the game (public/packs). It is imported once on first run and enabled
+ * if the player has no other pack active. After that it behaves like any other pack: the player
+ * can disable or remove it, and it is not re-added.
+ */
+const BUNDLED_PACK = {
+  id: 'bundled-default-pack',
+  name: 'Default Pack (1.21.10)',
+  file: 'packs/default-resource-pack.zip',
+  seededKey: 'physicscraft-bundled-pack-seeded',
+};
+
 function openDb(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
     try {
@@ -85,6 +97,33 @@ class ResourcePackManagerImpl {
     this.ready = true;
     this.imageCache.clear();
     this.emit();
+
+    // First run: install the bundled pack. Done after the first emit so packs the player
+    // already has are applied immediately while the download happens.
+    if (await this.seedBundledPack()) this.emit();
+  }
+
+  /** Import and (if nothing else is enabled) enable the bundled pack once. Returns true if changed. */
+  private async seedBundledPack(): Promise<boolean> {
+    try {
+      if (localStorage.getItem(BUNDLED_PACK.seededKey) === BUNDLED_PACK.id) return false;
+      if (this.packs.some((p) => p.id === BUNDLED_PACK.id)) {
+        localStorage.setItem(BUNDLED_PACK.seededKey, BUNDLED_PACK.id);
+        return false;
+      }
+      const res = await fetch(`${import.meta.env.BASE_URL}${BUNDLED_PACK.file}`);
+      if (!res.ok) return false;
+      // An SPA host answers unknown paths with index.html; loadZip rejects that (no pack.mcmeta).
+      const pack = await this.loadZip(await res.blob(), BUNDLED_PACK.id, BUNDLED_PACK.name);
+      pack.enabled = !this.hasActivePacks();
+      pack.order = 0;
+      this.packs.push(pack);
+      await this.persist(pack);
+      localStorage.setItem(BUNDLED_PACK.seededKey, BUNDLED_PACK.id);
+      return true;
+    } catch {
+      return false; // offline / blocked storage: try again next launch
+    }
   }
 
   subscribe(fn: Listener): () => void {

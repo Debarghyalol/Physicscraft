@@ -41,7 +41,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onOpenPauseMenu }) => {
       <button
         type="button"
         onClick={onOpenPauseMenu}
-        className="pointer-events-auto absolute left-1/2 top-2 -translate-x-1/2 w-10 h-10 sm:w-11 sm:h-11 rounded-md bg-black/25 border border-white/10 shadow-lg transition active:scale-95"
+        // MCPE keeps the pause button small and tucked against the top-centre edge. The sprite is
+        // 20x16 and already carries its own bevel, so it is drawn at that aspect ratio with no
+        // extra border/background. The ::before pad keeps a finger-sized (44px) touch target.
+        className="pointer-events-auto absolute left-1/2 top-0.5 -translate-x-1/2 w-[30px] h-6 transition active:scale-95 before:absolute before:-inset-2 before:content-['']"
         style={{
           backgroundImage: "url('/textures/gui/130366.png')",
           backgroundRepeat: 'no-repeat',
