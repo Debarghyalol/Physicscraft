@@ -232,6 +232,7 @@ export class PlayerController {
 
     // 4. Sync 3D Player Model
     this.model.root.position.set(pos.x, pos.y - 0.9, pos.z);
+    this.model.setHeldItem(inventory.held);
     this.model.update(delta, this.currentSpeed, this.isGrounded && !this.isFlying, this.pitch, this.yaw);
 
     // 5. Update Camera Position & Orientation

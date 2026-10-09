@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
+import { HeldItemRig } from './HeldItemRig';
+import type { ItemDef } from '../inventory/items';
 
 /**
  * Helper to compute authentic Minecraft 64x64 skin UV coordinates
@@ -73,6 +75,7 @@ export class PlayerModel {
   private fpMeshes: THREE.Mesh[] = [];
   private fpSwingTime: number = 0; // 0..1 vanilla swingProgress
   private fpSwinging: boolean = false;
+  private heldItem = new HeldItemRig();
 
   private skinTexture: THREE.Texture;
   private layer1Material: THREE.MeshBasicMaterial;
@@ -288,11 +291,22 @@ export class PlayerModel {
     this.fpSwinging = false;
     this.fpSwingTime = 0;
     this.rightArmGroup.visible = !isFirstPerson;
-    this.fpRig.visible = isFirstPerson;
+    this.refreshFirstPersonVisibility();
     this.layer1Material.depthTest = !isFirstPerson;
     this.layer2Material.depthTest = !isFirstPerson;
     this.rightArmGroup.position.set(0.375, 1.5, 0);
     this.rightArmGroup.rotation.set(0, 0, 0);
+  }
+
+  /** Held item replaces the bare arm in first person, like vanilla. */
+  private refreshFirstPersonVisibility() {
+    this.fpRig.visible = this.isFirstPerson && !this.heldItem.hasItem;
+    this.heldItem.rig.visible = this.isFirstPerson && this.heldItem.hasItem;
+  }
+
+  public setHeldItem(def: ItemDef | null) {
+    this.heldItem.setItem(def);
+    this.refreshFirstPersonVisibility();
   }
 
   public setFrontViewMode(isFrontView: boolean) {
@@ -303,11 +317,13 @@ export class PlayerModel {
   public setLightTint(color: THREE.Color) {
     this.layer1Material.color.copy(color);
     this.layer2Material.color.copy(color);
+    this.heldItem.setTint(color);
   }
 
   /** Parent the first-person arm to the camera (camera must be in the scene) */
   public attachFirstPersonRig(camera: THREE.Camera) {
     camera.add(this.fpRig);
+    camera.add(this.heldItem.rig);
   }
 
   /** Swap Steve's skin for the enabled resource pack's (or restore the default). */
@@ -382,6 +398,7 @@ export class PlayerModel {
     const l = Math.sin(g * Math.PI);
     this.fpSwingYaw.rotation.y = l * 70 * (Math.PI / 180);
     this.fpSwingRoll.rotation.z = k * -20 * (Math.PI / 180);
+    this.heldItem.update(delta, s);
   }
 
   /**
@@ -462,6 +479,7 @@ export class PlayerModel {
   }
 
   public dispose() {
+    this.heldItem.dispose();
     this.skinTexture.dispose();
     this.layer1Material.dispose();
     this.layer2Material.dispose();
