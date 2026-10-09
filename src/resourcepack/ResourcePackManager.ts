@@ -106,7 +106,9 @@ class ResourcePackManagerImpl {
   /** Import and (if nothing else is enabled) enable the bundled pack once. Returns true if changed. */
   private async seedBundledPack(): Promise<boolean> {
     try {
-      if (localStorage.getItem(BUNDLED_PACK.seededKey) === BUNDLED_PACK.id) return false;
+      // The flag only stops re-seeding while packs exist; if browser storage lost the packs
+      // (IndexedDB evicted/unreadable) the game would be left with no textures at all.
+      if (localStorage.getItem(BUNDLED_PACK.seededKey) === BUNDLED_PACK.id && this.packs.length > 0) return false;
       if (this.packs.some((p) => p.id === BUNDLED_PACK.id)) {
         localStorage.setItem(BUNDLED_PACK.seededKey, BUNDLED_PACK.id);
         return false;
