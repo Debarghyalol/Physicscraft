@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useInventory } from '../inventory/useInventory';
 import { HOTBAR_SIZE, InventoryTab, inventory } from '../inventory/InventoryStore';
 import { ITEM_DEFS, getItemDef } from '../inventory/items';
-import { ItemIcon, StackCount, TextureIcon, usePackImage } from '../inventory/icons';
+import { BG, ItemIcon, StackCount, TextureIcon, usePackImage } from '../inventory/icons';
 
 /**
  * Java-edition creative inventory. Everything is laid out in the texture's own 195x136 pixel
@@ -73,7 +73,7 @@ const PlayerPreview: React.FC = () => {
     img.src = skin;
   }, [skin]);
   if (!url) return null;
-  return <img src={url} alt="" draggable={false} style={{ position: 'absolute', left: 81, top: 10, width: 16, height: 32, imageRendering: 'pixelated', pointerEvents: 'none' }} />;
+  return <div aria-hidden="true" style={{ position: 'absolute', left: 81, top: 10, width: 16, height: 32, backgroundImage: `url(${url})`, ...BG }} />;
 };
 
 const Slot: React.FC<{ x: number; y: number; itemId?: string | null; count?: number; onClick: (e: React.MouseEvent) => void; label?: string | null; setTooltip: (t: string | null) => void }> = ({ x, y, itemId, count, onClick, label, setTooltip }) => (

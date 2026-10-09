@@ -6,6 +6,14 @@ import { getItemDef } from './items';
 /** Icons are rendered at 32px (a 16px item at GUI scale 2) and displayed at any CSS size. */
 const ICON_PX = 32;
 
+/**
+ * Icons are drawn as CSS backgrounds rather than <img>: mobile browsers with "force dark mode"
+ * (e.g. MIUI) invert/wash out <img> elements, but leave background images alone.
+ */
+export const BG: React.CSSProperties = {
+  display: 'block', backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat', imageRendering: 'pixelated', pointerEvents: 'none',
+};
+
 function upscale(tex: HTMLCanvasElement, size = ICON_PX): string {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -77,11 +85,9 @@ export const ItemIcon: React.FC<{ itemId: string; size: number; style?: React.CS
     return <div style={{ width: size * 0.7, height: size * 0.7, margin: size * 0.15, background: '#888', ...style }} />;
   }
   return (
-    <img
-      src={url}
-      alt=""
-      draggable={false}
-      style={{ width: size, height: size, display: 'block', imageRendering: 'pixelated', pointerEvents: 'none', ...style }}
+    <div
+      aria-hidden="true"
+      style={{ width: size, height: size, backgroundImage: `url(${url})`, ...BG, ...style }}
     />
   );
 };
@@ -90,7 +96,7 @@ export const ItemIcon: React.FC<{ itemId: string; size: number; style?: React.CS
 export const TextureIcon: React.FC<{ paths: string[]; size: number }> = ({ paths, size }) => {
   const url = usePackImage(paths);
   if (!url) return null;
-  return <img src={url} alt="" draggable={false} style={{ width: size, height: size, imageRendering: 'pixelated', pointerEvents: 'none', display: 'block' }} />;
+  return <div aria-hidden="true" style={{ width: size, height: size, backgroundImage: `url(${url})`, ...BG }} />;
 };
 
 /** Stack size in the bottom-right of a slot, in the vanilla style (white with a dark shadow). */
