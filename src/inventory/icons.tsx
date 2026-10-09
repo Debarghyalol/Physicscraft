@@ -59,8 +59,8 @@ function useItemIconUrl(itemId: string): string | null {
         if (def?.voxel !== undefined) {
           const faces = await getBlockIconFaces(def.voxel);
           if (faces) out = renderIsometricBlockIcon(faces, ICON_PX).toDataURL('image/png');
-        } else if (def?.disc) {
-          const tex = await resourcePacks.getTexture([`item/music_disc_${def.disc}`]);
+        } else if (def?.disc || def?.texture) {
+          const tex = await resourcePacks.getTexture([def.texture ?? `item/music_disc_${def.disc}`]);
           if (tex) out = upscale(tex);
         }
         if (alive) setUrl(out);

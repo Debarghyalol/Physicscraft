@@ -35,13 +35,14 @@ const MENU_MUSIC = Object.values(
   })
 ) as string[];
 
-const DISC_MUSIC = Object.values(
-  import.meta.glob('../../sounds/records/*.ogg', {
-    eager: true,
-    query: '?url',
-    import: 'default',
-  })
-) as string[];
+// Keyed by source path: built URLs are content-hashed (13-abc123.ogg), so the disc id must be
+// matched against the original file name, not the final URL.
+const DISC_URLS = import.meta.glob('../../sounds/records/*.ogg', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>;
+const DISC_MUSIC = Object.values(DISC_URLS);
 
 const GAME_MUSIC = Object.values(
   import.meta.glob('../../sounds/music/game/*.ogg', {
@@ -149,7 +150,8 @@ class MusicEngine {
 
   public playDisc(id: MusicDiscId) {
     if (this.muted) return;
-    const url = DISC_MUSIC.find((candidate) => candidate.endsWith('/' + id + '.ogg'));
+    const key = Object.keys(DISC_URLS).find((path) => path.endsWith('/' + id + '.ogg'));
+    const url = key ? DISC_URLS[key] : undefined;
     if (!url) return;
     this.mode = 'disc';
     this.startTrack(url);

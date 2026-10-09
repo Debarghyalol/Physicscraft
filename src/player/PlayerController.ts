@@ -565,6 +565,9 @@ export class PlayerController {
   /**
    * Place selected voxel block using either aim ray or exact screen touch coords
    */
+  /** Wired up by the physics engine: light the TNT block at these cell coordinates. */
+  public onIgniteTNT: ((bx: number, by: number, bz: number) => void) | null = null;
+
   public placeBlock(input?: THREE.Ray | { x: number; y: number }): boolean {
     this.model.triggerSwing();
     let ray: THREE.Ray;
@@ -579,6 +582,15 @@ export class PlayerController {
     const hit = this.voxelWorld.raycastVoxel(ray, 7.0);
 
     const held = inventory.held;
+
+    // Flint and steel lights TNT; it never places anything.
+    if (held?.tool === 'flint_and_steel') {
+      if (hit?.voxelType === VoxelType.TNT && this.onIgniteTNT) {
+        this.onIgniteTNT(hit.blockX, hit.blockY, hit.blockZ);
+        return true;
+      }
+      return false;
+    }
 
     // A jukebox plays the disc in hand (or the last one held) instead of having a block placed against it.
     if (hit?.voxelType === VoxelType.JUKEBOX) {

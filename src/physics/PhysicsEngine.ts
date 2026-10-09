@@ -108,6 +108,7 @@ export class PhysicsEngine {
     const spawnZ = 6.0;
     const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
     this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
+    this.player.onIgniteTNT = (bx, by, bz) => this.igniteVoxelTNT(bx, by, bz, 1500);
     this.player.yaw = 0;
     this.player.pitch = -0.05;
 
@@ -569,6 +570,26 @@ export class PhysicsEngine {
     for (const sb of this.softBodies.values()) {
       sb.applyImpulse(epicenter, strength * 0.8, radius);
     }
+  }
+
+  /**
+   * Light a TNT block in the voxel world. The block vanishes immediately and blows up after
+   * `fuseMs`; TNT caught in the blast is lit with a short random fuse, so stacks chain-react.
+   */
+  public igniteVoxelTNT(bx: number, by: number, bz: number, fuseMs: number) {
+    if (this.voxelWorld.getVoxel(bx, by, bz) !== VoxelType.TNT) return;
+    this.voxelWorld.setVoxel(bx, by, bz, VoxelType.AIR);
+    const center = new THREE.Vector3(bx + 0.5, by + 0.5, bz + 0.5);
+    setTimeout(() => {
+      const r = 5;
+      for (let x = bx - r; x <= bx + r; x++)
+        for (let y = by - r; y <= by + r; y++)
+          for (let z = bz - r; z <= bz + r; z++)
+            if (Math.hypot(x - bx, y - by, z - bz) <= r && this.voxelWorld.getVoxel(x, y, z) === VoxelType.TNT) {
+              this.igniteVoxelTNT(x, y, z, 150 + Math.random() * 450);
+            }
+      this.triggerExplosion(center, 10.0, 85.0);
+    }, fuseMs);
   }
 
   public detonateTNT(entity: PhysicsEntity) {

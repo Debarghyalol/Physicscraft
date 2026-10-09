@@ -7,6 +7,9 @@ export interface ItemDef {
   maxStack: number;
   voxel?: VoxelType;
   disc?: MusicDiscId;
+  /** Flat item sprite (textures/<texture>.png) for non-block items. */
+  texture?: string;
+  tool?: 'flint_and_steel';
 }
 
 export interface ItemStack {
@@ -33,6 +36,7 @@ const BLOCKS: { voxel: VoxelType; name: string }[] = [
 /** Every item the game knows about, in creative-menu order. */
 export const ITEM_DEFS: ItemDef[] = [
   ...BLOCKS.map((b) => ({ id: `block:${b.voxel}`, name: b.name, maxStack: 64, voxel: b.voxel })),
+  { id: 'tool:flint_and_steel', name: 'Flint and Steel', maxStack: 1, texture: 'item/flint_and_steel', tool: 'flint_and_steel' },
   ...MUSIC_DISCS.map((d) => ({ id: `disc:${d.id}`, name: `Music Disc - ${d.title}`, maxStack: 1, disc: d.id })),
 ];
 

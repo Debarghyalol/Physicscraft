@@ -28,6 +28,11 @@ class InventoryStore {
   constructor() {
     [VoxelType.GRASS, VoxelType.DIRT, VoxelType.STONE, VoxelType.WOOD, VoxelType.LEAVES, VoxelType.SAND, VoxelType.COBBLESTONE, VoxelType.GLASS, VoxelType.GLOWSTONE]
       .forEach((v, i) => (this.slots[i] = { id: blockItemId(v), count: 64 }));
+    // A few extras in the main inventory so the tools are within reach from the start.
+    this.slots[9] = { id: 'tool:flint_and_steel', count: 1 };
+    this.slots[10] = { id: 'disc:13', count: 1 };
+    this.slots[11] = { id: blockItemId(VoxelType.TNT), count: 64 };
+    this.slots[12] = { id: blockItemId(VoxelType.JUKEBOX), count: 64 };
   }
 
   subscribe = (fn: Listener) => {
