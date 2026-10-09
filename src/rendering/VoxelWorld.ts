@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { float, materialColor, mrt, uniform as tslUniform, vec4 } from 'three/tsl';
+import { float, mrt, uniform as tslUniform, uniformTexture, vec4 } from 'three/tsl';
 import { voxelLightmap } from '../shaderpack/ShaderPackWebGPUFinalPass';
+import { buildGlassConnectTables, glassConnectMask } from './glassConnect';
+import { createConnectedGlassUV } from './GlassConnectedUV';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
@@ -86,6 +88,9 @@ const FACE_INFO: FaceVertexInfo[][] = FACE_VERTS.map((verts, f) => {
   });
 });
 
+/** In-plane neighbour offsets per face, used to connect adjacent glass textures. */
+const GLASS_CONNECT = buildGlassConnectTables(FACE_INFO);
+
 /** Growable typed-array geometry builder (reused between subchunk builds, no per-face allocations). */
 class MeshBuilder {
   pos: Float32Array;
@@ -93,7 +98,8 @@ class MeshBuilder {
   col: Float32Array;
   lit: Float32Array;
   normal: Float32Array;
-  materialClass: Float32Array;
+  /** Connected-glass edge/corner mask (see glassConnect.ts); 0 for non-glass faces. */
+  ctm: Float32Array;
   idx: Uint32Array;
   cap: number; // capacity in faces
   vc = 0;
@@ -106,7 +112,7 @@ class MeshBuilder {
     this.col = new Float32Array(cap * 12);
     this.lit = new Float32Array(cap * 8);
     this.normal = new Float32Array(cap * 12);
-    this.materialClass = new Float32Array(cap * 4);
+    this.ctm = new Float32Array(cap * 4);
     this.idx = new Uint32Array(cap * 6);
   }
 
@@ -130,7 +136,7 @@ class MeshBuilder {
     this.col = grow(this.col, cap * 12);
     this.lit = grow(this.lit, cap * 8);
     this.normal = grow(this.normal, cap * 12);
-    this.materialClass = grow(this.materialClass, cap * 4);
+    this.ctm = grow(this.ctm, cap * 4);
     this.idx = grow(this.idx, cap * 6);
     this.cap = cap;
   }
@@ -143,12 +149,12 @@ class MeshBuilder {
     const uv = g.getAttribute('uv') as THREE.BufferAttribute;
     const light = new THREE.BufferAttribute(this.lit.slice(0, this.vc * 2), 2);
     const normal = new THREE.BufferAttribute(this.normal.slice(0, this.vc * 3), 3);
-    const materialClass = new THREE.BufferAttribute(this.materialClass.slice(0, this.vc), 1);
+    const ctm = new THREE.BufferAttribute(this.ctm.slice(0, this.vc), 1);
     g.setAttribute('color', color);
     g.setAttribute('aLight', light);
     g.setAttribute('normal', normal);
-    // 0 = opaque/cutout G-buffer surface, 1 = forward translucent terrain.
-    g.setAttribute('aMaterialClass', materialClass);
+    // Connected-glass mask: which neighbours of a glass face are glass too (0 for other faces).
+    g.setAttribute('aCtm', ctm);
 
     // Shader-pack aliases. The Nostalgia terrain program uses Minecraft's
     // legacy attribute names; keep the vanilla renderer's attributes intact
@@ -277,6 +283,10 @@ export class VoxelWorld {
   private lightUniforms = { uSkyDim: { value: 0 } };
   /** TSL mirror of uSkyDim, used by the glass MRT output (node materials ignore onBeforeCompile). */
   private skyDimNode = tslUniform(0);
+  /** Atlas sampled by the glass layer. Kept in sync with the live atlas on resource-pack changes. */
+  private glassAtlasNode = uniformTexture();
+  /** Day/night world tint for glass (mirrors material.color, which the glass MRT output bypasses). */
+  private glassTintNode = tslUniform(new THREE.Color(1, 1, 1));
   public currentUnderground: number = 0.0;
 
   constructor(scene: THREE.Scene) {
@@ -615,10 +625,19 @@ export class VoxelWorld {
     const voxelLit = curve(skyLevel).pow(2.2).max(curve(light.y).pow(2.2)).max(0.03);
     const lit = light.z.greaterThan(0.5).select(voxelLit, float(1.0));
 
-    // materialColor = material.color * atlas map (rgba): pane tint with real texture alpha.
-    // vec4() is a no-op for the (runtime) vec4 and pads alpha=1 if the map were ever absent.
-    const tex = vec4(materialColor as any) as any;
-    const glass = vec4(tex.rgb.mul(lit), tex.a);
+    // Atlas sample with connected-glass UVs (frame removed on edges shared with other glass),
+    // tinted like the other voxel materials. Keeps the texture's real alpha.
+    this.glassAtlasNode.value = this.atlasTexture;
+    const sampled = this.glassAtlasNode.sample(
+      createConnectedGlassUV({
+        columns: 16,
+        innerMin: ATLAS_INNER_MIN,
+        innerMax: ATLAS_INNER_MAX,
+        innerMinV: ATLAS_INNER_MIN_V,
+        innerMaxV: ATLAS_INNER_MAX_V,
+      }),
+    ) as any;
+    const glass = vec4(sampled.rgb.mul(this.glassTintNode).mul(lit), sampled.a);
     const untouched = vec4(0.0, 0.0, 0.0, 0.0);
 
     // NOTE: three takes blend modes from the pass-level MRT (activateNostalgiaGBuffer),
@@ -776,6 +795,7 @@ export class VoxelWorld {
     this.material.map = tex;
     this.cutoutMaterial.map = tex;
     this.transparentMaterial.map = tex;
+    this.glassAtlasNode.value = tex;
     this.material.needsUpdate = true;
     this.cutoutMaterial.needsUpdate = true;
     this.transparentMaterial.needsUpdate = true;
@@ -793,6 +813,7 @@ export class VoxelWorld {
     this.material.color.copy(color);
     this.cutoutMaterial.color.copy(color);
     this.transparentMaterial.color.copy(color);
+    this.glassTintNode.value.copy(color);
   }
 
   public setWireframe(enabled: boolean) {
@@ -1426,9 +1447,18 @@ export class VoxelWorld {
                 renderClass === 'cutout'
                   ? nb !== 0 && nb !== VoxelType.LEAVES
                   : renderClass === 'translucent'
-                    ? nb !== 0 && nb !== VoxelType.GLASS
+                    // Connected glass: the face shared with another glass block is hidden (so a
+                    // glass wall is one seamless sheet), and so is a face pressed against an
+                    // opaque solid. A face against leaves stays: the leaf cutout path culls its
+                    // own side, so culling both here would leave a see-through hole.
+                    ? nb === VoxelType.GLASS || (nb !== 0 && nb !== VoxelType.LEAVES)
                     : nb !== 0 && nb !== VoxelType.GLASS && nb !== VoxelType.LEAVES;
               if (neighbourOccludes) continue;
+
+              // Which neighbours of this glass face are glass too; drives the seamless texture.
+              const ctmMask = renderClass === 'translucent'
+                ? glassConnectMask(B, pi, f, GLASS_CONNECT, VoxelType.GLASS)
+                : 0;
 
               const tileCol = this.getVoxelFaceTile(voxel, f)[0];
               const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
@@ -1469,7 +1499,7 @@ export class VoxelWorld {
                 mb.normal[o * 3] = FACE_NORMALS[f][0];
                 mb.normal[o * 3 + 1] = FACE_NORMALS[f][1];
                 mb.normal[o * 3 + 2] = FACE_NORMALS[f][2];
-                mb.materialClass[o] = renderClass === 'translucent' ? 1 : 0;
+                mb.ctm[o] = ctmMask;
                 const shade = SHADE_LINEAR[f * 4 + aoLevel];
                 mb.col[o * 3] = shade;
                 mb.col[o * 3 + 1] = shade;
