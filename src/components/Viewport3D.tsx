@@ -9,12 +9,11 @@ import {
   BlockMaterial,
   StructurePreset,
   CameraViewMode,
-  VoxelType,
 } from '../types/physics';
 import { EnvironmentManager } from '../rendering/EnvironmentManager';
 import { PlayerControlsOverlay } from './PlayerControlsOverlay';
-import { InventoryOverlay } from './InventoryOverlay';
-import { MusicDiscId } from '../audio/MusicEngine';
+import { CreativeInventoryScreen } from './CreativeInventoryScreen';
+import { inventory } from '../inventory/InventoryStore';
 import { PlayerInput } from '../player/PlayerController';
 import { GraphicsSettings } from './SettingsModal';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
@@ -53,9 +52,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
   // Camera & Player State (Starts in FIRST PERSON as requested)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const [selectedVoxel, setSelectedVoxel] = useState<VoxelType>(VoxelType.STONE);
-  const [selectedDisc, setSelectedDisc] = useState<MusicDiscId>('13');
-  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [currentFps, setCurrentFps] = useState(60);
   const fpsRef = useRef(60);
   const [isFlying, setIsFlying] = useState(false);
@@ -492,7 +488,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       if (event.key.toLowerCase() === 'e') {
         event.preventDefault();
-        setInventoryOpen((open) => !open);
+        inventory.toggle();
       }
     };
     window.addEventListener('keydown', handleInventoryKey);
@@ -529,25 +525,20 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const handleActionPlace = useCallback(
     (coords?: { x: number; y: number }) => {
       if (engineRef.current?.player) {
-        engineRef.current.player.selectedVoxel = selectedVoxel;
-        engineRef.current.player.selectedDisc = selectedDisc;
         engineRef.current.player.placeBlock(coords);
       }
     },
-    [selectedVoxel, selectedDisc]
+    []
   );
 
-  // Action: Select Voxel
-  const handleSelectVoxel = useCallback((v: VoxelType) => {
-    setSelectedVoxel(v);
-    if (engineRef.current?.player) {
-      engineRef.current.player.selectedVoxel = v;
-    }
-  }, []);
-
-  const handleSelectDisc = useCallback((disc: MusicDiscId) => {
-    setSelectedDisc(disc);
-    if (engineRef.current?.player) engineRef.current.player.selectedDisc = disc;
+  // Opening the inventory releases the mouse so the cursor can be used.
+  useEffect(() => {
+    const off = inventory.subscribe(() => {
+      if (inventory.open && document.pointerLockElement) document.exitPointerLock();
+    });
+    return () => {
+      off();
+    };
   }, []);
 
   // Update touch aim coordinates on player
@@ -586,14 +577,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       {/* 3D WebGPU Canvas */}
       <div ref={containerRef} className="w-full h-full cursor-crosshair" />
 
-      <InventoryOverlay
-        open={inventoryOpen}
-        onClose={() => setInventoryOpen(false)}
-        selectedVoxel={selectedVoxel}
-        onSelectVoxel={handleSelectVoxel}
-        selectedDisc={selectedDisc}
-        onSelectDisc={handleSelectDisc}
-      />
+      <CreativeInventoryScreen />
 
       {/* Cinematic Viewport Frame Mode Overlay (Brackets + HUD) */}
       <ViewportFrameOverlay enabled={graphics.viewportFrameMode} fps={currentFps} />
@@ -614,8 +598,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onToggleViewMode={onToggleViewMode}
         isFlying={isFlying}
         viewMode={viewMode}
-        selectedVoxel={selectedVoxel}
-        onSelectVoxel={handleSelectVoxel}
       />
     </div>
   );

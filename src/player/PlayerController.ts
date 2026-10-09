@@ -3,7 +3,8 @@ import { PlayerModel } from './PlayerModel';
 import { VoxelWorld } from '../rendering/VoxelWorld';
 import { CameraViewMode, VoxelType } from '../types/physics';
 import { soundManager } from '../audio/SoundEffects';
-import { musicEngine, MusicDiscId } from '../audio/MusicEngine';
+import { musicEngine } from '../audio/MusicEngine';
+import { inventory } from '../inventory/InventoryStore';
 
 export interface PlayerInput {
   moveForward: number; // -1 to 1
@@ -53,7 +54,6 @@ export class PlayerController {
 
   // Creative-style flight (toggle by double-tapping jump)
   /** Disc played when a jukebox is used (set from the inventory by the viewport). */
-  public selectedDisc: MusicDiscId = '13';
   public isFlying: boolean = false;
   public onFlyingChange?: (flying: boolean) => void;
   // Vanilla creative flight: ~10.89 blocks/s horizontally (flying acceleration 0.049 with
@@ -64,7 +64,6 @@ export class PlayerController {
   private lastJumpPressTime: number = -10000;
 
   // Selected voxel for building
-  public selectedVoxel: VoxelType = VoxelType.STONE;
 
   // Minecraft-style wireframe block highlight outline
   public targetHighlightMesh: THREE.LineSegments;
@@ -579,11 +578,17 @@ export class PlayerController {
 
     const hit = this.voxelWorld.raycastVoxel(ray, 7.0);
 
-    // A jukebox is interacted with instead of placing a block against it.
-    if (hit?.voxelType === VoxelType.JUKEBOX) {
-      musicEngine.playDisc(this.selectedDisc);
+    const held = inventory.held;
+
+    // A jukebox plays the disc in hand instead of having a block placed against it.
+    if (hit?.voxelType === VoxelType.JUKEBOX && held?.disc) {
+      musicEngine.playDisc(held.disc);
       return true;
     }
+
+    // Only block items can be placed (discs and empty hands do nothing).
+    if (!held || held.voxel === undefined) return false;
+    const voxel = held.voxel;
 
     if (hit) {
       const placeX = hit.blockX + hit.normal.x;
@@ -595,8 +600,8 @@ export class PlayerController {
         return false;
       }
 
-      this.voxelWorld.setVoxel(placeX, placeY, placeZ, this.selectedVoxel);
-      soundManager.playBlockPlace(this.getSoundMaterial(this.selectedVoxel));
+      this.voxelWorld.setVoxel(placeX, placeY, placeZ, voxel);
+      soundManager.playBlockPlace(this.getSoundMaterial(voxel));
       return true;
     }
     return false;

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PlayerInput } from '../player/PlayerController';
-import { CameraViewMode, VoxelType } from '../types/physics';
+import { CameraViewMode } from '../types/physics';
 import { Camera, Wrench } from 'lucide-react';
-import { resourcePacks } from '../resourcepack/ResourcePackManager';
-import { getBlockIconFaces, renderIsometricBlockIcon } from '../resourcepack/blockIconFaces';
+import { inventory, HOTBAR_SIZE } from '../inventory/InventoryStore';
+import { useInventory } from '../inventory/useInventory';
+import { ItemIcon, StackCount } from '../inventory/icons';
+import { getItemDef } from '../inventory/items';
 
 export interface PlayerControlsOverlayProps {
   onInputUpdate: (input: PlayerInput) => void;
@@ -14,127 +16,9 @@ export interface PlayerControlsOverlayProps {
   onToggleViewMode: () => void;
   isFlying?: boolean;
   viewMode: CameraViewMode;
-  selectedVoxel: VoxelType;
-  onSelectVoxel: (v: VoxelType) => void;
   onTogglePhysicsMaker?: () => void;
   isPhysicsMakerActive?: boolean;
 }
-
-export const HOTBAR_ITEMS: { type: VoxelType; name: string }[] = [
-  { type: VoxelType.GRASS, name: 'Grass Block' },
-  { type: VoxelType.DIRT, name: 'Dirt' },
-  { type: VoxelType.STONE, name: 'Stone' },
-  { type: VoxelType.WOOD, name: 'Oak Wood' },
-  { type: VoxelType.LEAVES, name: 'Oak Leaves' },
-  { type: VoxelType.SAND, name: 'Sand' },
-  { type: VoxelType.COBBLESTONE, name: 'Cobblestone' },
-  { type: VoxelType.GLASS, name: 'Glass' },
-  { type: VoxelType.GLOWSTONE, name: 'Glowstone' },
-];
-
-/**
- * Authentic 3D Isometric Voxel Block Icon with proper Minecraft GUI proportions
- */
-const IsometricVoxelIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
-  switch (type) {
-    case VoxelType.GRASS:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          {/* Top Face */}
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#58a032" />
-          {/* Left Face (Dirt + Grass Overlay) */}
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#866043" />
-          <polygon points="4,6.5 12,11 12,14.5 4,10" fill="#4d8c2c" />
-          {/* Right Face (Dirt + Grass Overlay, shaded) */}
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#6d4c33" />
-          <polygon points="12,11 20,6.5 20,10 12,14.5" fill="#3f7523" />
-        </svg>
-      );
-    case VoxelType.DIRT:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#9c7353" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#866043" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#67472e" />
-        </svg>
-      );
-    case VoxelType.STONE:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#8e8e8e" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#7a7a7a" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#5f5f5f" />
-        </svg>
-      );
-    case VoxelType.WOOD:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#aa8555" />
-          <ellipse cx="12" cy="6.7" rx="2.2" ry="1.2" fill="#7d5930" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#674d2b" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#4d391d" />
-        </svg>
-      );
-    case VoxelType.LEAVES:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#429e2e" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#328221" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#246416" />
-        </svg>
-      );
-    case VoxelType.SAND:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#e8dc9e" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#d8cb8c" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#b9ab6d" />
-        </svg>
-      );
-    case VoxelType.COBBLESTONE:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#787878" stroke="#484848" strokeWidth="0.5" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#626262" stroke="#484848" strokeWidth="0.5" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#4c4c4c" stroke="#363636" strokeWidth="0.5" />
-        </svg>
-      );
-    case VoxelType.GLASS:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="rgba(220, 240, 255, 0.55)" stroke="#ffffff" strokeWidth="0.7" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="rgba(180, 215, 245, 0.45)" stroke="#ffffff" strokeWidth="0.7" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="rgba(150, 195, 235, 0.45)" stroke="#ffffff" strokeWidth="0.7" />
-          <line x1="8" y1="11" x2="16" y2="17" stroke="#ffffff" strokeWidth="0.9" strokeLinecap="round" />
-        </svg>
-      );
-    case VoxelType.GLOWSTONE:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#ffe08a" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#d9a441" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#b8832f" />
-          <rect x="9" y="5.5" width="2" height="2" fill="#fff6c8" />
-          <rect x="6" y="12" width="2" height="2" fill="#fff0a8" />
-          <rect x="15" y="13" width="2" height="2" fill="#f7d36b" />
-        </svg>
-      );
-    case VoxelType.TNT:
-      return (
-        <svg viewBox="0 0 24 24" className="w-8 h-8 shape-rendering-crispEdges">
-          <polygon points="12,2.5 20,6.5 12,11 4,6.5" fill="#cc2a20" />
-          <polygon points="4,6.5 12,11 12,22 4,17.5" fill="#b0241b" />
-          <polygon points="12,11 20,6.5 20,17.5 12,22" fill="#8f1c15" />
-          {/* TNT white band */}
-          <polygon points="4,11.5 12,16 12,18 4,13.5" fill="#ffffff" />
-          <polygon points="12,16 20,11.5 20,13.5 12,18" fill="#e0e0e0" />
-          <text x="6" y="16.5" fill="#000000" fontSize="3" fontWeight="bold" fontFamily="monospace">TNT</text>
-        </svg>
-      );
-    default:
-      return <div className="w-6 h-6 bg-neutral-500 rounded-xs" />;
-  }
-};
 
 const CONTROLS_PATH = '/textures/gui/controls';
 
@@ -172,58 +56,6 @@ const ControlImg: React.FC<{
   />
 );
 
-/** Size of a hotbar item at GUI scale 2 (a 16px item). The cube fills this box exactly. */
-const HOTBAR_ICON_SIZE = 32;
-
-const ResourcePackBlockIcon: React.FC<{ type: VoxelType }> = ({ type }) => {
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-
-    const refresh = async () => {
-      try {
-        // Same textures and biome tints the world uses, so icons match placed blocks.
-        const faces = await getBlockIconFaces(type);
-        if (!alive) return;
-        setSrc(faces ? renderIsometricBlockIcon(faces, HOTBAR_ICON_SIZE).toDataURL('image/png') : null);
-      } catch {
-        if (alive) setSrc(null);
-      }
-    };
-
-    void refresh();
-    const unsubscribe = resourcePacks.subscribe(refresh);
-    return () => {
-      alive = false;
-      unsubscribe();
-    };
-  }, [type]);
-
-  if (!src) {
-    return (
-      <div className="flex items-center justify-center" style={{ width: HOTBAR_ICON_SIZE, height: HOTBAR_ICON_SIZE }}>
-        <IsometricVoxelIcon type={type} />
-      </div>
-    );
-  }
-
-  return (
-    <img
-      aria-hidden="true"
-      className="block shrink-0"
-      src={src}
-      alt=""
-      draggable={false}
-      style={{
-        width: HOTBAR_ICON_SIZE,
-        height: HOTBAR_ICON_SIZE,
-        imageRendering: 'pixelated',
-      }}
-    />
-  );
-};
-
 export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onInputUpdate,
   onLookDelta,
@@ -231,12 +63,11 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onActionMine,
   onActionPlace,
   onToggleViewMode,
-  selectedVoxel,
-  onSelectVoxel,
   onTogglePhysicsMaker,
   isPhysicsMakerActive,
   isFlying = false,
 }) => {
+  const inv = useInventory();
   const isMobile = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
   // PC Keyboard & Pointer Lock
@@ -308,6 +139,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   // Keyboard Event Listeners for PC
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+    if (inventory.open) return;
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
 
       keysDown.current.add(e.code);
@@ -320,8 +152,8 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
       // Hotbar 1-9
       if (e.code.startsWith('Digit')) {
         const num = parseInt(e.code.replace('Digit', ''), 10);
-        if (num >= 1 && num <= HOTBAR_ITEMS.length) {
-          onSelectVoxel(HOTBAR_ITEMS[num - 1].type);
+        if (num >= 1 && num <= HOTBAR_SIZE) {
+          inventory.select(num - 1);
         }
       }
 
@@ -340,7 +172,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [emitInput, onSelectVoxel, onToggleViewMode]);
+  }, [emitInput, onToggleViewMode]);
 
   // PC Pointer Lock mouse look listener
   useEffect(() => {
@@ -741,54 +573,63 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           }}
         >
           {/* Active Hotbar Selection Cursor */}
-          {(() => {
-            const selectedIdx = Math.max(0, HOTBAR_ITEMS.findIndex((it) => it.type === selectedVoxel));
-            return (
-              <div
-                className="absolute pointer-events-none transition-all duration-100 ease-out"
-                style={{
-                  width: '48px',
-                  height: '46px',
-                  left: `${selectedIdx * 40 - 2}px`,
-                  top: '-2px',
-                  backgroundImage: 'var(--rp-hotbar-selection, url(/textures/gui/hotbar_selection.png))',
-                  backgroundSize: '100% 100%',
-                  imageRendering: 'pixelated',
-                  zIndex: 10,
-                }}
-              />
-            );
-          })()}
+          <div
+            className="absolute pointer-events-none transition-all duration-100 ease-out"
+            style={{
+              width: '48px',
+              height: '46px',
+              left: `${inv.selected * 40 - 2}px`,
+              top: '-2px',
+              backgroundImage: 'var(--rp-hotbar-selection, url(/textures/gui/hotbar_selection.png))',
+              backgroundSize: '100% 100%',
+              imageRendering: 'pixelated',
+              zIndex: 10,
+            }}
+          />
 
-          {/* 9 Hotbar Slots */}
-          {HOTBAR_ITEMS.map((item, idx) => {
+          {/* 9 Hotbar Slots (driven by the inventory store) */}
+          {Array.from({ length: HOTBAR_SIZE }, (_, idx) => {
+            const stack = inv.slots[idx];
             return (
               <button
-                key={item.type}
+                key={idx}
                 onTouchStart={(e) => {
                   e.stopPropagation();
-                  onSelectVoxel(item.type);
+                  inventory.select(idx);
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSelectVoxel(item.type);
+                  inventory.select(idx);
                 }}
                 className="relative flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
-                style={{
-                  width: '40px',
-                  height: '44px',
-                  marginLeft: idx === 0 ? '2px' : '0px',
-                }}
-                title={`${idx + 1}: ${item.name}`}
+                style={{ width: '40px', height: '44px', marginLeft: idx === 0 ? '2px' : '0px' }}
+                title={stack ? `${idx + 1}: ${getItemDef(stack.id)?.name ?? ''}` : `${idx + 1}`}
               >
-                <div className="flex items-center justify-center w-full h-full">
-                  <ResourcePackBlockIcon type={item.type} />
-                </div>
+                {stack && (
+                  <div className="relative" style={{ width: 32, height: 32 }}>
+                    <ItemIcon itemId={stack.id} size={32} />
+                    <StackCount count={stack.count} size={16} />
+                  </div>
+                )}
               </button>
             );
           })}
         </div>
       </div>
+    <button
+      type="button"
+      onTouchStart={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        inventory.toggle();
+      }}
+      className="ui-touch-interactive absolute bottom-2 sm:bottom-3 z-30 pointer-events-auto w-10 h-11 text-white text-xl leading-none active:scale-95"
+      style={{ left: 'calc(50% + 190px)', backgroundImage: 'var(--rp-hotbar-selection, none)', backgroundSize: '100% 100%', imageRendering: 'pixelated', textShadow: '2px 2px #3f3f3f' }}
+      title="Inventory (E)"
+      aria-label="Open inventory"
+    >
+      …
+    </button>
     </div>
   );
 };
