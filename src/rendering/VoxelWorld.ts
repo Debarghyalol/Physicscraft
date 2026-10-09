@@ -537,6 +537,12 @@ export class VoxelWorld {
       c.fillRect(ox + 11, oy + 10, 2, 2);
     });
 
+    // 15,0: Jukebox top fallback
+    drawTile(15, 0, (c, ox, oy) => {
+      c.fillStyle = '#8a6337'; c.fillRect(ox, oy, 16, 16);
+      c.fillStyle = '#3d2a18'; c.fillRect(ox + 5, oy + 5, 6, 6);
+    });
+
     // 14,0: Jukebox fallback texture (custom resource packs override this)
     drawTile(14, 0, (c, ox, oy) => {
       c.fillStyle = '#6b4b2b'; c.fillRect(ox, oy, 16, 16);
@@ -744,7 +750,8 @@ export class VoxelWorld {
       [11, ['block/gold_block'], null],
       [12, ['block/glass'], null],
       [13, ['block/glowstone'], null],
-      [14, ['block/jukebox'], null],
+      [14, ['block/jukebox_side', 'block/jukebox'], null],
+      [15, ['block/jukebox_top', 'block/jukebox_side', 'block/jukebox'], null],
     ];
 
     const loaded = await Promise.all(
@@ -862,7 +869,7 @@ export class VoxelWorld {
       case VoxelType.GLOWSTONE:
         return [13, 0];
       case VoxelType.JUKEBOX:
-        return [14, 0];
+        return faceIndex === 2 ? [15, 0] : [14, 0]; // top vs side/bottom
       default:
         return [0, 0];
     }

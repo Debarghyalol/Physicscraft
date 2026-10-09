@@ -580,9 +580,9 @@ export class PlayerController {
 
     const held = inventory.held;
 
-    // A jukebox plays the disc in hand instead of having a block placed against it.
-    if (hit?.voxelType === VoxelType.JUKEBOX && held?.disc) {
-      musicEngine.playDisc(held.disc);
+    // A jukebox plays the disc in hand (or the last one held) instead of having a block placed against it.
+    if (hit?.voxelType === VoxelType.JUKEBOX) {
+      musicEngine.playDisc(held?.disc ?? inventory.lastDisc);
       return true;
     }
 

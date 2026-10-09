@@ -1,5 +1,6 @@
 import { VoxelType } from '../types/physics';
 import { getItemDef, blockItemId, ItemDef, ItemStack } from './items';
+import type { MusicDiscId } from '../audio/MusicEngine';
 
 export type InventoryTab = 'items' | 'search' | 'inventory';
 
@@ -20,6 +21,8 @@ class InventoryStore {
   tab: InventoryTab = 'items';
   search = '';
   version = 0;
+  /** Last disc held, so a jukebox still plays something when a block is in hand. */
+  lastDisc: MusicDiscId = '13';
   private listeners = new Set<Listener>();
 
   constructor() {
@@ -33,6 +36,8 @@ class InventoryStore {
   };
   getVersion = () => this.version;
   private emit() {
+    const h = this.held;
+    if (h?.disc) this.lastDisc = h.disc;
     this.version++;
     this.listeners.forEach((l) => l());
   }
