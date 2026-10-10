@@ -1,3 +1,4 @@
+import { MobManager } from '../mobs/MobManager';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
@@ -44,6 +45,7 @@ export class PhysicsEngine {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
   public voxelWorld!: VoxelWorld;
+  public mobs!: MobManager;
   public player!: PlayerController;
   public selectionRenderer: SelectionBoxRenderer;
   public blockParticles!: BlockParticles;
@@ -108,6 +110,9 @@ export class PhysicsEngine {
     const spawnZ = 6.0;
     const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
     this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
+    this.mobs = new MobManager(this.scene, this.voxelWorld);
+    if (import.meta.env.DEV) (window as any).__engine = this; // dev-only debugging hook
+    this.player.mobManager = this.mobs;
     this.player.onIgniteTNT = (bx, by, bz) => this.igniteVoxelTNT(bx, by, bz, 1500);
     this.player.yaw = 0;
     this.player.pitch = -0.05;
@@ -1438,6 +1443,7 @@ export class PhysicsEngine {
       const pos = this.player.getPosition();
       this.voxelWorld.updatePlayerPosition(pos.x, pos.z);
       this.voxelWorld.update();
+      this.mobs.update(scaledDt, pos);
     }
 
     // Apply drag spring force if a rigid body is grabbed

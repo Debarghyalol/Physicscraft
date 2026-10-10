@@ -94,6 +94,21 @@ class SoundSynthesizer {
       import: 'default',
     })) as string[],
 
+    pig_say: Object.values(import.meta.glob('../../sounds/mob/pig/say*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    pig_death: Object.values(import.meta.glob('../../sounds/mob/pig/death.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    pig_step: Object.values(import.meta.glob('../../sounds/mob/pig/step*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
     ui_button: Object.values(import.meta.glob('../../sounds/random/click_stereo.ogg', {
       eager: true,
       query: '?url',
@@ -139,6 +154,12 @@ class SoundSynthesizer {
     void audio.play().catch(() => {
       this.busyAudio.delete(audio!);
     });
+  }
+
+  /** Pig vocals/footsteps (volume already attenuated by distance). */
+  public playPigSound(kind: 'say' | 'death' | 'step', volume: number = 1) {
+    if (this.isMuted || volume <= 0.01) return;
+    this.playAssetGroup(`pig_${kind}` as keyof typeof this.soundAssets, volume, 0.9, 1.1);
   }
 
   private playAssetGroup(

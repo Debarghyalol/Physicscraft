@@ -5,6 +5,7 @@ import { CameraViewMode, VoxelType } from '../types/physics';
 import { soundManager } from '../audio/SoundEffects';
 import { musicEngine } from '../audio/MusicEngine';
 import { inventory } from '../inventory/InventoryStore';
+import type { MobManager } from '../mobs/MobManager';
 
 export interface PlayerInput {
   moveForward: number; // -1 to 1
@@ -535,6 +536,13 @@ export class PlayerController {
 
     const hit = this.voxelWorld.raycastVoxel(ray, 7.0);
 
+    // Hitting a mob (reach 4) takes priority over a block behind it.
+    const mobHit = this.mobManager?.raycast(ray, 4.0);
+    if (mobHit && (!hit || mobHit.dist < hit.point.distanceTo(ray.origin))) {
+      mobHit.pig.hurt(1, this.position);
+      return true;
+    }
+
     if (hit && hit.voxelType !== VoxelType.BEDROCK) {
       this.voxelWorld.setVoxel(hit.blockX, hit.blockY, hit.blockZ, VoxelType.AIR);
       this.onBlockBroken?.(hit.blockX, hit.blockY, hit.blockZ, hit.voxelType);
@@ -566,6 +574,9 @@ export class PlayerController {
   /**
    * Place selected voxel block using either aim ray or exact screen touch coords
    */
+  /** Wired up by the physics engine: mobs the player can attack. */
+  public mobManager: MobManager | null = null;
+
   /** Wired up by the physics engine: light the TNT block at these cell coordinates. */
   public onIgniteTNT: ((bx: number, by: number, bz: number) => void) | null = null;
 

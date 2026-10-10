@@ -369,6 +369,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         engine.voxelWorld.getLightColorAt(playerPos.x, playerPos.y + 1.0, playerPos.z, skyDim, steveLight);
         steveLight.multiply(envManager.getWarmTint());
         engine.player.model.setLightTint(steveLight);
+        engine.mobs.applyLighting(skyDim, envManager.getWarmTint());
       }
 
         // Use the Minecraft sky's authoritative celestial direction for deferred lighting.

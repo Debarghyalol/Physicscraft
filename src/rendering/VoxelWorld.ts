@@ -1988,6 +1988,11 @@ export class VoxelWorld {
     return null;
   }
 
+  /** True when the chunk column containing world (x, z) is loaded. */
+  public hasColumnAt(wx: number, wz: number): boolean {
+    return !!this.colAt(Math.floor(wx), Math.floor(wz));
+  }
+
   /** Height of the first free cell above the highest block at world (x, z). */
   public getElevationAt(wx: number, wz: number): number {
     const bx = Math.floor(wx);

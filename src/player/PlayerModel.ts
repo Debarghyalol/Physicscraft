@@ -7,7 +7,7 @@ import type { ItemDef } from '../inventory/items';
  * Helper to compute authentic Minecraft 64x64 skin UV coordinates
  * Exact formula from Minecraft Java Edition / skinview3d
  */
-function setSkinUVs(
+export function setSkinUVs(
   box: THREE.BoxGeometry,
   u: number,
   v: number,
