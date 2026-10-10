@@ -107,7 +107,8 @@ const addAtlasPath = (path: string) => {
 };
 for (const path of EXTRA_ATLAS_TEXTURES) addAtlasPath(path);
 for (const [key, value] of Object.entries(VoxelType)) {
-  if (!/^[0-9]+$/.test(key) || typeof value !== 'number' || value <= VoxelType.WATER) continue;
+  // Numeric enums also contain reverse entries ("5" -> "STONE"); keep only name -> number.
+  if (typeof value !== 'number' || value <= VoxelType.WATER) continue;
   const name = key.toLowerCase();
   addAtlasPath(`block/${name}`);
   if (name.endsWith('_log')) addAtlasPath(`block/${name}_top`);
@@ -801,7 +802,8 @@ export class VoxelWorld {
     this.glassAtlasNode.value = this.atlasTexture;
     const sampled = this.glassAtlasNode.sample(
       createConnectedGlassUV({
-        columns: 16,
+        columns: ATLAS_COLUMNS,
+        rows: ATLAS_ROWS,
         innerMin: ATLAS_INNER_MIN,
         innerMax: ATLAS_INNER_MAX,
         innerMinV: ATLAS_INNER_MIN_V,
@@ -1660,8 +1662,9 @@ export class VoxelWorld {
               const [tileCol, tileRow] = this.getVoxelFaceTile(voxel as VoxelType, f);
               const u0 = (tileCol + ATLAS_INNER_MIN) / ATLAS_COLUMNS;
               const u1 = (tileCol + ATLAS_INNER_MAX) / ATLAS_COLUMNS;
-              const v0 = (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS;
-              const v1 = (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS;
+              // CanvasTexture is flipY: canvas row 0 is at the top, i.e. V close to 1.
+              const v0 = 1 - (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS; // tile bottom
+              const v1 = 1 - (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS; // tile top
               const infos = FACE_INFO[f];
 
               mb.ensure(1);
@@ -1747,8 +1750,8 @@ export class VoxelWorld {
     const tileRow = Math.floor(tileIndex / ATLAS_COLUMNS);
     const u0 = (tileCol + ATLAS_INNER_MIN) / ATLAS_COLUMNS;
     const u1 = (tileCol + ATLAS_INNER_MAX) / ATLAS_COLUMNS;
-    const v0 = (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS;
-    const v1 = (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS;
+    const v0 = 1 - (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS;
+    const v1 = 1 - (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS;
 
     let tintR = 1.0, tintG = 1.0, tintB = 1.0;
     let height = 0.92;
