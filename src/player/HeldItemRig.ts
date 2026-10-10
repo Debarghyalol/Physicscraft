@@ -176,7 +176,7 @@ export class HeldItemRig {
     if (!object) return;
     object.renderOrder = 1002;
     object.frustumCulled = false;
-    this.display.rotation.order = 'ZYX'; // JOML rotationXYZ = Rz*Ry*Rx (X applied first)
+    this.display.rotation.order = 'XYZ';
     if (blockLike) {
       // block model: first_person_righthand rotation [0,45,0], scale 0.4
       this.display.position.set(0, 0, 0);
