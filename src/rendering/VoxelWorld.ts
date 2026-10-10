@@ -881,7 +881,7 @@ export class VoxelWorld {
       // extrude edges into the gutter (left/right first, then full rows for the corners)
       ctx.drawImage(canvas, x, y, 1, res, x - pad, y, pad, res);
       ctx.drawImage(canvas, x + res - 1, y, 1, res, x + res, y, pad, res);
-      ctx.drawImage(canvas, x - pad, y, stride, 1, x - pad, 0, stride, pad);
+      ctx.drawImage(canvas, x - pad, y, stride, 1, x - pad, y - pad, stride, pad);
       ctx.drawImage(canvas, x - pad, y + res - 1, stride, 1, x - pad, y + res, stride, pad);
     }
     const tex = new THREE.CanvasTexture(canvas);
