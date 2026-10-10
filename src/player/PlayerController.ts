@@ -470,6 +470,15 @@ export class PlayerController {
     }
   }
 
+  /** What a touch at these screen coordinates would hit: a mob (tap = attack) or a block. */
+  public getTargetKind(coords: { x: number; y: number }): 'mob' | 'block' {
+    const ray = this.getRayFromScreen(coords.x, coords.y);
+    const mob = this.mobManager?.raycast(ray, 4.0);
+    if (!mob) return 'block';
+    const hit = this.voxelWorld.raycastVoxel(ray, 7.0);
+    return !hit || mob.dist < hit.point.distanceTo(ray.origin) ? 'mob' : 'block';
+  }
+
   public getAimRay(): THREE.Ray {
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);

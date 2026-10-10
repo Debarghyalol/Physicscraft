@@ -596,6 +596,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         onAimTouchCoords={handleAimTouchCoords}
         onActionMine={handleActionMine}
         onActionPlace={handleActionPlace}
+        onQueryTarget={(c) => engineRef.current?.player?.getTargetKind(c) ?? 'block'}
         onToggleViewMode={onToggleViewMode}
         isFlying={isFlying}
         viewMode={viewMode}

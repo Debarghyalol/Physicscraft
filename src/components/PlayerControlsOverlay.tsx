@@ -13,6 +13,8 @@ export interface PlayerControlsOverlayProps {
   onAimTouchCoords?: (coords: { x: number; y: number } | null) => void;
   onActionMine: (coords?: { x: number; y: number }) => void;
   onActionPlace: (coords?: { x: number; y: number }) => void;
+  /** What is under a screen point: a mob (tap = attack) or a block/nothing (tap = place, hold = break). */
+  onQueryTarget?: (coords: { x: number; y: number }) => 'mob' | 'block';
   onToggleViewMode: () => void;
   isFlying?: boolean;
   viewMode: CameraViewMode;
@@ -62,6 +64,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   onAimTouchCoords,
   onActionMine,
   onActionPlace,
+  onQueryTarget,
   onToggleViewMode,
   onTogglePhysicsMaker,
   isPhysicsMakerActive,
@@ -99,6 +102,8 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
   const holdBreakInterval = useRef<number | null>(null);
   const [breakProgress, setBreakProgress] = useState<number | null>(null);
   const [breakIndicatorPos, setBreakIndicatorPos] = useState<{ x: number; y: number } | null>(null);
+  const [burst, setBurst] = useState<{ x: number; y: number; id: number } | null>(null);
+  const holdActiveRef = useRef(false); // finger has been down long enough that release is not a tap
 
   // Send input changes
   const emitInput = useCallback(() => {
@@ -317,34 +322,58 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
 
         const targetPos = { x: touch.clientX, y: touch.clientY };
         onAimTouchCoords?.(targetPos);
-        setBreakIndicatorPos(targetPos);
-        setBreakProgress(0);
+        holdActiveRef.current = false;
+        const kind = onQueryTarget?.(targetPos) ?? 'block';
 
+        // Timeline: release before TAP_MAX_MS = tap (place / attack). Past it the touch is a hold:
+        // on a block the ring fills until BREAK_AT_MS and the block breaks; on a mob it attacks
+        // repeatedly. Releasing mid-ring cancels, so a slow tap never breaks by accident.
+        const TAP_MAX_MS = 250;
+        const BREAK_AT_MS = 650;
         const startTime = performance.now();
-        const duration = 280;
+        let lastRepeat = 0;
 
         const tickProgress = () => {
           const elapsed = performance.now() - startTime;
-          const p = Math.min(1.0, elapsed / duration);
+          if (elapsed < TAP_MAX_MS) {
+            holdBreakTimer.current = window.setTimeout(tickProgress, 20);
+            return;
+          }
+          holdActiveRef.current = true;
+
+          if (kind === 'mob') {
+            const now = performance.now();
+            if (now - lastRepeat >= 450) {
+              lastRepeat = now;
+              didBreakRef.current = true;
+              onActionMine(targetPos);
+            }
+            holdBreakTimer.current = window.setTimeout(tickProgress, 40);
+            return;
+          }
+
+          const p = Math.min(1.0, (elapsed - TAP_MAX_MS) / (BREAK_AT_MS - TAP_MAX_MS));
+          setBreakIndicatorPos(targetPos);
           setBreakProgress(p);
 
           if (p >= 1.0) {
             isBreakingRef.current = true;
             didBreakRef.current = true;
             onActionMine(targetPos);
+            setBurst({ x: targetPos.x, y: targetPos.y, id: performance.now() });
             setBreakProgress(0);
 
             if (!holdBreakInterval.current) {
               holdBreakInterval.current = window.setInterval(() => {
                 onActionMine(targetPos);
-              }, 220);
+              }, 300);
             }
           } else {
-            holdBreakTimer.current = window.setTimeout(tickProgress, 25);
+            holdBreakTimer.current = window.setTimeout(tickProgress, 20);
           }
         };
 
-        holdBreakTimer.current = window.setTimeout(tickProgress, 25);
+        holdBreakTimer.current = window.setTimeout(tickProgress, 20);
       }
     }
   };
@@ -364,7 +393,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
           touch.clientY - lookStartPos.current.y
         );
 
-        if (totalMoved > 8) {
+        if (totalMoved > 14) {
           hasMovedRef.current = true;
           cancelHoldBreak();
         }
@@ -384,9 +413,13 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         onAimTouchCoords?.(null);
         const duration = performance.now() - touchStartTimeRef.current;
 
-        if (!hasMovedRef.current && !didBreakRef.current && !isBreakingRef.current && duration < 240) {
-          onActionPlace({ x: touch.clientX, y: touch.clientY });
+        if (!hasMovedRef.current && !didBreakRef.current && !isBreakingRef.current && !holdActiveRef.current && duration < 250) {
+          const pos = { x: touch.clientX, y: touch.clientY };
+          // Tap on a mob attacks it; anywhere else it places a block / uses the item.
+          if ((onQueryTarget?.(pos) ?? 'block') === 'mob') onActionMine(pos);
+          else onActionPlace(pos);
         }
+        holdActiveRef.current = false;
 
         cancelHoldBreak();
       }
@@ -412,34 +445,36 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
         </div>
       )}
 
-      {/* MCPE Break Progress Radial Indicator */}
+      {/* MCPE hold-to-break ring: pops in once the touch becomes a hold, fills clockwise (white -> green) */}
+      <style>{`
+        @keyframes pe-ring-in { from { transform: translate(-50%,-50%) scale(.55); opacity: 0 } to { transform: translate(-50%,-50%) scale(1); opacity: 1 } }
+        @keyframes pe-ring-burst { from { transform: translate(-50%,-50%) scale(1); opacity: .9 } to { transform: translate(-50%,-50%) scale(1.7); opacity: 0 } }
+      `}</style>
       {breakProgress !== null && breakIndicatorPos && (
         <div
-          className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 flex items-center justify-center z-40"
-          style={{ left: breakIndicatorPos.x, top: breakIndicatorPos.y }}
+          className="absolute pointer-events-none z-40"
+          style={{ left: breakIndicatorPos.x, top: breakIndicatorPos.y, width: 96, height: 96, transform: 'translate(-50%,-50%)', animation: 'pe-ring-in 120ms ease-out' }}
         >
-          <svg className="w-12 h-12 -rotate-90">
+          <svg width="96" height="96" viewBox="0 0 96 96" className="-rotate-90" style={{ filter: 'drop-shadow(0 0 3px rgba(0,0,0,.65))' }}>
+            <circle cx="48" cy="48" r="38" fill="rgba(0,0,0,0.28)" stroke="rgba(255,255,255,0.3)" strokeWidth="8" />
             <circle
-              cx="24"
-              cy="24"
-              r="18"
-              stroke="rgba(255,255,255,0.25)"
-              strokeWidth="3"
-              fill="rgba(0,0,0,0.35)"
-            />
-            <circle
-              cx="24"
-              cy="24"
-              r="18"
-              stroke="#ffffff"
-              strokeWidth="3.5"
-              fill="transparent"
-              strokeDasharray={2 * Math.PI * 18}
-              strokeDashoffset={2 * Math.PI * 18 * (1 - breakProgress)}
-              strokeLinecap="round"
+              cx="48" cy="48" r="38" fill="none"
+              stroke={`hsl(${Math.round(breakProgress * 105)}, ${Math.round(breakProgress * 85)}%, ${100 - Math.round(breakProgress * 38)}%)`}
+              strokeWidth="8"
+              strokeDasharray={2 * Math.PI * 38}
+              strokeDashoffset={2 * Math.PI * 38 * (1 - breakProgress)}
+              strokeLinecap="butt"
             />
           </svg>
         </div>
+      )}
+      {burst && (
+        <div
+          key={burst.id}
+          className="absolute pointer-events-none z-40 rounded-full"
+          style={{ left: burst.x, top: burst.y, width: 96, height: 96, border: '6px solid #9bff7a', boxShadow: '0 0 12px rgba(155,255,122,.8)', animation: 'pe-ring-burst 260ms ease-out forwards' }}
+          onAnimationEnd={() => setBurst(null)}
+        />
       )}
 
       {/* MCPE D-Pad: Contiguous 3x3 Grid; all buttons have identical size and stay properly anchored */}
