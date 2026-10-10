@@ -23,7 +23,7 @@ export const CHUNK_GRID_RADIUS = 2; // initial synchronous build radius (in chun
 
 // ---- light data -----------------------------------------------------------
 /** Vegetation rendered as two intersecting alpha-cutout planes instead of a solid cube. */
-const CROSS_PLANT_TYPES = new Set<VoxelType>([
+const CROSS_PLANT_TYPES = new Set<number>([
   VoxelType.SHORT_GRASS, VoxelType.TALL_GRASS, VoxelType.FERN, VoxelType.LARGE_FERN,
   VoxelType.DEAD_BUSH, VoxelType.BUSH, VoxelType.DANDELION, VoxelType.POPPY,
   VoxelType.BLUE_ORCHID, VoxelType.ALLIUM, VoxelType.AZURE_BLUET, VoxelType.RED_TULIP,
@@ -1701,7 +1701,7 @@ export class VoxelWorld {
    * Emit two intersecting, double-sided vegetation planes using the alpha-cutout foliage tile.
    * This keeps plants in the existing cutout/depth path while avoiding cube-shaped grass.
    */
-  private meshCrossPlant(mb: MeshBuilder, pi: number, X: number, Y: number, Z: number, voxel: VoxelType) {
+  private meshCrossPlant(mb: MeshBuilder, pi: number, X: number, Y: number, Z: number, voxel: number) {
     const light = this.padL[pi];
     const sky = (light >> 4) / 15;
     const blk = (light & 15) / 15;
