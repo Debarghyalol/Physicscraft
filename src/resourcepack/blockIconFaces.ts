@@ -45,7 +45,7 @@ const ICON_SPECS: Partial<Record<VoxelType, IconSpec>> = {
 // Register an icon spec for every appended block automatically. Minecraft texture names usually
 // match the lower-case voxel enum name; logs and leaves have dedicated top textures.
 for (const [key, value] of Object.entries(VoxelType)) {
-  if (!/^\\d+$/.test(key) || typeof value !== 'number' || value <= VoxelType.WATER) continue;
+  if (!/^[0-9]+$/.test(key) || typeof value !== 'number' || value <= VoxelType.WATER) continue;
   const voxel = value as VoxelType;
   if (ICON_SPECS[voxel]) continue;
   const name = key.toLowerCase();
