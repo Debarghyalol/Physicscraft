@@ -10,6 +10,9 @@ export interface ItemDef {
   /** Flat item sprite (textures/<texture>.png) for non-block items. */
   texture?: string;
   tool?: 'flint_and_steel';
+  /** Melee damage in half-hearts when used as a weapon (hand = 1). */
+  damage?: number;
+  toolKind?: 'sword' | 'pickaxe' | 'axe' | 'shovel' | 'hoe';
 }
 
 export interface ItemStack {
@@ -33,10 +36,38 @@ const BLOCKS: { voxel: VoxelType; name: string }[] = [
   { voxel: VoxelType.JUKEBOX, name: 'Jukebox' },
 ];
 
+// Java 1.21 attack damage per tier: [sword, pickaxe, axe, shovel, hoe]
+const TIERS: { id: string; name: string; damage: number[] }[] = [
+  { id: 'wooden', name: 'Wooden', damage: [4, 2, 7, 2.5, 1] },
+  { id: 'stone', name: 'Stone', damage: [5, 3, 9, 3.5, 1] },
+  { id: 'iron', name: 'Iron', damage: [6, 4, 9, 4.5, 1] },
+  { id: 'golden', name: 'Golden', damage: [4, 2, 7, 2.5, 1] },
+  { id: 'diamond', name: 'Diamond', damage: [7, 5, 9, 5.5, 1] },
+  { id: 'netherite', name: 'Netherite', damage: [8, 6, 10, 6.5, 1] },
+];
+const TOOL_KINDS: { kind: NonNullable<ItemDef['toolKind']>; name: string }[] = [
+  { kind: 'sword', name: 'Sword' },
+  { kind: 'pickaxe', name: 'Pickaxe' },
+  { kind: 'axe', name: 'Axe' },
+  { kind: 'shovel', name: 'Shovel' },
+  { kind: 'hoe', name: 'Hoe' },
+];
+const TOOLS: ItemDef[] = TOOL_KINDS.flatMap((k, ki) =>
+  TIERS.map((t) => ({
+    id: `tool:${t.id}_${k.kind}`,
+    name: `${t.name} ${k.name}`,
+    maxStack: 1,
+    texture: `item/${t.id}_${k.kind}`,
+    toolKind: k.kind,
+    damage: t.damage[ki],
+  }))
+);
+
 /** Every item the game knows about, in creative-menu order. */
 export const ITEM_DEFS: ItemDef[] = [
   ...BLOCKS.map((b) => ({ id: `block:${b.voxel}`, name: b.name, maxStack: 64, voxel: b.voxel })),
   { id: 'tool:flint_and_steel', name: 'Flint and Steel', maxStack: 1, texture: 'item/flint_and_steel', tool: 'flint_and_steel' },
+  ...TOOLS,
   ...MUSIC_DISCS.map((d) => ({ id: `disc:${d.id}`, name: `Music Disc - ${d.title}`, maxStack: 1, disc: d.id })),
 ];
 

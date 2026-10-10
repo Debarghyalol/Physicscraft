@@ -74,6 +74,9 @@ export function createPigRig(texture: THREE.Texture | null): PigRig {
   const leg = (px: number, pz: number) => {
     const g = part(rig, px, 18, pz);
     g.add(box(mat, 0, 16, -2, 0, -2, 4, 6, 4));
+    // Hidden collar inside the body: continues the leg's top rows upward so the leg never shows
+    // a gap against the body when it swings (its top plane tilts away from the belly).
+    g.add(box(mat, 0, 16, -2, -2, -2, 4, 2, 4));
     return g;
   };
   const legs = { rh: leg(-3, 7), lh: leg(3, 7), rf: leg(-3, -5), lf: leg(3, -5) };

@@ -12,7 +12,7 @@ import { createPigRig, PigRig } from './PigModel';
 const WIDTH = 0.9;
 const HEIGHT = 0.9;
 const GRAVITY = 32;
-const JUMP_V = 8.4;
+const JUMP_V = 9.6; // ~1.44 block apex (vanilla ~1.25): clears a full block with margin
 const WALK_SPEED = 2.4; // blocks/s
 const PANIC_MULT = 1.25;
 const MAX_HEALTH = 10;
@@ -180,6 +180,13 @@ export class Pig {
       this.lookTargetYaw = 0;
       this.lookTargetPitch = 0;
     }
+    // Like vanilla's body-rotation control: once the head is turned far, the body follows it.
+    if (!this.target && Math.abs(this.headYaw) > 50 * D2R) {
+      const d = Math.sign(this.headYaw) * Math.min(Math.abs(this.headYaw) - 50 * D2R, 10 * D2R);
+      this.yaw += d;
+      this.headYaw -= d;
+      this.lookTargetYaw -= d;
+    }
     // head turn rate: 30deg per tick toward the goal, clamped to +-75deg
     const maxStep = 30 * D2R;
     const want = Math.max(-75 * D2R, Math.min(75 * D2R, this.lookTargetYaw));
@@ -340,6 +347,7 @@ export class Pig {
     const { root, rig, head, legs, materials } = this.rig;
     root.position.copy(this.position);
     root.rotation.y = this.yaw;
+    head.rotation.order = 'YXZ'; // yaw first, then pitch about the turned axis
     head.rotation.set(this.headPitch, this.headYaw, 0);
     const p = this.walkPos * 0.6662, s = this.walkSpeed * 1.4;
     legs.rh.rotation.x = Math.cos(p) * s;

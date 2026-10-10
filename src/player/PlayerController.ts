@@ -539,7 +539,7 @@ export class PlayerController {
     // Hitting a mob (reach 4) takes priority over a block behind it.
     const mobHit = this.mobManager?.raycast(ray, 4.0);
     if (mobHit && (!hit || mobHit.dist < hit.point.distanceTo(ray.origin))) {
-      mobHit.pig.hurt(1, this.position);
+      mobHit.pig.hurt(inventory.held?.damage ?? 1, this.position);
       return true;
     }
 

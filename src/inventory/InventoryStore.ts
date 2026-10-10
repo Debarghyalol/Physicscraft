@@ -33,6 +33,9 @@ class InventoryStore {
     this.slots[10] = { id: 'disc:13', count: 1 };
     this.slots[11] = { id: blockItemId(VoxelType.TNT), count: 64 };
     this.slots[12] = { id: blockItemId(VoxelType.JUKEBOX), count: 64 };
+    ['wooden_sword', 'stone_sword', 'iron_sword', 'diamond_sword', 'iron_axe', 'iron_pickaxe', 'iron_shovel', 'iron_hoe', 'netherite_sword'].forEach(
+      (n, i) => (this.slots[13 + i] = { id: `tool:${n}`, count: 1 })
+    );
   }
 
   subscribe = (fn: Listener) => {
@@ -157,3 +160,4 @@ class InventoryStore {
 }
 
 export const inventory = new InventoryStore();
+if (import.meta.env.DEV) (window as any).__inventory = inventory; // dev-only debugging hook
