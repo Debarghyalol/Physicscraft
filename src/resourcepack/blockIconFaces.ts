@@ -61,6 +61,31 @@ for (const [key, value] of Object.entries(VoxelType)) {
   };
 }
 
+// Correct Minecraft 1.21.6 texture names and per-face textures for blocks whose enum name
+// does not match a single block texture, or whose top/front uses a different texture.
+Object.assign(ICON_SPECS, {
+  [VoxelType.TALL_GRASS]: { top: ['block/tall_grass_top'], side: ['block/tall_grass_bottom'] },
+  [VoxelType.LARGE_FERN]: { top: ['block/large_fern_top'], side: ['block/large_fern_bottom'] },
+  [VoxelType.SNOW_BLOCK]: { side: ['block/snow'] },
+  [VoxelType.BASALT]: { top: ['block/basalt_top'], side: ['block/basalt_side'] },
+  [VoxelType.BLACKSTONE]: { top: ['block/blackstone_top'], side: ['block/blackstone'] },
+  [VoxelType.PUMPKIN]: { top: ['block/pumpkin_top'], side: ['block/pumpkin_side'] },
+  [VoxelType.MELON]: { top: ['block/melon_top'], side: ['block/melon_side'] },
+  [VoxelType.HAY_BALE]: { top: ['block/hay_block_top'], side: ['block/hay_block_side'] },
+  [VoxelType.CRAFTING_TABLE]: { top: ['block/crafting_table_top'], side: ['block/crafting_table_front', 'block/crafting_table_side'] },
+  [VoxelType.FURNACE]: { top: ['block/furnace_top'], side: ['block/furnace_front', 'block/furnace_side'] },
+});
+
+// Keep foliage tinted only where Minecraft uses grayscale foliage textures.
+for (const voxel of [
+  VoxelType.OAK_LEAVES, VoxelType.SPRUCE_LEAVES, VoxelType.BIRCH_LEAVES,
+  VoxelType.JUNGLE_LEAVES, VoxelType.ACACIA_LEAVES, VoxelType.DARK_OAK_LEAVES,
+  VoxelType.MANGROVE_LEAVES, VoxelType.CHERRY_LEAVES, VoxelType.PALE_OAK_LEAVES,
+]) {
+  const spec = ICON_SPECS[voxel];
+  if (spec) ICON_SPECS[voxel] = { ...spec, sideTint: LEAF_TINT, topTint: LEAF_TINT };
+}
+
 /** Multiply a texture by a colour, keeping its alpha (same maths as the world atlas). */
 function tinted(img: HTMLCanvasElement, color: string): HTMLCanvasElement {
   const c = document.createElement('canvas');
