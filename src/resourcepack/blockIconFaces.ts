@@ -42,6 +42,50 @@ const ICON_SPECS: Partial<Record<VoxelType, IconSpec>> = {
   [VoxelType.JUKEBOX]: { top: ['block/jukebox_top'], side: ['block/jukebox_side', 'block/jukebox'] },
 };
 
+// Register an icon spec for every appended block automatically. Minecraft texture names usually
+// match the lower-case voxel enum name; logs and leaves have dedicated top textures.
+for (const [key, value] of Object.entries(VoxelType)) {
+  if (!/^[0-9]+$/.test(key) || typeof value !== 'number' || value <= VoxelType.WATER) continue;
+  const voxel = value as VoxelType;
+  if (ICON_SPECS[voxel]) continue;
+  const name = key.toLowerCase();
+  const isLog = name.endsWith('_log');
+  const isLeaves = name.endsWith('_leaves');
+  const side = isLeaves
+    ? [`block/${name}`, 'block/oak_leaves']
+    : [`block/${name}`];
+  ICON_SPECS[voxel] = {
+    ...(isLog ? { top: [`block/${name}_top`] } : {}),
+    side,
+    ...(isLeaves ? { sideTint: LEAF_TINT, topTint: LEAF_TINT } : {}),
+  };
+}
+
+// Correct Minecraft 1.21.6 texture names and per-face textures for blocks whose enum name
+// does not match a single block texture, or whose top/front uses a different texture.
+Object.assign(ICON_SPECS, {
+  [VoxelType.TALL_GRASS]: { top: ['block/tall_grass_top'], side: ['block/tall_grass_bottom'] },
+  [VoxelType.LARGE_FERN]: { top: ['block/large_fern_top'], side: ['block/large_fern_bottom'] },
+  [VoxelType.SNOW_BLOCK]: { side: ['block/snow'] },
+  [VoxelType.BASALT]: { top: ['block/basalt_top'], side: ['block/basalt_side'] },
+  [VoxelType.BLACKSTONE]: { top: ['block/blackstone_top'], side: ['block/blackstone'] },
+  [VoxelType.PUMPKIN]: { top: ['block/pumpkin_top'], side: ['block/pumpkin_side'] },
+  [VoxelType.MELON]: { top: ['block/melon_top'], side: ['block/melon_side'] },
+  [VoxelType.HAY_BALE]: { top: ['block/hay_block_top'], side: ['block/hay_block_side'] },
+  [VoxelType.CRAFTING_TABLE]: { top: ['block/crafting_table_top'], side: ['block/crafting_table_front', 'block/crafting_table_side'] },
+  [VoxelType.FURNACE]: { top: ['block/furnace_top'], side: ['block/furnace_front', 'block/furnace_side'] },
+});
+
+// Keep foliage tinted only where Minecraft uses grayscale foliage textures.
+for (const voxel of [
+  VoxelType.OAK_LEAVES, VoxelType.SPRUCE_LEAVES, VoxelType.BIRCH_LEAVES,
+  VoxelType.JUNGLE_LEAVES, VoxelType.ACACIA_LEAVES, VoxelType.DARK_OAK_LEAVES,
+  VoxelType.MANGROVE_LEAVES, VoxelType.CHERRY_LEAVES, VoxelType.PALE_OAK_LEAVES,
+]) {
+  const spec = ICON_SPECS[voxel];
+  if (spec) ICON_SPECS[voxel] = { ...spec, sideTint: LEAF_TINT, topTint: LEAF_TINT };
+}
+
 /** Multiply a texture by a colour, keeping its alpha (same maths as the world atlas). */
 function tinted(img: HTMLCanvasElement, color: string): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -71,7 +115,9 @@ export async function getBlockIconFaces(voxel: VoxelType): Promise<BlockIconFace
   const spec = ICON_SPECS[voxel];
   if (!spec) return null;
 
-  const sideBase = await resourcePacks.getTexture(spec.side);
+  // Keep blocks visible in the hotbar and first-person hand even if the active resource pack
+  // does not contain a texture for a newly registered voxel. Prefer its real texture when found.
+  const sideBase = (await resourcePacks.getTexture(spec.side)) ?? await resourcePacks.getTexture(['block/stone']);
   if (!sideBase) return null;
   let side = spec.sideTint ? tinted(sideBase, spec.sideTint) : sideBase;
   if (spec.sideOverlay) {
