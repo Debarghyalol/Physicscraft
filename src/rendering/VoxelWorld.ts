@@ -1606,16 +1606,21 @@ export class VoxelWorld {
               // Minecraft-style face visibility. Geometry occlusion is separate from
               // material back-face culling: leaves are DoubleSide, but adjacent leaf
               // voxels should still share one hidden internal face.
+              // Crossed plants occupy only two thin planes, so they must never hide a
+              // neighbouring cube face (especially the ground block's top face beneath grass).
+              const neighbourIsCrossPlant = CROSS_PLANT_TYPES.has(nb);
               const neighbourOccludes =
-                renderClass === 'cutout'
-                  ? nb !== 0 && nb !== VoxelType.LEAVES
-                  : renderClass === 'translucent'
-                    // Connected glass: the face shared with another glass block is hidden (so a
-                    // glass wall is one seamless sheet), and so is a face pressed against an
-                    // opaque solid. A face against leaves stays: the leaf cutout path culls its
-                    // own side, so culling both here would leave a see-through hole.
-                    ? nb === VoxelType.GLASS || (nb !== 0 && nb !== VoxelType.LEAVES)
-                    : nb !== 0 && nb !== VoxelType.GLASS && nb !== VoxelType.LEAVES;
+                !neighbourIsCrossPlant && (
+                  renderClass === 'cutout'
+                    ? nb !== 0 && nb !== VoxelType.LEAVES
+                    : renderClass === 'translucent'
+                      // Connected glass: the face shared with another glass block is hidden (so a
+                      // glass wall is one seamless sheet), and so is a face pressed against an
+                      // opaque solid. A face against leaves stays: the leaf cutout path culls its
+                      // own side, so culling both here would leave a see-through hole.
+                      ? nb === VoxelType.GLASS || (nb !== 0 && nb !== VoxelType.LEAVES)
+                      : nb !== 0 && nb !== VoxelType.GLASS && nb !== VoxelType.LEAVES
+                );
               if (neighbourOccludes) continue;
 
               // Which neighbours of this glass face are glass too; drives the seamless texture.
