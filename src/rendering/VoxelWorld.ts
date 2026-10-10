@@ -2421,8 +2421,8 @@ export class VoxelWorld {
     }
 
     const image = this.atlasTexture.image as HTMLCanvasElement | undefined;
-    const width = image?.width ?? 16 * 18 * ATLAS_COLUMNS;
-    const height = image?.height ?? 18 * ATLAS_ROWS;
+    const width = image?.width ?? 20 * ATLAS_COLUMNS;
+    const height = image?.height ?? 20 * ATLAS_ROWS;
     const res = height / ATLAS_ROWS * 0.8;
     const pad = res / 8;
     const stride = res + pad * 2;
