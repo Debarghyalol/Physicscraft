@@ -42,6 +42,25 @@ const ICON_SPECS: Partial<Record<VoxelType, IconSpec>> = {
   [VoxelType.JUKEBOX]: { top: ['block/jukebox_top'], side: ['block/jukebox_side', 'block/jukebox'] },
 };
 
+// Register an icon spec for every appended block automatically. Minecraft texture names usually
+// match the lower-case voxel enum name; logs and leaves have dedicated top textures.
+for (const [key, value] of Object.entries(VoxelType)) {
+  if (!/^\\d+$/.test(key) || typeof value !== 'number' || value <= VoxelType.WATER) continue;
+  const voxel = value as VoxelType;
+  if (ICON_SPECS[voxel]) continue;
+  const name = key.toLowerCase();
+  const isLog = name.endsWith('_log');
+  const isLeaves = name.endsWith('_leaves');
+  const side = isLeaves
+    ? [`block/${name}`, 'block/oak_leaves']
+    : [`block/${name}`];
+  ICON_SPECS[voxel] = {
+    ...(isLog ? { top: [`block/${name}_top`] } : {}),
+    side,
+    ...(isLeaves ? { sideTint: LEAF_TINT, topTint: LEAF_TINT } : {}),
+  };
+}
+
 /** Multiply a texture by a colour, keeping its alpha (same maths as the world atlas). */
 function tinted(img: HTMLCanvasElement, color: string): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -71,7 +90,9 @@ export async function getBlockIconFaces(voxel: VoxelType): Promise<BlockIconFace
   const spec = ICON_SPECS[voxel];
   if (!spec) return null;
 
-  const sideBase = await resourcePacks.getTexture(spec.side);
+  // Keep blocks visible in the hotbar and first-person hand even if the active resource pack
+  // does not contain a texture for a newly registered voxel. Prefer its real texture when found.
+  const sideBase = (await resourcePacks.getTexture(spec.side)) ?? await resourcePacks.getTexture(['block/stone']);
   if (!sideBase) return null;
   let side = spec.sideTint ? tinted(sideBase, spec.sideTint) : sideBase;
   if (spec.sideOverlay) {
