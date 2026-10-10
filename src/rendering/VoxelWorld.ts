@@ -22,12 +22,24 @@ export const CHUNK_HEIGHT = WORLD_HEIGHT;
 export const CHUNK_GRID_RADIUS = 2; // initial synchronous build radius (in chunks)
 
 // ---- light data -----------------------------------------------------------
+/** Vegetation rendered as two intersecting alpha-cutout planes instead of a solid cube. */
+const CROSS_PLANT_TYPES = new Set<VoxelType>([
+  VoxelType.SHORT_GRASS, VoxelType.TALL_GRASS, VoxelType.FERN, VoxelType.LARGE_FERN,
+  VoxelType.DEAD_BUSH, VoxelType.BUSH, VoxelType.DANDELION, VoxelType.POPPY,
+  VoxelType.BLUE_ORCHID, VoxelType.ALLIUM, VoxelType.AZURE_BLUET, VoxelType.RED_TULIP,
+  VoxelType.ORANGE_TULIP, VoxelType.WHITE_TULIP, VoxelType.PINK_TULIP, VoxelType.OXEYE_DAISY,
+  VoxelType.CORNFLOWER, VoxelType.LILY_OF_THE_VALLEY, VoxelType.SUNFLOWER, VoxelType.LILAC,
+  VoxelType.ROSE_BUSH, VoxelType.PEONY, VoxelType.VINE,
+]);
+
 /** How much each block type dims light passing through it (15 = fully opaque). */
 const OPACITY = new Uint8Array(256).fill(15);
 OPACITY[VoxelType.AIR] = 0;
 OPACITY[VoxelType.GLASS] = 0;
 OPACITY[VoxelType.LEAVES] = 1;
 OPACITY[VoxelType.WATER] = 1;
+/** Crossed plants do not occlude sunlight or block light. */
+for (const type of CROSS_PLANT_TYPES) OPACITY[type] = 0;
 /** Block light emitted by each block type. */
 const EMISSION = new Uint8Array(256);
 EMISSION[VoxelType.GLOWSTONE] = 15;
@@ -925,6 +937,29 @@ export class VoxelWorld {
         if (faceIndex === 2 || faceIndex === 3) return [6, 0]; // Rings top/bottom
         return [5, 0]; // Bark sides
       case VoxelType.LEAVES:
+      case VoxelType.SHORT_GRASS:
+      case VoxelType.TALL_GRASS:
+      case VoxelType.FERN:
+      case VoxelType.LARGE_FERN:
+      case VoxelType.DEAD_BUSH:
+      case VoxelType.BUSH:
+      case VoxelType.DANDELION:
+      case VoxelType.POPPY:
+      case VoxelType.BLUE_ORCHID:
+      case VoxelType.ALLIUM:
+      case VoxelType.AZURE_BLUET:
+      case VoxelType.RED_TULIP:
+      case VoxelType.ORANGE_TULIP:
+      case VoxelType.WHITE_TULIP:
+      case VoxelType.PINK_TULIP:
+      case VoxelType.OXEYE_DAISY:
+      case VoxelType.CORNFLOWER:
+      case VoxelType.LILY_OF_THE_VALLEY:
+      case VoxelType.SUNFLOWER:
+      case VoxelType.LILAC:
+      case VoxelType.ROSE_BUSH:
+      case VoxelType.PEONY:
+      case VoxelType.VINE:
         return [7, 0];
       case VoxelType.SAND:
         return [8, 0];
@@ -1553,9 +1588,15 @@ export class VoxelWorld {
               this.meshWaterCell(wat, pi, wx0 + lx, baseWy + ly, wz0 + lz);
               continue;
             }
-            const renderClass = voxel === VoxelType.GLASS ? 'translucent' : voxel === VoxelType.LEAVES ? 'cutout' : 'opaque';
+            const renderClass = voxel === VoxelType.GLASS ? 'translucent' : (voxel === VoxelType.LEAVES || CROSS_PLANT_TYPES.has(voxel)) ? 'cutout' : 'opaque';
             const mb = renderClass === 'translucent' ? tr : renderClass === 'cutout' ? cut : op;
             const wy = baseWy + ly;
+
+            // Plants use crossed planes, not the six faces of a cube.
+            if (CROSS_PLANT_TYPES.has(voxel)) {
+              this.meshCrossPlant(cut, pi, wx0 + lx, wy, wz0 + lz, voxel);
+              continue;
+            }
 
             for (let f = 0; f < 6; f++) {
               if (f === 3 && wy <= WORLD_MIN_Y) continue;
@@ -1654,6 +1695,107 @@ export class VoxelWorld {
     this.applyBuilder(col, sy, tr, 'translucent', cxw, cyw, czw);
     this.applyBuilder(col, sy, wat, 'water', cxw, cyw, czw);
     if (rebuildCollider) this.updateSectionCollider(col, sy, op);
+  }
+
+  /**
+   * Emit two intersecting, double-sided vegetation planes using the alpha-cutout foliage tile.
+   * This keeps plants in the existing cutout/depth path while avoiding cube-shaped grass.
+   */
+  private meshCrossPlant(mb: MeshBuilder, pi: number, X: number, Y: number, Z: number, voxel: VoxelType) {
+    const light = this.padL[pi];
+    const sky = (light >> 4) / 15;
+    const blk = (light & 15) / 15;
+    const tileCol = 7;
+    const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
+    const u1 = (tileCol + ATLAS_INNER_MAX) / 16;
+    const v0 = ATLAS_INNER_MIN_V;
+    const v1 = ATLAS_INNER_MAX_V;
+
+    let tintR = 1.0, tintG = 1.0, tintB = 1.0;
+    let height = 0.92;
+    switch (voxel) {
+      case VoxelType.SHORT_GRASS:
+        tintR = 0.72; tintG = 1.0; tintB = 0.62; height = 0.68; break;
+      case VoxelType.TALL_GRASS:
+        tintR = 0.68; tintG = 1.0; tintB = 0.58; height = 1.0; break;
+      case VoxelType.FERN:
+        tintR = 0.60; tintG = 0.92; tintB = 0.58; height = 0.82; break;
+      case VoxelType.LARGE_FERN:
+        tintR = 0.58; tintG = 0.9; tintB = 0.52; height = 1.0; break;
+      case VoxelType.DEAD_BUSH:
+        tintR = 0.72; tintG = 0.48; tintB = 0.24; height = 0.82; break;
+      case VoxelType.BUSH:
+        tintR = 0.62; tintG = 0.9; tintB = 0.48; height = 0.78; break;
+      case VoxelType.DANDELION:
+        tintR = 1.0; tintG = 0.9; tintB = 0.3; height = 0.72; break;
+      case VoxelType.POPPY:
+      case VoxelType.RED_TULIP:
+      case VoxelType.ROSE_BUSH:
+        tintR = 1.0; tintG = 0.28; tintB = 0.24; break;
+      case VoxelType.BLUE_ORCHID:
+      case VoxelType.CORNFLOWER:
+        tintR = 0.36; tintG = 0.62; tintB = 1.0; break;
+      case VoxelType.ALLIUM:
+      case VoxelType.LILAC:
+        tintR = 0.78; tintG = 0.45; tintB = 0.95; break;
+      case VoxelType.AZURE_BLUET:
+      case VoxelType.WHITE_TULIP:
+      case VoxelType.LILY_OF_THE_VALLEY:
+      case VoxelType.OXEYE_DAISY:
+        tintR = 0.96; tintG = 0.94; tintB = 0.86; break;
+      case VoxelType.ORANGE_TULIP:
+        tintR = 1.0; tintG = 0.56; tintB = 0.18; break;
+      case VoxelType.PINK_TULIP:
+      case VoxelType.PEONY:
+        tintR = 1.0; tintG = 0.58; tintB = 0.72; break;
+      case VoxelType.SUNFLOWER:
+        tintR = 1.0; tintG = 0.82; tintB = 0.2; height = 1.0; break;
+      case VoxelType.VINE:
+        tintR = 0.55; tintG = 0.85; tintB = 0.48; height = 0.95; break;
+    }
+
+    // Allocation-free crossed planes; vegetation is common, so avoid per-block arrays.
+    const inset = 0.12;
+    const x0 = X + inset, x1 = X + 1 - inset;
+    const z0 = Z + inset, z1 = Z + 1 - inset;
+    // Double-sided quads use twice as many indices as a normal face. Reserve index capacity too.
+    mb.ensure(Math.max(4, Math.ceil((mb.ic + 24) / 6) - (mb.vc >> 2)));
+
+    for (let plane = 0; plane < 2; plane++) {
+      const vb = mb.vc;
+      const nx = plane === 0 ? -0.7071 : 0.7071;
+      const nz = 0.7071;
+      for (let k = 0; k < 4; k++) {
+        const o = vb + k;
+        let px: number, pz: number;
+        if (plane === 0) {
+          px = (k === 0 || k === 3) ? x0 : x1;
+          pz = (k === 0 || k === 3) ? z0 : z1;
+        } else {
+          px = (k === 0 || k === 3) ? x1 : x0;
+          pz = (k === 0 || k === 3) ? z0 : z1;
+        }
+        mb.pos[o * 3] = px;
+        mb.pos[o * 3 + 1] = k < 2 ? Y : Y + height;
+        mb.pos[o * 3 + 2] = pz;
+        mb.normal[o * 3] = nx;
+        mb.normal[o * 3 + 1] = 0;
+        mb.normal[o * 3 + 2] = nz;
+        mb.ctm[o] = 0;
+        mb.col[o * 3] = tintR;
+        mb.col[o * 3 + 1] = tintG;
+        mb.col[o * 3 + 2] = tintB;
+        mb.lit[o * 2] = sky;
+        mb.lit[o * 2 + 1] = blk;
+        mb.uv[o * 2] = k === 0 || k === 3 ? u0 : u1;
+        mb.uv[o * 2 + 1] = k < 2 ? v0 : v1;
+      }
+      mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 1; mb.idx[mb.ic++] = vb + 2;
+      mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 2; mb.idx[mb.ic++] = vb + 3;
+      mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 2; mb.idx[mb.ic++] = vb + 1;
+      mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 3; mb.idx[mb.ic++] = vb + 2;
+      mb.vc += 4;
+    }
   }
 
   /**
