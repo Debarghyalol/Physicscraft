@@ -72,6 +72,95 @@ const ATLAS_INNER_MAX = 0.9;
 const ATLAS_INNER_MIN_V = 0.1;
 const ATLAS_INNER_MAX_V = 0.9;
 
+const ATLAS_COLUMNS = 16;
+const ATLAS_ROWS = 16;
+const BASE_ATLAS_TEXTURES = [
+  'block/grass_block_top', 'block/grass_block_side', 'block/dirt', 'block/stone',
+  'block/bedrock', 'block/oak_log', 'block/oak_log_top', 'block/oak_leaves',
+  'block/sand', 'block/cobblestone', 'block/tnt_side', 'block/gold_block',
+  'block/glass', 'block/glowstone', 'block/jukebox_side', 'block/jukebox_top',
+] as const;
+
+const EXTRA_ATLAS_TEXTURES = [
+  'block/grass_block_side_overlay', 'block/short_grass', 'block/tall_grass',
+  'block/tall_grass_top', 'block/tall_grass_bottom', 'block/fern', 'block/large_fern',
+  'block/large_fern_top', 'block/large_fern_bottom', 'block/dead_bush', 'block/bush',
+  'block/dandelion', 'block/poppy', 'block/blue_orchid', 'block/allium', 'block/azure_bluet',
+  'block/red_tulip', 'block/orange_tulip', 'block/white_tulip', 'block/pink_tulip',
+  'block/oxeye_daisy', 'block/cornflower', 'block/lily_of_the_valley', 'block/sunflower',
+  'block/lilac', 'block/rose_bush', 'block/peony', 'block/vine', 'block/snow',
+  'block/basalt_top', 'block/basalt_side', 'block/blackstone_top', 'block/pumpkin_top',
+  'block/pumpkin_side', 'block/carved_pumpkin', 'block/melon_top', 'block/melon_side',
+  'block/hay_block_top', 'block/hay_block_side', 'block/crafting_table_top',
+  'block/crafting_table_front', 'block/crafting_table_side', 'block/furnace_top',
+  'block/furnace_front', 'block/furnace_side', 'block/tnt_top', 'block/tnt_bottom',
+  'block/jungle_log_top', 'block/spruce_log_top', 'block/birch_log_top',
+  'block/acacia_log_top', 'block/dark_oak_log_top', 'block/mangrove_log_top',
+  'block/cherry_log_top', 'block/pale_oak_log_top',
+];
+
+const ATLAS_TEXTURE_PATHS: string[] = [...BASE_ATLAS_TEXTURES];
+const addAtlasPath = (path: string) => {
+  if (!ATLAS_TEXTURE_PATHS.includes(path) && ATLAS_TEXTURE_PATHS.length < ATLAS_COLUMNS * ATLAS_ROWS) {
+    ATLAS_TEXTURE_PATHS.push(path);
+  }
+};
+for (const path of EXTRA_ATLAS_TEXTURES) addAtlasPath(path);
+for (const [key, value] of Object.entries(VoxelType)) {
+  if (!/^[0-9]+$/.test(key) || typeof value !== 'number' || value <= VoxelType.WATER) continue;
+  const name = key.toLowerCase();
+  addAtlasPath(`block/${name}`);
+  if (name.endsWith('_log')) addAtlasPath(`block/${name}_top`);
+}
+const ATLAS_TILE_BY_PATH = new Map<string, number>();
+ATLAS_TEXTURE_PATHS.forEach((path, index) => {
+  if (!ATLAS_TILE_BY_PATH.has(path)) ATLAS_TILE_BY_PATH.set(path, index);
+});
+
+function voxelTexturePath(voxel: VoxelType, faceIndex: number): string {
+  const top = faceIndex === 2;
+  const bottom = faceIndex === 3;
+  switch (voxel) {
+    case VoxelType.GRASS:
+      return top ? 'block/grass_block_top' : bottom ? 'block/dirt' : 'block/grass_block_side';
+    case VoxelType.DIRT: return 'block/dirt';
+    case VoxelType.STONE: return 'block/stone';
+    case VoxelType.BEDROCK: return 'block/bedrock';
+    case VoxelType.WOOD: return top || bottom ? 'block/oak_log_top' : 'block/oak_log';
+    case VoxelType.LEAVES: return 'block/oak_leaves';
+    case VoxelType.SAND: return 'block/sand';
+    case VoxelType.COBBLESTONE: return 'block/cobblestone';
+    case VoxelType.TNT: return top ? 'block/tnt_top' : bottom ? 'block/tnt_bottom' : 'block/tnt_side';
+    case VoxelType.GOLD: return 'block/gold_block';
+    case VoxelType.GLASS: return 'block/glass';
+    case VoxelType.GLOWSTONE: return 'block/glowstone';
+    case VoxelType.JUKEBOX: return top ? 'block/jukebox_top' : 'block/jukebox_side';
+    case VoxelType.SHORT_GRASS: return 'block/short_grass';
+    case VoxelType.TALL_GRASS: return 'block/tall_grass_bottom';
+    case VoxelType.LARGE_FERN: return 'block/large_fern_bottom';
+    case VoxelType.SNOW_BLOCK: return 'block/snow';
+    case VoxelType.BASALT: return top || bottom ? 'block/basalt_top' : 'block/basalt_side';
+    case VoxelType.BLACKSTONE: return top ? 'block/blackstone_top' : 'block/blackstone';
+    case VoxelType.PUMPKIN: return top ? 'block/pumpkin_top' : 'block/pumpkin_side';
+    case VoxelType.CARVED_PUMPKIN: return top ? 'block/pumpkin_top' : 'block/carved_pumpkin';
+    case VoxelType.MELON: return top ? 'block/melon_top' : 'block/melon_side';
+    case VoxelType.HAY_BALE: return top || bottom ? 'block/hay_block_top' : 'block/hay_block_side';
+    case VoxelType.CRAFTING_TABLE:
+      return top ? 'block/crafting_table_top' : faceIndex === 0 ? 'block/crafting_table_front' : 'block/crafting_table_side';
+    case VoxelType.FURNACE:
+      return top ? 'block/furnace_top' : faceIndex === 0 ? 'block/furnace_front' : 'block/furnace_side';
+    case VoxelType.FERN: return 'block/fern';
+    default: {
+      const name = VoxelType[voxel] as string | undefined;
+      if (!name || typeof name !== 'string') return 'block/stone';
+      const lower = name.toLowerCase();
+      if (lower.endsWith('_log') && (top || bottom)) return `block/${lower}_top`;
+      return `block/${lower}`;
+    }
+  }
+}
+
+
 interface FaceVertexInfo {
   px: number; py: number; pz: number;
   oCenter: number; o1: number; o2: number; oC: number;
@@ -772,16 +861,23 @@ export class VoxelWorld {
     const pad = res / 8;
     const stride = res + pad * 2;
     const canvas = document.createElement('canvas');
-    canvas.width = stride * 16;
-    canvas.height = stride;
+    canvas.width = stride * ATLAS_COLUMNS;
+    canvas.height = stride * ATLAS_ROWS;
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
-    for (let col = 0; col < 16; col++) {
+    for (let index = 0; index < ATLAS_COLUMNS * ATLAS_ROWS; index++) {
+      const col = index % ATLAS_COLUMNS;
+      const row = Math.floor(index / ATLAS_COLUMNS);
       const x = col * stride + pad;
-      const y = pad;
-      const img = tileImg(col);
+      const y = row * stride + pad;
+      const img = tileImg(index);
       if (img) ctx.drawImage(img, 0, 0, img.width, img.width, x, y, res, res);
-      else ctx.drawImage(this.baseAtlasCanvas, col * 16, 0, 16, 16, x, y, res, res);
+      else {
+        // Preserve the original procedural textures for the first 16 slots. Missing
+        // newly-added textures use stone rather than silently displaying grass-top.
+        const fallbackCol = index < 16 ? index : 3;
+        ctx.drawImage(this.baseAtlasCanvas, fallbackCol * 16, 0, 16, 16, x, y, res, res);
+      }
       // extrude edges into the gutter (left/right first, then full rows for the corners)
       ctx.drawImage(canvas, x, y, 1, res, x - pad, y, pad, res);
       ctx.drawImage(canvas, x + res - 1, y, 1, res, x + res, y, pad, res);
@@ -811,31 +907,18 @@ export class VoxelWorld {
   public async applyResourcePack() {
     const grassTint = '#91bd59';
     const leafTint = '#77ab2f';
-    const tiles: Array<[number, string[], string | null, string[]?]> = [
-      [0, ['block/grass_block_top'], grassTint],
-      [1, ['block/grass_block_side'], null, ['block/grass_block_side_overlay']],
-      [2, ['block/dirt'], null],
-      [3, ['block/stone'], null],
-      [4, ['block/bedrock'], null],
-      [5, ['block/oak_log'], null],
-      [6, ['block/oak_log_top'], null],
-      [7, ['block/oak_leaves'], leafTint],
-      [8, ['block/sand'], null],
-      [9, ['block/cobblestone'], null],
-      [10, ['block/tnt_side'], null],
-      [11, ['block/gold_block'], null],
-      [12, ['block/glass'], null],
-      [13, ['block/glowstone'], null],
-      [14, ['block/jukebox_side', 'block/jukebox'], null],
-      [15, ['block/jukebox_top', 'block/jukebox_side', 'block/jukebox'], null],
-    ];
+    const tiles = ATLAS_TEXTURE_PATHS.map((path, index) => ({
+      index,
+      path,
+      tint: path.endsWith('_leaves') ? leafTint : null,
+      overlay: index === 1 ? 'block/grass_block_side_overlay' : null,
+    }));
 
     const loaded = await Promise.all(
-      tiles.map(async ([col, names, tint, overlay]) => ({
-        col,
-        tint,
-        img: await resourcePacks.getTexture(names),
-        overlay: overlay ? await resourcePacks.getTexture(overlay) : null,
+      tiles.map(async (tile) => ({
+        ...tile,
+        img: await resourcePacks.getTexture([tile.path]),
+        overlay: tile.overlay ? await resourcePacks.getTexture([tile.overlay]) : null,
       }))
     );
 
@@ -869,10 +952,10 @@ export class VoxelWorld {
       const base = t.tint ? tinted(t.img, t.tint) : t.img;
       g.drawImage(base, 0, 0, base.width, base.width, 0, 0, res, res);
       if (t.overlay) g.drawImage(tinted(t.overlay, grassTint), 0, 0, res, res);
-      prepared.set(t.col, c);
+      prepared.set(t.index, c);
     }
 
-    const tex = this.composeAtlas(res, (col) => prepared.get(col) ?? null);
+    const tex = this.composeAtlas(res, (index) => prepared.get(index) ?? null);
     const old = this.atlasTexture;
     this.atlasTexture = tex;
     this.material.map = tex;
@@ -921,63 +1004,9 @@ export class VoxelWorld {
   }
 
   private getVoxelFaceTile(voxel: VoxelType, faceIndex: number): [number, number] {
-    // faceIndex: 0: +X, 1: -X, 2: +Y (Top), 3: -Y (Bottom), 4: +Z, 5: -Z
-    switch (voxel) {
-      case VoxelType.GRASS:
-        if (faceIndex === 2) return [0, 0]; // Top grass
-        if (faceIndex === 3) return [2, 0]; // Bottom dirt
-        return [1, 0]; // Side grass
-      case VoxelType.DIRT:
-        return [2, 0];
-      case VoxelType.STONE:
-        return [3, 0];
-      case VoxelType.BEDROCK:
-        return [4, 0];
-      case VoxelType.WOOD:
-        if (faceIndex === 2 || faceIndex === 3) return [6, 0]; // Rings top/bottom
-        return [5, 0]; // Bark sides
-      case VoxelType.LEAVES:
-      case VoxelType.SHORT_GRASS:
-      case VoxelType.TALL_GRASS:
-      case VoxelType.FERN:
-      case VoxelType.LARGE_FERN:
-      case VoxelType.DEAD_BUSH:
-      case VoxelType.BUSH:
-      case VoxelType.DANDELION:
-      case VoxelType.POPPY:
-      case VoxelType.BLUE_ORCHID:
-      case VoxelType.ALLIUM:
-      case VoxelType.AZURE_BLUET:
-      case VoxelType.RED_TULIP:
-      case VoxelType.ORANGE_TULIP:
-      case VoxelType.WHITE_TULIP:
-      case VoxelType.PINK_TULIP:
-      case VoxelType.OXEYE_DAISY:
-      case VoxelType.CORNFLOWER:
-      case VoxelType.LILY_OF_THE_VALLEY:
-      case VoxelType.SUNFLOWER:
-      case VoxelType.LILAC:
-      case VoxelType.ROSE_BUSH:
-      case VoxelType.PEONY:
-      case VoxelType.VINE:
-        return [7, 0];
-      case VoxelType.SAND:
-        return [8, 0];
-      case VoxelType.COBBLESTONE:
-        return [9, 0];
-      case VoxelType.TNT:
-        return [10, 0];
-      case VoxelType.GOLD:
-        return [11, 0];
-      case VoxelType.GLASS:
-        return [12, 0];
-      case VoxelType.GLOWSTONE:
-        return [13, 0];
-      case VoxelType.JUKEBOX:
-        return faceIndex === 2 ? [15, 0] : [14, 0]; // top vs side/bottom
-      default:
-        return [0, 0];
-    }
+    const path = voxelTexturePath(voxel, faceIndex);
+    const index = ATLAS_TILE_BY_PATH.get(path) ?? ATLAS_TILE_BY_PATH.get('block/stone') ?? 3;
+    return [index % ATLAS_COLUMNS, Math.floor(index / ATLAS_COLUMNS)];
   }
 
   // ======================================================================
@@ -1628,9 +1657,11 @@ export class VoxelWorld {
                 ? glassConnectMask(B, pi, f, GLASS_CONNECT, VoxelType.GLASS)
                 : 0;
 
-              const tileCol = this.getVoxelFaceTile(voxel, f)[0];
-              const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
-              const u1 = (tileCol + ATLAS_INNER_MAX) / 16;
+              const [tileCol, tileRow] = this.getVoxelFaceTile(voxel as VoxelType, f);
+              const u0 = (tileCol + ATLAS_INNER_MIN) / ATLAS_COLUMNS;
+              const u1 = (tileCol + ATLAS_INNER_MAX) / ATLAS_COLUMNS;
+              const v0 = (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS;
+              const v1 = (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS;
               const infos = FACE_INFO[f];
 
               mb.ensure(1);
@@ -1675,7 +1706,7 @@ export class VoxelWorld {
                 mb.lit[o * 2] = sky;
                 mb.lit[o * 2 + 1] = blk;
                 mb.uv[o * 2] = k === 0 || k === 3 ? u0 : u1;
-                mb.uv[o * 2 + 1] = k < 2 ? ATLAS_INNER_MIN_V : ATLAS_INNER_MAX_V;
+                mb.uv[o * 2 + 1] = k < 2 ? v0 : v1;
               }
 
               if (b0 + b2 > b1 + b3) {
@@ -1710,11 +1741,14 @@ export class VoxelWorld {
     const light = this.padL[pi];
     const sky = (light >> 4) / 15;
     const blk = (light & 15) / 15;
-    const tileCol = 7;
-    const u0 = (tileCol + ATLAS_INNER_MIN) / 16;
-    const u1 = (tileCol + ATLAS_INNER_MAX) / 16;
-    const v0 = ATLAS_INNER_MIN_V;
-    const v1 = ATLAS_INNER_MAX_V;
+    const plantPath = voxelTexturePath(voxel as VoxelType, 0);
+    const tileIndex = ATLAS_TILE_BY_PATH.get(plantPath) ?? ATLAS_TILE_BY_PATH.get('block/oak_leaves') ?? 7;
+    const tileCol = tileIndex % ATLAS_COLUMNS;
+    const tileRow = Math.floor(tileIndex / ATLAS_COLUMNS);
+    const u0 = (tileCol + ATLAS_INNER_MIN) / ATLAS_COLUMNS;
+    const u1 = (tileCol + ATLAS_INNER_MAX) / ATLAS_COLUMNS;
+    const v0 = (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS;
+    const v1 = (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS;
 
     let tintR = 1.0, tintG = 1.0, tintB = 1.0;
     let height = 0.92;
@@ -2380,26 +2414,29 @@ export class VoxelWorld {
    * so particles follow resource packs automatically.
    */
   public getBlockTileRects(voxel: VoxelType): Array<[number, number, number, number]> {
-    const cols = new Set<number>();
-    for (let face = 0; face < 6; face++) cols.add(this.getVoxelFaceTile(voxel, face)[0]);
+    const tiles = new Set<number>();
+    for (let face = 0; face < 6; face++) {
+      const [col, row] = this.getVoxelFaceTile(voxel, face);
+      tiles.add(row * ATLAS_COLUMNS + col);
+    }
 
-    // The atlas is not 16 tiles wide in UV space: every tile has an extruded
-    // gutter (res / 8) on both sides. The old particle UV calculation assumed
-    // a 16x16 no-gutter atlas, so break particles sampled unrelated/white atlas
-    // pixels instead of the broken block texture.
     const image = this.atlasTexture.image as HTMLCanvasElement | undefined;
-    const width = image?.width ?? 16 * 18;
-    const height = image?.height ?? 18;
-    const res = height * 0.8; // height = res + 2*(res/8)
+    const width = image?.width ?? 16 * 18 * ATLAS_COLUMNS;
+    const height = image?.height ?? 18 * ATLAS_ROWS;
+    const res = height / ATLAS_ROWS * 0.8;
     const pad = res / 8;
     const stride = res + pad * 2;
 
-    return [...cols].map((col) => [
-      (col * stride + pad + res * ATLAS_INNER_MIN / 1) / width,
-      (pad + res * ATLAS_INNER_MIN_V) / height,
-      (col * stride + pad + res * ATLAS_INNER_MAX / 1) / width,
-      (pad + res * ATLAS_INNER_MAX_V) / height,
-    ]);
+    return [...tiles].map((index) => {
+      const col = index % ATLAS_COLUMNS;
+      const row = Math.floor(index / ATLAS_COLUMNS);
+      return [
+        (col * stride + pad + res * ATLAS_INNER_MIN) / width,
+        (row * stride + pad + res * ATLAS_INNER_MIN_V) / height,
+        (col * stride + pad + res * ATLAS_INNER_MAX) / width,
+        (row * stride + pad + res * ATLAS_INNER_MAX_V) / height,
+      ];
+    });
   }
 
   private static readonly NEIGHBOR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
