@@ -910,7 +910,7 @@ export class VoxelWorld {
     const tiles = ATLAS_TEXTURE_PATHS.map((path, index) => ({
       index,
       path,
-      tint: path.endsWith('_leaves') ? leafTint : null,
+      tint: path === 'block/grass_block_top' ? grassTint : path.endsWith('_leaves') ? leafTint : null,
       overlay: index === 1 ? 'block/grass_block_side_overlay' : null,
     }));
 
