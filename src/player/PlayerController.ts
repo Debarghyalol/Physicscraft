@@ -6,6 +6,7 @@ import { soundManager } from '../audio/SoundEffects';
 import { musicEngine } from '../audio/MusicEngine';
 import { inventory } from '../inventory/InventoryStore';
 import type { MobManager } from '../mobs/MobManager';
+import { WaterSample, isPointInWater, makeWaterSample, sampleWater } from '../fluid/fluidPhysics';
 
 export interface PlayerInput {
   moveForward: number; // -1 to 1
@@ -64,7 +65,16 @@ export class PlayerController {
   private prevJump: boolean = false;
   private lastJumpPressTime: number = -10000;
 
-  // Selected voxel for building
+  // Water state (vanilla: isInWater / isUnderWater / isSwimming)
+  public inWater = false;
+  public eyeInWater = false;
+  public isSwimming = false;
+  public onEyeWaterChange?: (underwater: boolean) => void;
+  private waterSample: WaterSample = makeWaterSample();
+  private waterJumpDelay = 0;
+  private wasInWater = false;
+  private swimSoundTimer = 0;
+  private static readonly EYE_OFFSET = 0.68;
 
   // Minecraft-style wireframe block highlight outline
   public targetHighlightMesh: THREE.LineSegments;
@@ -166,14 +176,73 @@ export class PlayerController {
       (PlayerController.scratchForward.z * input.moveForward +
         PlayerController.scratchRight.z * input.moveRight) * speed * inputScale;
 
+    // ---- Water (vanilla Entity.updateFluidInteraction + LivingEntity.travelInWater) ----
+    const hwB = PlayerController.PLAYER_HALF_WIDTH;
+    const hhB = PlayerController.PLAYER_HALF_HEIGHT;
+    const ws = sampleWater(this.voxelWorld, pos.x - hwB, pos.x + hwB, pos.y - hhB, pos.y + hhB, pos.z - hwB, pos.z + hwB, this.waterSample);
+    const inWater = ws.count > 0 && !this.isFlying;
+    this.inWater = inWater;
+    this.waterJumpDelay = Math.max(0, this.waterJumpDelay - delta);
+    if (inWater && !this.wasInWater) {
+      const impact = Math.abs(this.velY);
+      soundManager.playWaterSound(impact > 8 ? 'big_splash' : 'splash', Math.min(1, 0.25 + impact / 14));
+    }
+    this.wasInWater = inWater;
+    const eyeIn = this.isEyeInWater();
+    if (eyeIn !== this.eyeInWater) {
+      this.eyeInWater = eyeIn;
+      this.onEyeWaterChange?.(eyeIn);
+    }
+    // Sprinting underwater starts swimming; it lasts while sprinting in water.
+    this.isSwimming = inWater && input.sprint && input.moveForward > 0 && (this.isSwimming || eyeIn);
+
     const accel = this.isFlying ? 10 : this.isGrounded ? 18 : 8;
     let newVx = THREE.MathUtils.lerp(this.velX, targetVelX, Math.min(1, delta * accel));
     let newVz = THREE.MathUtils.lerp(this.velZ, targetVelZ, Math.min(1, delta * accel));
     let newVy = this.velY;
     let startVy = this.velY; // vertical velocity at the start of this frame
 
-    // Gravity / jump is integrated manually because the player has no Rapier collider.
-    if (this.isFlying) {
+    if (inWater) {
+      // Per tick vanilla multiplies velocity by 0.8 (0.9 swimming) and adds 0.02 of input; in
+      // continuous time that is an exponential approach to 2 blocks/s (4 swimming).
+      const lam = this.isSwimming ? 2.107 : 4.463;
+      const k = 1 - Math.exp(-lam * delta);
+      const e = 1 - k;
+      const top = this.isSwimming ? 4.0 : 2.0;
+      let tx = (PlayerController.scratchForward.x * input.moveForward + PlayerController.scratchRight.x * input.moveRight) * top * inputScale;
+      let tz = (PlayerController.scratchForward.z * input.moveForward + PlayerController.scratchRight.z * input.moveRight) * top * inputScale;
+      let ty: number | null = null;
+      if (this.isSwimming) {
+        // Swim where you look: forward motion follows the pitch.
+        const cp = Math.cos(this.pitch);
+        tx = (PlayerController.scratchForward.x * input.moveForward * cp + PlayerController.scratchRight.x * input.moveRight) * top;
+        tz = (PlayerController.scratchForward.z * input.moveForward * cp + PlayerController.scratchRight.z * input.moveRight) * top;
+        ty = Math.sin(this.pitch) * input.moveForward * top;
+        if (input.jump) ty = Math.max(ty, 3.0);
+      }
+      newVx = this.velX + (tx - this.velX) * k;
+      newVz = this.velZ + (tz - this.velZ) * k;
+      // Current: 0.014 blocks/tick^2 along the averaged flow.
+      newVx += ws.flowX * 5.6 * delta;
+      newVz += ws.flowZ * 5.6 * delta;
+      if (ty !== null) {
+        newVy = this.velY + (ty - this.velY) * k;
+      } else {
+        // gravity/16 = 0.005 per tick (-2 b/s^2); jump = +0.04 per tick, sneak = -0.04 per tick
+        let acc = -2;
+        if (input.jump) acc += 16;
+        if (input.descend) acc -= 16;
+        newVy = this.velY * e + (acc / lam) * k;
+      }
+      startVy = this.velY;
+      // At the surface (water no deeper than 0.4) a jump hops out of the water like on land.
+      if (input.jump && !this.isSwimming && ws.height <= 0.4 && this.waterJumpDelay <= 0) {
+        startVy = this.jumpVelocity;
+        newVy = this.jumpVelocity - this.gravityAcceleration * delta;
+        this.waterJumpDelay = 0.5;
+      }
+      this.isGrounded = false;
+    } else if (this.isFlying) {
       const dir = (input.jump ? 1 : 0) - (input.descend ? 1 : 0);
       newVy = THREE.MathUtils.lerp(this.velY, dir * this.flyVerticalSpeed, Math.min(1, delta * 12));
     } else if (input.jump && this.isGrounded && this.velY < 2.0) {
@@ -217,6 +286,11 @@ export class PlayerController {
       this.isGrounded = this.checkGrounded(nextX, nextY, nextZ);
     }
 
+    // Vanilla jumpOutOfFluid: pushed against a ledge in water with room 0.6 higher -> climb out.
+    if (inWater && (xResult.collided || zResult.collided) && !input.descend) {
+      if (this.isFreeBox(nextX + newVx * 0.05, nextY + 0.6, nextZ + newVz * 0.05)) newVy = Math.max(newVy, 6.0);
+    }
+
     // Commit the collision-resolved position (walking, falling and flying alike) and
     // keep the velocity for the next frame.
     this.position.set(nextX, nextY, nextZ);
@@ -227,8 +301,16 @@ export class PlayerController {
     this.currentSpeed = Math.hypot(newVx, newVz);
 
     // Footsteps sound
-    if (this.currentSpeed > 1.2 && this.isGrounded && !this.isFlying) {
+    if (this.currentSpeed > 1.2 && this.isGrounded && !this.isFlying && !inWater) {
       soundManager.playFootstep(this.getSoundMaterial(this.getGroundVoxelType()));
+    }
+    // Swimming strokes
+    if (inWater && this.currentSpeed > 0.8) {
+      this.swimSoundTimer -= delta;
+      if (this.swimSoundTimer <= 0) {
+        this.swimSoundTimer = this.isSwimming ? 0.35 : 0.6;
+        soundManager.playWaterSound('swim', 0.35);
+      }
     }
 
     // 4. Sync 3D Player Model
@@ -272,7 +354,23 @@ export class PlayerController {
   private static readonly COLLISION_EPSILON = 0.0001;
 
   private isSolidBlock(x: number, y: number, z: number): boolean {
-    return this.voxelWorld.getVoxel(x, y, z) !== VoxelType.AIR;
+    return this.voxelWorld.isSolidAt(x, y, z);
+  }
+
+  /** True when the player's box centred at (x, y, z) overlaps no solid block. */
+  private isFreeBox(x: number, y: number, z: number): boolean {
+    const hw = PlayerController.PLAYER_HALF_WIDTH - 0.001;
+    const hh = PlayerController.PLAYER_HALF_HEIGHT - 0.001;
+    for (let bx = Math.floor(x - hw); bx <= Math.floor(x + hw); bx++)
+      for (let by = Math.floor(y - hh); by <= Math.floor(y + hh); by++)
+        for (let bz = Math.floor(z - hw); bz <= Math.floor(z + hw); bz++)
+          if (this.isSolidBlock(bx, by, bz)) return false;
+    return true;
+  }
+
+  /** True when the camera (eye) is inside water, below the surface. */
+  public isEyeInWater(): boolean {
+    return isPointInWater(this.voxelWorld, this.position.x, this.position.y + PlayerController.EYE_OFFSET, this.position.z);
   }
 
   private getSoundMaterial(voxelType: VoxelType): 'grass' | 'stone' | 'wood' | 'sand' | 'glass' {
@@ -294,6 +392,7 @@ export class PlayerController {
       case VoxelType.GOLD:
       case VoxelType.JUKEBOX:
       case VoxelType.TNT:
+      case VoxelType.WATER:
       default:
         return 'stone';
 
@@ -407,7 +506,7 @@ export class PlayerController {
     for (let bx = minX; bx <= maxX; bx++) {
       for (let bz = minZ; bz <= maxZ; bz++) {
         const voxel = this.voxelWorld.getVoxel(bx, by, bz);
-        if (voxel !== VoxelType.AIR) return voxel;
+        if (voxel !== VoxelType.AIR && voxel !== VoxelType.WATER) return voxel;
       }
     }
 
@@ -613,6 +712,9 @@ export class PlayerController {
       return false;
     }
 
+    // Buckets: an empty one scoops up a water source, a water bucket places one (creative: not consumed).
+    if (held?.bucket) return this.useBucket(held.bucket, ray);
+
     // A jukebox plays the disc in hand (or the last one held) instead of having a block placed against it.
     if (hit?.voxelType === VoxelType.JUKEBOX) {
       musicEngine.playDisc(held?.disc ?? inventory.lastDisc);
@@ -638,6 +740,27 @@ export class PlayerController {
       return true;
     }
     return false;
+  }
+
+  private useBucket(kind: 'empty' | 'water', ray: THREE.Ray): boolean {
+    const world = this.voxelWorld;
+    if (kind === 'empty') {
+      const hit = world.raycastVoxel(ray, 7.0, 'source');
+      if (!hit || hit.voxelType !== VoxelType.WATER) return false;
+      world.setVoxel(hit.blockX, hit.blockY, hit.blockZ, VoxelType.AIR);
+      soundManager.playWaterSound('bucket_fill', 0.8);
+      return true;
+    }
+    const hit = world.raycastVoxel(ray, 7.0);
+    if (!hit) return false;
+    const x = hit.blockX + hit.normal.x;
+    const y = hit.blockY + hit.normal.y;
+    const z = hit.blockZ + hit.normal.z;
+    const t = world.getVoxel(x, y, z);
+    if (t !== VoxelType.AIR && !(t === VoxelType.WATER && world.getFluidLevel(x, y, z) !== 0)) return false;
+    world.setWater(x, y, z, 0);
+    soundManager.playWaterSound('bucket_empty', 0.8);
+    return true;
   }
 
   public teleport(x: number, y: number, z: number) {

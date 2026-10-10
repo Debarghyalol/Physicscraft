@@ -1,4 +1,5 @@
 import { MobManager } from '../mobs/MobManager';
+import { FluidSimulator } from '../fluid/FluidSimulator';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
@@ -46,6 +47,7 @@ export class PhysicsEngine {
   public camera: THREE.PerspectiveCamera;
   public voxelWorld!: VoxelWorld;
   public mobs!: MobManager;
+  public fluids!: FluidSimulator;
   public player!: PlayerController;
   public selectionRenderer: SelectionBoxRenderer;
   public blockParticles!: BlockParticles;
@@ -111,6 +113,7 @@ export class PhysicsEngine {
     const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
     this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
     this.mobs = new MobManager(this.scene, this.voxelWorld);
+    this.fluids = new FluidSimulator(this.voxelWorld);
     if (import.meta.env.DEV) (window as any).__engine = this; // dev-only debugging hook
     this.player.mobManager = this.mobs;
     this.player.onIgniteTNT = (bx, by, bz) => this.igniteVoxelTNT(bx, by, bz, 1500);
@@ -530,7 +533,7 @@ export class PhysicsEngine {
         for (let bz = ez - rBlocks; bz <= ez + rBlocks; bz++) {
           if (Math.hypot(bx - ex, by - ey, bz - ez) < radius * 0.36) {
             const v = this.voxelWorld.getVoxel(bx, by, bz);
-            if (v !== VoxelType.AIR && v !== VoxelType.BEDROCK) {
+            if (v !== VoxelType.AIR && v !== VoxelType.BEDROCK && v !== VoxelType.WATER) {
               this.voxelWorld.setVoxel(bx, by, bz, VoxelType.AIR);
             }
           }
@@ -722,7 +725,7 @@ export class PhysicsEngine {
       for (let y = minY; y <= maxY; y++) {
         for (let z = minZ; z <= maxZ; z++) {
           const v = this.voxelWorld.getVoxel(x, y, z);
-          if (v !== VoxelType.AIR && v !== VoxelType.BEDROCK) {
+          if (v !== VoxelType.AIR && v !== VoxelType.BEDROCK && v !== VoxelType.WATER) {
             blocks.push({ x, y, z, type: v });
             sumX += x + 0.5;
             sumY += y + 0.5;
@@ -1445,6 +1448,9 @@ export class PhysicsEngine {
       this.voxelWorld.update();
       this.mobs.update(scaledDt, pos);
     }
+    // Water: spread at 20 ticks/s and animate the texture
+    this.fluids.update(scaledDt);
+    this.voxelWorld.updateWater(deltaTime);
 
     // Apply drag spring force if a rigid body is grabbed
     if (this.grabbedEntity) {

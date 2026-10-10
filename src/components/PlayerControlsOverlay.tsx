@@ -125,7 +125,7 @@ export const PlayerControlsOverlay: React.FC<PlayerControlsOverlayProps> = ({
 
     const jump = jumpPressed || keysDown.current.has('Space');
     const shift = keysDown.current.has('ShiftLeft') || keysDown.current.has('ShiftRight');
-    const descend = isFlying && (descendPressed || shift || keysDown.current.has('KeyC'));
+    const descend = descendPressed || keysDown.current.has('KeyC') || (isFlying && shift);
     const sprint = !isFlying && (isSprinting || shift);
 
     onInputUpdate({

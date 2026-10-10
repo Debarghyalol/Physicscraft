@@ -10,6 +10,8 @@ export interface ItemDef {
   /** Flat item sprite (textures/<texture>.png) for non-block items. */
   texture?: string;
   tool?: 'flint_and_steel';
+  /** Buckets: empty picks up a water source, water places one. */
+  bucket?: 'empty' | 'water';
   /** Melee damage in half-hearts when used as a weapon (hand = 1). */
   damage?: number;
   toolKind?: 'sword' | 'pickaxe' | 'axe' | 'shovel' | 'hoe';
@@ -67,6 +69,8 @@ const TOOLS: ItemDef[] = TOOL_KINDS.flatMap((k, ki) =>
 export const ITEM_DEFS: ItemDef[] = [
   ...BLOCKS.map((b) => ({ id: `block:${b.voxel}`, name: b.name, maxStack: 64, voxel: b.voxel })),
   { id: 'tool:flint_and_steel', name: 'Flint and Steel', maxStack: 1, texture: 'item/flint_and_steel', tool: 'flint_and_steel' },
+  { id: 'item:bucket', name: 'Bucket', maxStack: 1, texture: 'item/bucket', bucket: 'empty' },
+  { id: 'item:water_bucket', name: 'Water Bucket', maxStack: 1, texture: 'item/water_bucket', bucket: 'water' },
   ...TOOLS,
   ...MUSIC_DISCS.map((d) => ({ id: `disc:${d.id}`, name: `Music Disc - ${d.title}`, maxStack: 1, disc: d.id })),
 ];

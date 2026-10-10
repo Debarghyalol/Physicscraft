@@ -154,7 +154,7 @@ export class BlockParticles {
   }
 
   private solidAt(x: number, y: number, z: number): boolean {
-    return this.voxelWorld.getVoxel(Math.floor(x), Math.floor(y), Math.floor(z)) !== VoxelType.AIR;
+    return this.voxelWorld.isSolidAt(Math.floor(x), Math.floor(y), Math.floor(z));
   }
 
   public update(delta: number) {

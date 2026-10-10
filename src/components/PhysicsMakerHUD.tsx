@@ -72,7 +72,7 @@ export const PhysicsMakerHUD: React.FC<PhysicsMakerHUDProps> = ({
           for (let y = bounds.min.y; y <= bounds.max.y; y++) {
             for (let z = bounds.min.z; z <= bounds.max.z; z++) {
               const v = engine.voxelWorld.getVoxel(x, y, z);
-              if (v !== 0 && v !== 4) {
+              if (v !== 0 && v !== 4 && v !== 14) {
                 // not AIR or BEDROCK
                 solidCount++;
               }

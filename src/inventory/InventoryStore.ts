@@ -33,6 +33,8 @@ class InventoryStore {
     this.slots[10] = { id: 'disc:13', count: 1 };
     this.slots[11] = { id: blockItemId(VoxelType.TNT), count: 64 };
     this.slots[12] = { id: blockItemId(VoxelType.JUKEBOX), count: 64 };
+    this.slots[22] = { id: 'item:bucket', count: 1 };
+    this.slots[23] = { id: 'item:water_bucket', count: 1 };
     ['wooden_sword', 'stone_sword', 'iron_sword', 'diamond_sword', 'iron_axe', 'iron_pickaxe', 'iron_shovel', 'iron_hoe', 'netherite_sword'].forEach(
       (n, i) => (this.slots[13 + i] = { id: `tool:${n}`, count: 1 })
     );

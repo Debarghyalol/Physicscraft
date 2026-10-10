@@ -3,6 +3,7 @@ import { VoxelWorld } from '../rendering/VoxelWorld';
 import { VoxelType } from '../types/physics';
 import { soundManager } from '../audio/SoundEffects';
 import { createPigRig, PigRig } from './PigModel';
+import { WaterSample, makeWaterSample, sampleWater } from '../fluid/fluidPhysics';
 
 /**
  * A pig. Behaviour mirrors vanilla's goal list (Panic 1.25x, WaterAvoidingRandomStroll 1.0x every
@@ -33,6 +34,8 @@ export class Pig {
   private vy = 0;
   private vz = 0;
   private onGround = false;
+  private inWater = false;
+  private waterSample: WaterSample = makeWaterSample();
 
   public health = MAX_HEALTH;
   public hurtTime = 0; // seconds of red flash left
@@ -204,6 +207,7 @@ export class Pig {
     for (let y = by + 7; y >= by - 7; y--) {
       const here = this.world.getVoxel(Math.floor(x), y, Math.floor(z));
       if (here === VoxelType.AIR) continue;
+      if (here === VoxelType.WATER) return null; // WaterAvoidingRandomStroll: never pick water
       const a1 = this.world.getVoxel(Math.floor(x), y + 1, Math.floor(z));
       const a2 = this.world.getVoxel(Math.floor(x), y + 2, Math.floor(z));
       return a1 === VoxelType.AIR && a2 === VoxelType.AIR ? y + 1 : null;
@@ -253,7 +257,7 @@ export class Pig {
     const diff = angleDiff(this.yaw, want);
     this.yaw += Math.sign(diff) * Math.min(Math.abs(diff), 10 * D2R * dt * 20);
 
-    const speed = WALK_SPEED * (panicking ? PANIC_MULT : 1) * (Math.abs(diff) > 1.2 ? 0.3 : 1);
+    const speed = WALK_SPEED * (panicking ? PANIC_MULT : 1) * (Math.abs(diff) > 1.2 ? 0.3 : 1) * (this.inWater ? 0.55 : 1);
     const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
 
     // Don't walk off cliffs (vanilla paths avoid drops > 3) unless fleeing.
@@ -261,7 +265,7 @@ export class Pig {
       const ax = this.position.x + fx * 0.8, az = this.position.z + fz * 0.8;
       let ground = false;
       for (let d = 0; d <= 3 && !ground; d++) {
-        ground = this.world.getVoxel(Math.floor(ax), Math.floor(this.position.y) - 1 - d, Math.floor(az)) !== VoxelType.AIR;
+        ground = this.world.isSolidAt(Math.floor(ax), Math.floor(this.position.y) - 1 - d, Math.floor(az));
       }
       if (!ground) {
         this.target = null;
@@ -270,14 +274,14 @@ export class Pig {
     }
 
     // Step up one-block ledges.
-    if (this.onGround) {
+    if (this.onGround || this.inWater) {
       const ax = this.position.x + fx * 0.65, az = this.position.z + fz * 0.65;
       const fy = Math.floor(this.position.y + 0.05);
-      const blocked = this.world.getVoxel(Math.floor(ax), fy, Math.floor(az)) !== VoxelType.AIR;
+      const blocked = this.world.isSolidAt(Math.floor(ax), fy, Math.floor(az));
       const clear =
-        this.world.getVoxel(Math.floor(ax), fy + 1, Math.floor(az)) === VoxelType.AIR &&
-        this.world.getVoxel(Math.floor(ax), fy + 2, Math.floor(az)) === VoxelType.AIR;
-      if (blocked && clear) this.vy = JUMP_V;
+        !this.world.isSolidAt(Math.floor(ax), fy + 1, Math.floor(az)) &&
+        !this.world.isSolidAt(Math.floor(ax), fy + 2, Math.floor(az));
+      if (blocked && clear) this.vy = this.inWater && !this.onGround ? 6.0 : JUMP_V; // jumpOutOfFluid / step up
     }
 
     this.vx += (fx * speed - this.vx) * Math.min(1, dt * 10);
@@ -294,7 +298,7 @@ export class Pig {
   }
 
   private solidAt(x: number, y: number, z: number) {
-    return this.world.getVoxel(Math.floor(x), Math.floor(y), Math.floor(z)) !== VoxelType.AIR;
+    return this.world.isSolidAt(Math.floor(x), Math.floor(y), Math.floor(z));
   }
 
   private intersects(): boolean {
@@ -310,9 +314,23 @@ export class Pig {
 
   private physics(dt: number) {
     dt = Math.min(dt, 0.05);
-    this.vy -= GRAVITY * dt;
-    if (this.vy < -40) this.vy = -40;
     const hw = WIDTH / 2;
+    const ws = sampleWater(this.world, this.position.x - hw, this.position.x + hw, this.position.y, this.position.y + HEIGHT, this.position.z - hw, this.position.z + hw, this.waterSample);
+    this.inWater = ws.count > 0;
+    if (this.inWater) {
+      // travelInWater: 0.8 drag, gravity/16 sink, and FloatGoal's 0.04/tick jumps (80% of ticks)
+      // while deeper than 0.4, so pigs bob at the surface and get carried by currents.
+      const lam = 4.463;
+      const e = Math.exp(-lam * dt);
+      let acc = -2;
+      if (ws.height > 0.4) acc += 12.8;
+      this.vx = this.vx * e + ws.flowX * 5.6 * dt;
+      this.vz = this.vz * e + ws.flowZ * 5.6 * dt;
+      this.vy = this.vy * e + (acc / lam) * (1 - e);
+    } else {
+      this.vy -= GRAVITY * dt;
+    }
+    if (this.vy < -40) this.vy = -40;
 
     this.position.x += this.vx * dt;
     if (this.intersects()) {

@@ -55,6 +55,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const [currentFps, setCurrentFps] = useState(60);
   const fpsRef = useRef(60);
   const [isFlying, setIsFlying] = useState(false);
+  const [eyeInWater, setEyeInWater] = useState(false);
   const [shaderDiagnostics, setShaderDiagnostics] = useState<string[]>([]);
   const lastPresetRef = useRef<string | null>(null);
   const [debugSample, setDebugSample] = useState<DebugFrameSample>({
@@ -296,6 +297,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       if (engine.player) {
         engine.player.setViewMode('first_person');
         engine.player.onFlyingChange = setIsFlying;
+        engine.player.onEyeWaterChange = setEyeInWater;
       }
 
       // Resource packs: apply now and whenever the selection changes
@@ -577,6 +579,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     >
       {/* 3D WebGPU Canvas */}
       <div ref={containerRef} className="w-full h-full cursor-crosshair" />
+
+      {/* Underwater view tint (vanilla: blue water fog when the camera is submerged) */}
+      {eyeInWater && (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            zIndex: 5,
+            background: 'rgba(28, 62, 190, 0.42)',
+            boxShadow: 'inset 0 0 180px 40px rgba(0, 8, 60, 0.55)',
+          }}
+        />
+      )}
 
       <CreativeInventoryScreen />
 

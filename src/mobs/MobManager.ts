@@ -75,7 +75,7 @@ export class MobManager {
         const px = x + (Math.random() - 0.5) * 4, pz = z + (Math.random() - 0.5) * 4;
         if (!this.world.hasColumnAt(px, pz)) continue;
         const py = this.world.getElevationAt(px, pz);
-        if (this.world.getVoxel(Math.floor(px), Math.floor(py) - 1, Math.floor(pz)) === VoxelType.AIR) continue;
+        if (!this.world.isSolidAt(Math.floor(px), Math.floor(py) - 1, Math.floor(pz))) continue;
         const pig = new Pig(this.world, this.texture, px, py + 0.02, pz);
         this.scene.add(pig.rig.root);
         this.pigs.push(pig);

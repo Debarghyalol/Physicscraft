@@ -124,7 +124,38 @@ class SoundSynthesizer {
       query: '?url',
       import: 'default',
     })) as string[],
+    bucket_empty: Object.values(import.meta.glob('../../sounds/item/bucket/empty[123].ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    bucket_fill: Object.values(import.meta.glob('../../sounds/item/bucket/fill[123].ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    splash: Object.values(import.meta.glob('../../sounds/liquid/splash*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    big_splash: Object.values(import.meta.glob('../../sounds/liquid/heavy_splash.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
+    swim: Object.values(import.meta.glob('../../sounds/liquid/swim*.ogg', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })) as string[],
   };
+
+  /** Water interaction sounds (buckets, splashes, swimming strokes). */
+  public playWaterSound(kind: 'bucket_empty' | 'bucket_fill' | 'splash' | 'big_splash' | 'swim', volume: number = 1) {
+    if (this.isMuted || volume <= 0.01) return;
+    this.playAssetGroup(kind, volume, 0.9, 1.1);
+  }
 
   private playAsset(url: string, volume: number = 1.0, playbackRate: number = 1.0): void {
     if (this.isMuted || typeof window === 'undefined') return;

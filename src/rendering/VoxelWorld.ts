@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { float, mrt, uniform as tslUniform, uniformTexture, vec4 } from 'three/tsl';
+import { attribute, float, mrt, uniform as tslUniform, uniformTexture, uv, vec4 } from 'three/tsl';
 import { voxelLightmap } from '../shaderpack/ShaderPackWebGPUFinalPass';
 import { buildGlassConnectTables, glassConnectMask } from './glassConnect';
 import { createConnectedGlassUV } from './GlassConnectedUV';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
+import { WaterTexture, spriteU, spriteV } from './WaterTexture';
+import { FluidAccess, getFlow, ownHeight } from '../fluid/fluid';
 
 export const CHUNK_SIZE_X = 16;
 export const CHUNK_SIZE_Z = 16;
@@ -25,6 +27,7 @@ const OPACITY = new Uint8Array(256).fill(15);
 OPACITY[VoxelType.AIR] = 0;
 OPACITY[VoxelType.GLASS] = 0;
 OPACITY[VoxelType.LEAVES] = 1;
+OPACITY[VoxelType.WATER] = 1;
 /** Block light emitted by each block type. */
 const EMISSION = new Uint8Array(256);
 EMISSION[VoxelType.GLOWSTONE] = 15;
@@ -42,6 +45,8 @@ const PAD = 18;
 const PAD_Y = PAD * PAD;
 const FACE_OFF = [1, -1, PAD_Y, -PAD_Y, PAD, -PAD];
 const AO_VALUES = [1.0, 0.76, 0.55, 0.35];
+/** Default plains water tint (BlockTintSources.water()). */
+const WATER_TINT = new THREE.Color(0x3f76e4);
 const FACE_MULT = [0.68, 0.68, 1.0, 0.52, 0.82, 0.82];
 /** Vertex shade in linear space (Minecraft multiplies in gamma space) for [face][aoLevel]. */
 const SHADE_LINEAR = new Float32Array(24);
@@ -178,6 +183,8 @@ export class ChunkColumn {
   cz: number;
   blocks = new Uint8Array(16 * 16 * WORLD_HEIGHT);
   light = new Uint8Array(16 * 16 * WORLD_HEIGHT);
+  /** Minecraft legacy fluid level (0 = source, 1-7 flowing, 8+ falling) for every WATER cell. */
+  fluid = new Uint8Array(16 * 16 * WORLD_HEIGHT);
   counts = new Uint16Array(SECTION_COUNT); // non-air blocks per subchunk (empty ones are skipped)
   topY = new Int16Array(256); // highest non-air block per (x,z)
   heightmap = new Int16Array(256); // highest light-blocking block per (x,z)
@@ -189,6 +196,7 @@ export class ChunkColumn {
   opaqueMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   cutoutMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   transMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
+  waterMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
 
   constructor(cx: number, cz: number) {
     this.cx = cx;
@@ -258,6 +266,19 @@ export class VoxelWorld {
   // Scratch buffers (avoid allocations while meshing / lighting)
   private padB = new Uint8Array(PAD * PAD * PAD);
   private padL = new Uint8Array(PAD * PAD * PAD);
+  private padF = new Uint8Array(PAD * PAD * PAD);
+  private bufWater = new MeshBuilder(256);
+  private waterFlow = { x: 0, z: 0 };
+  private waterAccess: FluidAccess = {
+    type: (x, y, z) => this.padB[(y * PAD + z) * PAD + x],
+    level: (x, y, z) => this.padF[(y * PAD + z) * PAD + x],
+  };
+  /** Called after any voxel changes: (x, y, z, oldType, newType). The fluid simulator listens here. */
+  public blockListeners: Array<(x: number, y: number, z: number, oldType: number, newType: number) => void> = [];
+  public waterTexture!: WaterTexture;
+  public waterMaterial!: MeshBasicNodeMaterial;
+  private waterTexNode = uniformTexture();
+  private lakeNoise: any;
   private padCols: Array<ChunkColumn | undefined> = new Array(9);
   private bufOpaque = new MeshBuilder(4096);
   private bufTrans = new MeshBuilder(256);
@@ -321,6 +342,10 @@ export class VoxelWorld {
     this.caveNoise = new FastNoiseLite(this.seed + 31);
     this.caveNoise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
     this.caveNoise.SetFrequency(0.045);
+
+    this.lakeNoise = new FastNoiseLite(this.seed + 57);
+    this.lakeNoise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+    this.lakeNoise.SetFrequency(0.018);
   }
 
   /**
@@ -608,6 +633,45 @@ export class VoxelWorld {
     this.patchLightShader(this.cutoutMaterial);
     this.patchLightShader(this.transparentMaterial);
     this.transparentMaterial.mrtNode = this.createGlassMRT();
+
+    // Water: own animated texture + material, drawn into the same translucent (glass) attachment.
+    this.waterTexture = new WaterTexture();
+    this.waterTexNode.value = this.waterTexture.texture;
+    this.waterMaterial = new MeshBasicNodeMaterial({
+      map: this.waterTexture.texture,
+      vertexColors: true,
+      transparent: true,
+      opacity: 1.0,
+      side: THREE.FrontSide,
+      depthTest: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+    this.waterMaterial.mrtNode = this.createWaterMRT();
+    this.waterTexture.onReplaced = (tex) => {
+      this.waterMaterial.map = tex;
+      this.waterTexNode.value = tex;
+      this.waterMaterial.needsUpdate = true;
+    };
+  }
+
+  /** Water output for the translucent attachment: animated texture x tint x face shade x voxel light. */
+  private createWaterMRT() {
+    const light = voxelLightmap() as any;
+    const curve = (l: any) => l.div(l.mul(-3.0).add(4.0));
+    const skyLevel = light.x.sub(this.skyDimNode.mul(SKY_DIM_LEVELS / 15)).max(0.0);
+    const voxelLit = curve(skyLevel).pow(2.2).max(curve(light.y).pow(2.2)).max(0.03);
+    const lit = light.z.greaterThan(0.5).select(voxelLit, float(1.0));
+    const sampled = this.waterTexNode.sample(uv()) as any;
+    const vcol = attribute('color', 'vec3') as any;
+    const water = vec4(sampled.rgb.mul(vcol).mul(this.glassTintNode).mul(lit), sampled.a);
+    const untouched = vec4(0.0, 0.0, 0.0, 0.0);
+    return mrt({ output: untouched, albedo: untouched, gdata: untouched, glass: water });
+  }
+
+  /** Per-frame: animate the water texture. */
+  public updateWater(dt: number) {
+    this.waterTexture.update(dt);
   }
 
   /**
@@ -807,6 +871,7 @@ export class VoxelWorld {
     this.cutoutMaterial.needsUpdate = true;
     this.transparentMaterial.needsUpdate = true;
     old.dispose();
+    void this.waterTexture.load();
   }
 
   /** 0 = noon, 1 = midnight: how much sky light is removed by the day/night cycle. */
@@ -820,6 +885,7 @@ export class VoxelWorld {
     this.material.color.copy(color);
     this.cutoutMaterial.color.copy(color);
     this.transparentMaterial.color.copy(color);
+    this.waterMaterial.color.copy(color);
     this.glassTintNode.value.copy(color);
   }
 
@@ -835,6 +901,10 @@ export class VoxelWorld {
     if (this.transparentMaterial) {
       this.transparentMaterial.wireframe = enabled;
       this.transparentMaterial.needsUpdate = true;
+    }
+    if (this.waterMaterial) {
+      this.waterMaterial.wireframe = enabled;
+      this.waterMaterial.needsUpdate = true;
     }
   }
 
@@ -944,25 +1014,50 @@ export class VoxelWorld {
    * mountains up to ~y=130, cheese caves (with glowstone in cave ceilings) and trees.
    * The flat plaza stays at y=8 so the physics presets keep working.
    */
+  /** Terrain surface height (y of the top block) before lakes are carved. */
+  private terrainHeightAt(wx: number, wz: number): number {
+    const dist = Math.hypot(wx, wz);
+    let height = 8;
+    if (dist >= 12) {
+      const amp = Math.min(1, (dist - 12) / 16);
+      const n = this.noise.GetNoise(wx, wz);
+      let h = (n + 1) * 4.5 * amp;
+      const m = this.mountainNoise.GetNoise(wx, wz);
+      if (m > 0.08) h += Math.pow((m - 0.08) / 0.92, 1.5) * 120 * amp;
+      const rim = Math.min(4, Math.floor(Math.pow(dist / 28, 2) * 3));
+      height = Math.max(5, Math.floor(8 + h + rim * amp));
+    }
+    return Math.min(height, WORLD_MAX_Y - 14);
+  }
+
+  /** Water level of natural lakes. Every non-lake column is at least this high, so lakes never spill. */
+  private static readonly LAKE_LEVEL = 8;
+
+  /** Lake depth (0 = no lake) at a column: low, gentle terrain away from the spawn plaza. */
+  private lakeDepthAt(wx: number, wz: number): number {
+    if (Math.hypot(wx, wz) < 26) return 0;
+    if (this.terrainHeightAt(wx, wz) > 13) return 0;
+    const v = this.lakeNoise.GetNoise(wx, wz);
+    if (v < 0.42) return 0;
+    return Math.min(4, 1 + Math.floor((v - 0.42) * 14));
+  }
+
   private populateChunkTerrain(col: ChunkColumn) {
     const { cx, cz, blocks } = col;
+    // Lake depth for this chunk plus a one column border (caves keep away from lake edges).
+    const lakeGrid = new Uint8Array(18 * 18);
+    for (let gz = 0; gz < 18; gz++) {
+      for (let gx = 0; gx < 18; gx++) lakeGrid[gz * 18 + gx] = this.lakeDepthAt(cx * 16 + gx - 1, cz * 16 + gz - 1);
+    }
     for (let lx = 0; lx < 16; lx++) {
       for (let lz = 0; lz < 16; lz++) {
         const wx = cx * 16 + lx;
         const wz = cz * 16 + lz;
         const dist = Math.hypot(wx, wz);
 
-        let height = 8;
-        if (dist >= 12) {
-          const amp = Math.min(1, (dist - 12) / 16);
-          const n = this.noise.GetNoise(wx, wz);
-          let h = (n + 1) * 4.5 * amp;
-          const m = this.mountainNoise.GetNoise(wx, wz);
-          if (m > 0.08) h += Math.pow((m - 0.08) / 0.92, 1.5) * 120 * amp;
-          const rim = Math.min(4, Math.floor(Math.pow(dist / 28, 2) * 3));
-          height = Math.max(5, Math.floor(8 + h + rim * amp));
-        }
-        height = Math.min(height, WORLD_MAX_Y - 14);
+        let height = this.terrainHeightAt(wx, wz);
+        const lakeD = lakeGrid[(lz + 1) * 18 + lx + 1];
+        if (lakeD > 0) height = VoxelWorld.LAKE_LEVEL - lakeD;
 
         // Bedrock: solid floor with a ragged 4-layer ceiling like vanilla
         blocks[this.idx(lx, WORLD_MIN_Y, lz)] = VoxelType.BEDROCK;
@@ -972,13 +1067,20 @@ export class VoxelWorld {
 
         for (let y = WORLD_MIN_Y + 1; y <= height; y++) {
           let block = VoxelType.STONE;
-          if (y === height) block = height >= 110 ? VoxelType.STONE : y <= 6 ? VoxelType.SAND : VoxelType.GRASS;
-          else if (y >= height - 3) block = height >= 110 ? VoxelType.STONE : y <= 6 ? VoxelType.SAND : VoxelType.DIRT;
+          if (y === height) block = lakeD > 0 ? VoxelType.SAND : height >= 110 ? VoxelType.STONE : y <= 6 ? VoxelType.SAND : VoxelType.GRASS;
+          else if (y >= height - 3) block = height >= 110 ? VoxelType.STONE : y <= 6 || lakeD > 0 ? VoxelType.SAND : VoxelType.DIRT;
           blocks[this.idx(lx, y, lz)] = block;
         }
 
-        // Caves (kept away from the central plaza and sealed from the surface)
-        if (dist > 20) {
+        // Lakes: source water from the lake floor up to LAKE_LEVEL.
+        if (lakeD > 0) {
+          for (let y = height + 1; y <= VoxelWorld.LAKE_LEVEL; y++) blocks[this.idx(lx, y, lz)] = VoxelType.WATER; // fluid level 0 = source
+        }
+
+        // Caves (kept away from the central plaza, lakes, and sealed from the surface)
+        let nearLake = false;
+        for (let k = 0; k < 9 && !nearLake; k++) nearLake = lakeGrid[(lz + (k / 3 | 0)) * 18 + lx + (k % 3)] > 0;
+        if (dist > 20 && !nearLake) {
           let prevCarved = false;
           for (let y = WORLD_MIN_Y + 6; y <= height - 8; y++) {
             const carved = this.caveNoise.GetNoise(wx, y * 1.6, wz) > 0.5;
@@ -1371,6 +1473,7 @@ export class VoxelWorld {
     }
     const B = this.padB;
     const Lt = this.padL;
+    const Fl = this.padF;
     const baseY = WORLD_MIN_Y + sy * 16;
     for (let py = 0; py < PAD; py++) {
       const wy = baseY + py - 1;
@@ -1384,18 +1487,22 @@ export class VoxelWorld {
           if (wy >= WORLD_MAX_Y) {
             B[pi] = 0;
             Lt[pi] = 0xf0;
+            Fl[pi] = 0;
           } else if (wy < WORLD_MIN_Y) {
             B[pi] = 0;
             Lt[pi] = 0;
+            Fl[pi] = 0;
           } else {
             const c = cols[czo * 3 + cxo];
             if (!c) {
               B[pi] = VoxelType.STONE; // unloaded neighbour: treat as solid so no border faces appear
               Lt[pi] = 0;
+              Fl[pi] = 0;
             } else {
               const ci = (((wy - WORLD_MIN_Y) << 4 | lz) << 4) | lx;
               B[pi] = c.blocks[ci];
               Lt[pi] = c.light[ci];
+              Fl[pi] = c.fluid[ci];
             }
           }
         }
@@ -1416,12 +1523,14 @@ export class VoxelWorld {
     const op = this.bufOpaque;
     const tr = this.bufTrans;
     const cut = this.bufCutout;
+    const wat = this.bufWater;
     // Cutout geometry is intentionally kept separate from opaque geometry so its
     // alpha-test material can participate in the same depth/G-buffer pass without
     // becoming blended transparency.
     op.reset();
     tr.reset();
     cut.reset();
+    wat.reset();
 
     if (count > 0) {
       this.fillPad(col, sy);
@@ -1440,13 +1549,19 @@ export class VoxelWorld {
             const pi = ((ly + 1) * PAD + lz + 1) * PAD + lx + 1;
             const voxel = B[pi];
             if (voxel === 0) continue;
+            if (voxel === VoxelType.WATER) {
+              this.meshWaterCell(wat, pi, wx0 + lx, baseWy + ly, wz0 + lz);
+              continue;
+            }
             const renderClass = voxel === VoxelType.GLASS ? 'translucent' : voxel === VoxelType.LEAVES ? 'cutout' : 'opaque';
             const mb = renderClass === 'translucent' ? tr : renderClass === 'cutout' ? cut : op;
             const wy = baseWy + ly;
 
             for (let f = 0; f < 6; f++) {
               if (f === 3 && wy <= WORLD_MIN_Y) continue;
-              const nb = B[pi + FACE_OFF[f]];
+              // Water is see-through for culling and AO: faces underwater must still be drawn.
+              const nbRaw = B[pi + FACE_OFF[f]];
+              const nb = nbRaw === VoxelType.WATER ? 0 : nbRaw;
               // Minecraft-style face visibility. Geometry occlusion is separate from
               // material back-face culling: leaves are DoubleSide, but adjacent leaf
               // voxels should still share one hidden internal face.
@@ -1481,9 +1596,9 @@ export class VoxelWorld {
                 const i1 = pi + inf.o1;
                 const i2 = pi + inf.o2;
                 const ic = pi + inf.oC;
-                const s1 = B[i1] !== 0 && B[i1] !== VoxelType.GLASS;
-                const s2 = B[i2] !== 0 && B[i2] !== VoxelType.GLASS;
-                const sc = B[ic] !== 0 && B[ic] !== VoxelType.GLASS;
+                const s1 = B[i1] !== 0 && B[i1] !== VoxelType.GLASS && B[i1] !== VoxelType.WATER;
+                const s2 = B[i2] !== 0 && B[i2] !== VoxelType.GLASS && B[i2] !== VoxelType.WATER;
+                const sc = B[ic] !== 0 && B[ic] !== VoxelType.GLASS && B[ic] !== VoxelType.WATER;
                 const aoLevel = s1 && s2 ? 3 : (s1 ? 1 : 0) + (s2 ? 1 : 0) + (sc ? 1 : 0);
                 const l1 = s1 ? l0 : Lt[i1];
                 const l2 = s2 ? l0 : Lt[i2];
@@ -1537,20 +1652,185 @@ export class VoxelWorld {
     this.applyBuilder(col, sy, op, 'opaque', cxw, cyw, czw);
     this.applyBuilder(col, sy, cut, 'cutout', cxw, cyw, czw);
     this.applyBuilder(col, sy, tr, 'translucent', cxw, cyw, czw);
+    this.applyBuilder(col, sy, wat, 'water', cxw, cyw, czw);
     if (rebuildCollider) this.updateSectionCollider(col, sy, op);
+  }
+
+  /**
+   * Water surface for one cell, a port of Minecraft's FluidRenderer.tesselate: sloped top that
+   * averages the heights of neighbouring water, scrolling flow texture oriented along the current,
+   * and side/bottom faces only where the neighbour is neither water nor an opaque block.
+   */
+  private meshWaterCell(mb: MeshBuilder, pi: number, X: number, Y: number, Z: number) {
+    const B = this.padB;
+    const F = this.padF;
+    const Lt = this.padL;
+    const W = VoxelType.WATER;
+    const occ = (v: number) => v !== 0 && v !== VoxelType.GLASS && v !== VoxelType.LEAVES && v !== W;
+    const up = B[pi + PAD_Y];
+    const down = B[pi - PAD_Y];
+    const north = B[pi - PAD];
+    const south = B[pi + PAD];
+    const west = B[pi - 1];
+    const east = B[pi + 1];
+    const renderUp = up !== W;
+    const renderDown = down !== W && !occ(down);
+    const renderN = north !== W && !occ(north);
+    const renderS = south !== W && !occ(south);
+    const renderW = west !== W && !occ(west);
+    const renderE = east !== W && !occ(east);
+    if (!(renderUp || renderDown || renderN || renderS || renderW || renderE)) return;
+
+    const hAt = (o: number): number => {
+      const t = B[pi + o];
+      if (t === W) return B[pi + o + PAD_Y] === W ? 1 : ownHeight(F[pi + o]);
+      return t !== 0 ? -1 : 0;
+    };
+    const hSelf = hAt(0);
+    let hNE = 1, hNW = 1, hSE = 1, hSW = 1;
+    if (hSelf < 1) {
+      const hN = hAt(-PAD), hS = hAt(PAD), hE = hAt(1), hWst = hAt(-1);
+      const avg = (h2: number, h1: number, corner: number) => {
+        if (h1 >= 1 || h2 >= 1) return 1;
+        let sum = 0;
+        let wt = 0;
+        const add = (h: number) => {
+          if (h >= 0.8) { sum += h * 10; wt += 10; }
+          else if (h >= 0) { sum += h; wt += 1; }
+        };
+        if (h1 > 0 || h2 > 0) {
+          const hc = hAt(corner);
+          if (hc >= 1) return 1;
+          add(hc);
+        }
+        add(hSelf); add(h1); add(h2);
+        return sum / wt;
+      };
+      hNE = avg(hN, hE, -PAD + 1);
+      hNW = avg(hN, hWst, -PAD - 1);
+      hSE = avg(hS, hE, PAD + 1);
+      hSW = avg(hS, hWst, PAD - 1);
+    }
+
+    const l0 = Lt[pi];
+    const l1 = Lt[pi + PAD_Y];
+    const sky = Math.max(l0 >> 4, l1 >> 4) / 15;
+    const blk = Math.max(l0 & 15, l1 & 15) / 15;
+    const px = pi % PAD;
+    const pz = Math.floor(pi / PAD) % PAD;
+    const py = Math.floor(pi / PAD_Y);
+    const still = this.waterTexture.still;
+    const flow = this.waterTexture.flow;
+    const q = this.waterQuadScratch;
+    const bottomOffs = renderDown ? 0.001 : 0;
+
+    const topOccluded = occ(up) && Math.min(hNW, hSW, hSE, hNE) >= 1;
+    if (renderUp && !topOccluded) {
+      hNW -= 0.001; hSW -= 0.001; hSE -= 0.001; hNE -= 0.001;
+      getFlow(this.waterAccess, px, py, pz, this.waterFlow);
+      const fl = this.waterFlow;
+      let u00: number, v00: number, u01: number, v01: number, u10: number, v10: number, u11: number, v11: number;
+      if (fl.x === 0 && fl.z === 0) {
+        u00 = still.u0; v00 = still.v0;
+        u01 = u00; v01 = still.v1;
+        u10 = still.u1; v10 = v01;
+        u11 = u10; v11 = v00;
+      } else {
+        const angle = Math.atan2(fl.z, fl.x) - Math.PI / 2;
+        const sn = Math.sin(angle) * 0.25;
+        const cs = Math.cos(angle) * 0.25;
+        u00 = spriteU(flow, 0.5 + (-cs - sn)); v00 = spriteV(flow, 0.5 - cs + sn);
+        u01 = spriteU(flow, 0.5 - cs + sn); v01 = spriteV(flow, 0.5 + cs + sn);
+        u10 = spriteU(flow, 0.5 + cs + sn); v10 = spriteV(flow, 0.5 + (cs - sn));
+        u11 = spriteU(flow, 0.5 + (cs - sn)); v11 = spriteV(flow, 0.5 + (-cs - sn));
+      }
+      q[0] = X; q[1] = Y + hNW; q[2] = Z; q[3] = u00; q[4] = v00;
+      q[5] = X; q[6] = Y + hSW; q[7] = Z + 1; q[8] = u01; q[9] = v01;
+      q[10] = X + 1; q[11] = Y + hSE; q[12] = Z + 1; q[13] = u10; q[14] = v10;
+      q[15] = X + 1; q[16] = Y + hNE; q[17] = Z; q[18] = u11; q[19] = v11;
+      this.emitWaterQuad(mb, q, SHADE_LINEAR[2 * 4], sky, blk, 0, 1, 0, true);
+    }
+
+    if (renderDown) {
+      const lb = Lt[pi - PAD_Y];
+      q[0] = X; q[1] = Y + bottomOffs; q[2] = Z; q[3] = still.u0; q[4] = still.v0;
+      q[5] = X + 1; q[6] = Y + bottomOffs; q[7] = Z; q[8] = still.u1; q[9] = still.v0;
+      q[10] = X + 1; q[11] = Y + bottomOffs; q[12] = Z + 1; q[13] = still.u1; q[14] = still.v1;
+      q[15] = X; q[16] = Y + bottomOffs; q[17] = Z + 1; q[18] = still.u0; q[19] = still.v1;
+      this.emitWaterQuad(mb, q, SHADE_LINEAR[3 * 4], (lb >> 4) / 15, (lb & 15) / 15, 0, -1, 0, false);
+    }
+
+    const side = (render: boolean, hh0: number, hh1: number, x0: number, z0: number, x1: number, z1: number, f: number, nx: number, nz: number) => {
+      if (!render) return;
+      const u0 = spriteU(flow, 0);
+      const u1 = spriteU(flow, 0.5);
+      const v01 = spriteV(flow, (1 - hh0) * 0.5);
+      const v02 = spriteV(flow, (1 - hh1) * 0.5);
+      const v1 = spriteV(flow, 0.5);
+      q[0] = x0; q[1] = Y + hh0; q[2] = z0; q[3] = u0; q[4] = v01;
+      q[5] = x1; q[6] = Y + hh1; q[7] = z1; q[8] = u1; q[9] = v02;
+      q[10] = x1; q[11] = Y + bottomOffs; q[12] = z1; q[13] = u1; q[14] = v1;
+      q[15] = x0; q[16] = Y + bottomOffs; q[17] = z0; q[18] = u0; q[19] = v1;
+      this.emitWaterQuad(mb, q, SHADE_LINEAR[f * 4], sky, blk, nx, 0, nz, true);
+    };
+    side(renderN, hNW, hNE, X, Z + 0.001, X + 1, Z + 0.001, 5, 0, -1);
+    side(renderS, hSE, hSW, X + 1, Z + 1 - 0.001, X, Z + 1 - 0.001, 4, 0, 1);
+    side(renderW, hSW, hNW, X + 0.001, Z + 1, X + 0.001, Z, 1, -1, 0);
+    side(renderE, hNE, hSE, X + 1 - 0.001, Z, X + 1 - 0.001, Z + 1, 0, 1, 0);
+  }
+
+  private waterQuadScratch = new Float32Array(20);
+
+  /** Append a water quad (4 verts: x,y,z,u,v with v growing downwards) plus an optional back face. */
+  private emitWaterQuad(mb: MeshBuilder, q: Float32Array, shade: number, sky: number, blk: number, nx: number, ny: number, nz: number, back: boolean) {
+    // Back faces double the index count, so size the builder for indices as well as vertices.
+    mb.ensure(Math.max(1, Math.ceil((mb.ic + 12) / 6) - (mb.vc >> 2)));
+    const vb = mb.vc;
+    for (let k = 0; k < 4; k++) {
+      const o = vb + k;
+      mb.pos[o * 3] = q[k * 5];
+      mb.pos[o * 3 + 1] = q[k * 5 + 1];
+      mb.pos[o * 3 + 2] = q[k * 5 + 2];
+      mb.uv[o * 2] = q[k * 5 + 3];
+      mb.uv[o * 2 + 1] = 1 - q[k * 5 + 4];
+      mb.normal[o * 3] = nx;
+      mb.normal[o * 3 + 1] = ny;
+      mb.normal[o * 3 + 2] = nz;
+      mb.col[o * 3] = WATER_TINT.r * shade;
+      mb.col[o * 3 + 1] = WATER_TINT.g * shade;
+      mb.col[o * 3 + 2] = WATER_TINT.b * shade;
+      mb.lit[o * 2] = sky;
+      mb.lit[o * 2 + 1] = blk;
+      mb.ctm[o] = 0;
+    }
+    mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 1; mb.idx[mb.ic++] = vb + 2;
+    mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 2; mb.idx[mb.ic++] = vb + 3;
+    if (back) {
+      mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 2; mb.idx[mb.ic++] = vb + 1;
+      mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 3; mb.idx[mb.ic++] = vb + 2;
+    }
+    mb.vc += 4;
   }
 
   private applyBuilder(
     col: ChunkColumn,
     sy: number,
     mb: MeshBuilder,
-    renderClass: 'opaque' | 'cutout' | 'translucent',
+    renderClass: 'opaque' | 'cutout' | 'translucent' | 'water',
     cx: number,
     cy: number,
     cz: number,
   ) {
-    const arr = renderClass === 'translucent' ? col.transMeshes : renderClass === 'cutout' ? col.cutoutMeshes : col.opaqueMeshes;
-    const material = renderClass === 'translucent' ? this.transparentMaterial : renderClass === 'cutout' ? this.cutoutMaterial : this.material;
+    const arr =
+      renderClass === 'water' ? col.waterMeshes
+      : renderClass === 'translucent' ? col.transMeshes
+      : renderClass === 'cutout' ? col.cutoutMeshes
+      : col.opaqueMeshes;
+    const material =
+      renderClass === 'water' ? this.waterMaterial
+      : renderClass === 'translucent' ? this.transparentMaterial
+      : renderClass === 'cutout' ? this.cutoutMaterial
+      : this.material;
     let mesh = arr[sy];
     if (mb.vc === 0) {
       if (mesh) {
@@ -1564,18 +1844,19 @@ export class VoxelWorld {
     if (!mesh) {
       mesh = new THREE.Mesh(geometry, material);
       mesh.matrixAutoUpdate = false;
-      mesh.castShadow = renderClass !== 'translucent';
+      mesh.castShadow = renderClass !== 'translucent' && renderClass !== 'water';
       mesh.receiveShadow = true;
       mesh.frustumCulled = true;
       // Keep all terrain on the active scene layer. Translucent terrain is
       // ordered after opaque/cutout terrain instead of being hidden on a layer
       // that the main WebGPU camera/pass does not render.
       mesh.layers.set(0);
-      mesh.renderOrder = renderClass === 'translucent' ? 10 : 0;
+      mesh.renderOrder = renderClass === 'water' ? 11 : renderClass === 'translucent' ? 10 : 0;
       mesh.userData = {
-        isVoxelChunk: renderClass !== 'translucent',
+        isVoxelChunk: renderClass !== 'translucent' && renderClass !== 'water',
         isVoxelChunkCutout: renderClass === 'cutout',
-        isVoxelChunkTrans: renderClass === 'translucent',
+        isVoxelChunkTrans: renderClass === 'translucent' || renderClass === 'water',
+        isVoxelChunkWater: renderClass === 'water',
         cx: col.cx,
         cz: col.cz,
         sy,
@@ -1627,6 +1908,7 @@ export class VoxelWorld {
     if (old === type) return;
 
     col.blocks[i] = type;
+    if (type !== VoxelType.WATER) col.fluid[i] = 0;
     col.modified = true;
     const sy = (wy - WORLD_MIN_Y) >> 4;
     col.counts[sy] += (type !== 0 ? 1 : 0) - (old !== 0 ? 1 : 0);
@@ -1652,6 +1934,38 @@ export class VoxelWorld {
     // geometry changed here: remesh this subchunk (and neighbours the cell touches, for culling / AO)
     this.markAround(wx, wy, wz, true);
     if (this.batchDepth === 0) this.processDirty(Infinity);
+    for (const fn of this.blockListeners) fn(wx, wy, wz, old, type);
+  }
+
+  /** Legacy fluid level (0 = source .. 15) of a water cell; meaningless when the cell is not water. */
+  public getFluidLevel(wx: number, wy: number, wz: number): number {
+    if (wy < WORLD_MIN_Y || wy >= WORLD_MAX_Y) return 0;
+    const col = this.colAt(wx, wz);
+    return col ? col.fluid[this.idx(wx & 15, wy, wz & 15)] : 0;
+  }
+
+  /** True for blocks entities collide with: everything except air and water. */
+  public isSolidAt(wx: number, wy: number, wz: number): boolean {
+    const v = this.getVoxel(wx, wy, wz);
+    return v !== VoxelType.AIR && v !== VoxelType.WATER;
+  }
+
+  /** Place or update water in a cell (source = level 0). Replaces whatever was there. */
+  public setWater(wx: number, wy: number, wz: number, level: number) {
+    if (wy < WORLD_MIN_Y || wy >= WORLD_MAX_Y) return;
+    const col = this.getChunk(wx >> 4, wz >> 4);
+    const i = this.idx(wx & 15, wy, wz & 15);
+    if (col.blocks[i] === VoxelType.WATER) {
+      if (col.fluid[i] === level) return;
+      col.fluid[i] = level;
+      col.modified = true;
+      this.markAround(wx, wy, wz, true);
+      if (this.batchDepth === 0) this.processDirty(Infinity);
+      for (const fn of this.blockListeners) fn(wx, wy, wz, VoxelType.WATER, VoxelType.WATER);
+      return;
+    }
+    col.fluid[i] = level; // before setVoxel, which meshes immediately outside a batch
+    this.setVoxel(wx, wy, wz, VoxelType.WATER);
   }
 
   // ======================================================================
@@ -1751,6 +2065,12 @@ export class VoxelWorld {
         this.scene.remove(t);
         t.geometry.dispose();
         col.transMeshes[sy] = null;
+      }
+      const w = col.waterMeshes[sy];
+      if (w) {
+        this.scene.remove(w);
+        w.geometry.dispose();
+        col.waterMeshes[sy] = null;
       }
     }
   }
@@ -1955,7 +2275,11 @@ export class VoxelWorld {
     }
   }
 
-  public raycastVoxel(ray: THREE.Ray, maxDistance: number = 8.0): VoxelRaycastHit | null {
+  /**
+   * Voxel raycast. Water is ignored by default (like vanilla's ClipContext.Fluid.NONE); with
+   * `fluids = 'source'` it also stops at water source blocks (what an empty bucket targets).
+   */
+  public raycastVoxel(ray: THREE.Ray, maxDistance: number = 8.0, fluids: 'none' | 'source' = 'none'): VoxelRaycastHit | null {
     let t = 0;
     const step = 0.08;
     const currentPos = new THREE.Vector3();
@@ -1969,7 +2293,8 @@ export class VoxelWorld {
       const bz = Math.floor(currentPos.z);
 
       const voxel = this.getVoxel(bx, by, bz);
-      if (voxel !== VoxelType.AIR) {
+      const hitsWater = voxel === VoxelType.WATER && fluids === 'source' && this.getFluidLevel(bx, by, bz) === 0;
+      if ((voxel !== VoxelType.AIR && voxel !== VoxelType.WATER) || hitsWater) {
         const normal = new THREE.Vector3(0, 1, 0);
         if (hasAir) {
           const abx = Math.floor(lastAirPos.x);
@@ -2009,5 +2334,7 @@ export class VoxelWorld {
     this.material.dispose();
     this.cutoutMaterial.dispose();
     this.transparentMaterial.dispose();
+    this.waterMaterial.dispose();
+    this.waterTexture.dispose();
   }
 }
