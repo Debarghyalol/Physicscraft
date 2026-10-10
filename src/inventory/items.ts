@@ -36,6 +36,13 @@ const BLOCKS: { voxel: VoxelType; name: string }[] = [
   { voxel: VoxelType.GOLD, name: 'Block of Gold' },
   { voxel: VoxelType.GLOWSTONE, name: 'Glowstone' },
   { voxel: VoxelType.JUKEBOX, name: 'Jukebox' },
+  // Automatically expose every appended voxel type in the creative inventory/search grid.
+  ...Object.entries(VoxelType)
+    .filter(([key, value]) => !/^\\d+$/.test(key) && typeof value === 'number' && value > VoxelType.WATER)
+    .map(([key, value]) => ({
+      voxel: value as VoxelType,
+      name: key.toLowerCase().split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' '),
+    })),
 ];
 
 // Java 1.21 attack damage per tier: [sword, pickaxe, axe, shovel, hoe]
