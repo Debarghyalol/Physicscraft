@@ -24,6 +24,8 @@ class GlassCtmNode extends TSLNode {
 export interface GlassAtlasLayout {
   /** Number of tiles across the atlas row. */
   columns: number;
+  /** Number of tile rows in the atlas. */
+  rows: number;
   /** Inner (gutter-free) tile bounds, as fractions of a tile cell. */
   innerMin: number;
   innerMax: number;
@@ -45,14 +47,19 @@ const INTERIOR = 1.5 / 16;
  * corner texel is kept, which draws the small inner-corner mark.
  */
 export function createConnectedGlassUV(layout: GlassAtlasLayout): Node {
-  const { columns, innerMin, innerMax, innerMinV, innerMaxV } = layout;
+  const { columns, rows, innerMin, innerMax, innerMinV, innerMaxV } = layout;
   const mesherUV = uv();
 
   // Recover the tile column and the 0..1 position inside the tile from the baked atlas UV.
   const scaledU = mesherUV.x.mul(columns);
   const tileColumn = scaledU.floor();
   const localU = scaledU.sub(tileColumn).sub(innerMin).div(innerMax - innerMin);
-  const localV = mesherUV.y.sub(innerMinV).div(innerMaxV - innerMinV);
+  // Atlas V is flipped (canvas row 0 is at V~1). Recover the tile row and the position inside
+  // the tile, with localV = 0 at the tile bottom and 1 at the top (same as the old 1-row atlas).
+  const scaledV = float(1).sub(mesherUV.y).mul(rows);
+  const tileRow = scaledV.floor();
+  const fromTop = scaledV.sub(tileRow).sub(innerMinV).div(innerMaxV - innerMinV);
+  const localV = float(1).sub(fromTop);
 
   const ctm = new GlassCtmNode() as unknown as Node;
   const mask = (ctm as any).x.add(0.5).floor();
@@ -85,7 +92,7 @@ export function createConnectedGlassUV(layout: GlassAtlasLayout): Node {
   const v = keepCorner.select(localV, connectedV);
 
   const atlasU = tileColumn.add(u.mul(innerMax - innerMin).add(innerMin)).div(columns);
-  const atlasV = v.mul(innerMaxV - innerMinV).add(innerMinV);
+  const atlasV = float(1).sub(tileRow.add(innerMaxV).sub(v.mul(innerMaxV - innerMinV)).div(rows));
 
   return present.select(vec2(atlasU, atlasV), mesherUV) as unknown as Node;
 }
