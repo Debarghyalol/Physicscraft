@@ -17,10 +17,10 @@ export const DENSITY_JSON: Record<string, any> = {
  "overworld/jaggedness":{"type":"minecraft:mul","left":{"type":"minecraft:noise","noise":"minecraft:jagged","xz_scale":1500,"y_scale":0},"right":0.25},
  "overworld/sloped_cheese":{"type":"minecraft:add","left":{"type":"minecraft:mul","left":{"type":"minecraft:quarter_negative","input":{"type":"minecraft:mul","left":{"type":"minecraft:add","left":"minecraft:overworld/depth","right":{"type":"minecraft:mul","left":"minecraft:overworld/jaggedness","right":{"type":"minecraft:constant","argument":0.0}}},"right":"minecraft:overworld/factor"}},"right":4},"right":"minecraft:overworld/base_3d_noise"},
  "overworld/base_3d_noise":{"type":"minecraft:old_blended_noise","smear_scale_multiplier":8,"xz_factor":80,"xz_scale":0.25,"y_factor":160,"y_scale":0.125},
- "overworld/final_density":{"type":"minecraft:add","left":{"type":"minecraft:min","left":{"type":"minecraft:squeeze","input":{"type":"minecraft:interpolated","cell_size_xz":4,"cell_size_y":8,"input":{"type":"minecraft:mul","left":{"type":"minecraft:blend_density","input":{"type":"minecraft:constant","argument":0.1171875}},"right":0.64}}},"right":"minecraft:overworld/caves/noodle"},
+ "overworld/final_density":{"type":"minecraft:add","left":{"type":"minecraft:min","left":{"type":"minecraft:squeeze","input":{"type":"minecraft:interpolated","cell_size_xz":4,"cell_size_y":8,"input":{"type":"minecraft:mul","left":{"type":"minecraft:blend_density","input":{"type":"minecraft:constant","argument":0.1171875}},"right":0.64}}},"right":"minecraft:overworld/caves/noodle"}},
  "overworld/preliminary_surface_level":{"type":"minecraft:constant","argument":63},
  "overworld/chunk_surface_level":{"type":"minecraft:find_top_surface"}
-} as Record<string, any>;
+};
 export const NOISE_SETTINGS: Record<string, any> = {
  "continentalness":{"amplitude_modifiers":[1,1,2,2,2,1,1,1,1],"base_amplitude":0.8880832896205223,"base_octave":-9,"octave_count":9},
  "erosion":{"amplitude_modifiers":[1,1,0,1,1],"base_amplitude":1.063180125160734,"base_octave":-9,"octave_count":5},
