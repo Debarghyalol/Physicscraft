@@ -10,7 +10,7 @@ export class DensityFunctionCompiler{
  compileRoot(name='minecraft:overworld/final_density'):Density{return this.compileRef(name);}
  compileRef(name:string):Density{
   if(this.compiled.has(name))return this.compiled.get(name)!;const v=this.definitions.get(name);
-  if(v===undefined){if(name==='minecraft:zero')return()=>0;if(name==='minecraft:y')return p=>p.y;if(name==='minecraft:overworld/caves/noodle'||name==='minecraft:overworld/caves/entrances')return()=>1e6;if(name==='minecraft:beardifier'||name==='minecraft:blend_offset')return()=>0;if(name==='minecraft:blend_density')return this.compile(v?.input);if(name==='minecraft:blend_alpha')return()=>1;throw new Error('Unknown density function: '+name);}
+  if(v===undefined){if(name==='minecraft:zero')return()=>0;if(name==='minecraft:y')return p=>p.y;if(name==='minecraft:overworld/caves/noodle'||name==='minecraft:overworld/caves/entrances')return()=>1e6;if(name==='minecraft:beardifier'||name==='minecraft:blend_offset')return()=>0;if(name==='minecraft:blend_density')return()=>0;if(name==='minecraft:blend_alpha')return()=>1;throw new Error('Unknown density function: '+name);}
   const f=this.compile(v);this.compiled.set(name,f);return f;
  }
  private compile(v:any):Density{
