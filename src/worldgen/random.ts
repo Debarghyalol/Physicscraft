@@ -29,6 +29,8 @@ export class Xoroshiro128PlusPlus{
  nextInt():number{return Number(BigInt.asIntN(32,this.nextLong()));}
  nextIntBounded(bound:number):number{if(!Number.isInteger(bound)||bound<=0)throw new RangeError('bound must be positive');for(;;){const bits=BigInt(this.nextInt()>>>0),product=bits*BigInt(bound),low=product&0xffffffffn;if(low<BigInt(bound)){const threshold=(0x100000000n-BigInt(bound))%BigInt(bound);if(low<threshold)continue;}return Number(product>>32n);}}
  nextBoolean():boolean{return(u64(this.nextLong())&1n)!==0n;}nextFloat():number{return Number(u64(this.nextLong())>>40n)/16777216;}nextDouble():number{return Number(u64(this.nextLong())>>11n)/9007199254740992;}
+ /** Vanilla RandomSource.forkPositional(): consumes two longs from this generator. */
+ forkPositional():PositionalRandomFactory{return new PositionalRandomFactory(this.nextLong(),this.nextLong());}
  fork():Xoroshiro128PlusPlus{return new Xoroshiro128PlusPlus(this.nextLong(),this.nextLong());}
  static fromSeed(seed:bigint):Xoroshiro128PlusPlus{const s=upgradeSeedTo128bit(seed);return new Xoroshiro128PlusPlus(s.lo,s.hi);}
  static fromRawSeed(s:Seed128):Xoroshiro128PlusPlus{return new Xoroshiro128PlusPlus(s.lo,s.hi);}
