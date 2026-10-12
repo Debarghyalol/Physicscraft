@@ -84,6 +84,6 @@ export class ChunkDensitySampler{
  constructor(private root:Density,private originX:number,private originZ:number,private minY=-64){}
  private index(x:number,y:number,z:number){return(y*5+z)*5+x;}
  private corner(x:number,y:number,z:number){const i=this.index(x,y,z);if(!this.ready[i]){this.values[i]=this.root({x:this.originX+x*4,y:this.minY+y*8,z:this.originZ+z*4});this.ready[i]=1;}return this.values[i];}
- sample(x:number,y:number,z:number):number{const rx=Math.max(0,Math.min(3.999999,x-this.originX)),rz=Math.max(0,Math.min(3.999999,z-this.originZ)),gx=rx/4,gz=rz/4,gy=Math.max(0,Math.min(47.999999,y-this.minY))/8,ix=Math.floor(gx),iz=Math.floor(gz),iy=Math.floor(gy),tx=gx-ix,tz=gz-iz,ty=gy-iy,l=(a:number,b:number,t:number)=>a+(b-a)*t;
+ sample(x:number,y:number,z:number):number{const rx=Math.max(0,Math.min(15.999999,x-this.originX)),rz=Math.max(0,Math.min(15.999999,z-this.originZ)),gx=rx/4,gz=rz/4,gy=Math.max(0,Math.min(383.999999,y-this.minY))/8,ix=Math.floor(gx),iz=Math.floor(gz),iy=Math.floor(gy),tx=gx-ix,tz=gz-iz,ty=gy-iy,l=(a:number,b:number,t:number)=>a+(b-a)*t;
   const a=l(this.corner(ix,iy,iz),this.corner(ix+1,iy,iz),tx),b=l(this.corner(ix,iy,iz+1),this.corner(ix+1,iy,iz+1),tx),c=l(this.corner(ix,iy+1,iz),this.corner(ix+1,iy+1,iz),tx),d=l(this.corner(ix,iy+1,iz+1),this.corner(ix+1,iy+1,iz+1),tx);return l(l(a,b,tz),l(c,d,tz),ty);}
 }
