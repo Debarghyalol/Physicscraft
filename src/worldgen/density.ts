@@ -32,7 +32,7 @@ export class DensityFunctionCompiler{
    case'slice':{const y=Number(v.y??0),f=input();return p=>f({...p,y});}
    case'gradient':{const a=Number(v.from_coordinate),b=Number(v.to_coordinate),lo=Number(v.from_value),hi=Number(v.to_value),axis=String(v.axis??'y');return p=>{const x=axis==='x'?p.x:axis==='z'?p.z:p.y;return a===b?lo:lo+(hi-lo)*Math.max(0,Math.min(1,(x-a)/(b-a)));};}
    case'abs':{const f=input();return p=>Math.abs(f(p));}case'square':{const f=input();return p=>f(p)**2;}case'cube':{const f=input();return p=>f(p)**3;}
-   case'sqrt':{const f=input();return p=>Math.sqrt(Math.max(0,f(p));}case'half_negative':{const f=input();return p=>f(p)<0?f(p)*.5:f(p);}
+   case'sqrt':{const f=input();return p=>Math.sqrt(Math.max(0,f(p)));}case'half_negative':{const f=input();return p=>f(p)<0?f(p)*.5:f(p);}
    case'quarter_negative':{const f=input();return p=>f(p)<0?f(p)*.25:f(p);}case'reciprocal':{const f=input();return p=>1/f(p);}
    case'negate':{const f=input();return p=>-f(p);}case'squeeze':{const f=input();return p=>{const x=Math.max(-1,Math.min(1,f(p)));return x/2-x*x*x/24;};}
    case'sign':{const f=input();return p=>Math.sign(f(p));}
