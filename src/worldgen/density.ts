@@ -10,7 +10,7 @@ export class DensityFunctionCompiler{
  compileRoot(name='minecraft:overworld/final_density'):Density{return this.compileRef(name);}
  compileRef(name:string):Density{
   if(this.compiled.has(name))return this.compiled.get(name)!;const v=this.definitions.get(name);
-  if(v===undefined){if(name==='minecraft:zero')return()=>0;if(name==='minecraft:y')return p=>p.y;if(name==='minecraft:overworld/caves/noodle'||name==='minecraft:overworld/caves/entrances')return()=>1e6;if(name==='minecraft:beardifier'||name==='minecraft:blend_offset')return()=>0;if(name==='minecraft:blend_density')return()=>0;if(name==='minecraft:blend_alpha')return()=>1;throw new Error('Unknown density function: '+name);}
+  if(v===undefined){if(name==='minecraft:zero')return()=>0;if(name==='minecraft:y')return p=>p.y;if(name==='minecraft:overworld/caves/noodle'||name==='minecraft:overworld/caves/entrances')return()=>1e6;if(name==='minecraft:beardifier'||name==='minecraft:blend_offset')return()=>0;if(name==='minecraft:blend_alpha')return()=>1;if(name==='minecraft:blend_density')return p=>p.y;throw new Error('Unknown density function: '+name);}
   const f=this.compile(v);this.compiled.set(name,f);return f;
  }
  private compile(v:any):Density{
@@ -21,13 +21,13 @@ export class DensityFunctionCompiler{
    case'y':return p=>p.y;
    case'zero':return()=>0;
    case'cache':case'cache_2d':return input();
-   case'interpolated':return this.interpolate(input(),Number(v.cell_size_xz??v.cell_size_xz??4),Number(v.cell_size_y??8));
+   case'interpolated':return this.interpolate(input(),Number(v.cell_size_xz??4),Number(v.cell_size_y??8));
    case'noise':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,'')),sx=Number(v.xz_scale??1),sy=Number(v.y_scale??1),shx=v.shift_x?c('shift_x'):()=>0,shz=v.shift_z?c('shift_z'):()=>0;return p=>n.sample((p.x+shx(p))*sx,p.y*sy,(p.z+shz(p))*sx);}
    case'shift_a':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.x*.25,0,p.z*.25)*4;}
    case'shift_b':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.z*.25,p.x*.25,0)*4;}
    case'shift':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.x*.25,p.y*.25,p.z*.25)*4;}
    case'blend_density':return input();case'blend_alpha':return()=>1;case'blend_offset':case'beardifier':return()=>0;
-   case'old_blended_noise':{const n=this.getNoise('base_3d_noise'),sx=684.412*Number(v.xz_scale??.25),sy=684.412*Number(v.y_scale??.125);return p=>n.sample(p.x*sx/684.412,p.y*sy/684.412,p.z*sx/684.412);}
+   case'old_blended_noise':{const n=this.getNoise('base_3d_noise'),sx=684.412*Number(v.xz_scale??.25),sy=684.412*Number(v.y_scale??.125);return p=>n.sample(p.x*sx,p.y*sy,p.z*sx);}
    case'spline':return p=>this.spline(v.spline,p);
    case'find_top_surface':return p=>p.y;
    case'cache_once':return input();
