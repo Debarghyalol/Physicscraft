@@ -18,6 +18,8 @@ export class DensityFunctionCompiler{
   const t=String(v.type??'').replace(/^minecraft:/,''),c=(k:string)=>this.compile(v[k]),input=()=>c('input');
   switch(t){
    case'constant':return()=>Number(v.argument??v.value??0);
+   case'y':return p=>p.y;
+   case'zero':return()=>0;
    case'cache':case'cache_2d':return input();
    case'interpolated':return this.interpolate(input(),Number(v.cell_size_xz??4),Number(v.cell_size_y??8));
    case'noise':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,'')),sx=Number(v.xz_scale??1),sy=Number(v.y_scale??1),shx=v.shift_x?c('shift_x'):()=>0,shz=v.shift_z?c('shift_z'):()=>0;return p=>n.sample((p.x+shx(p))*sx,p.y*sy,(p.z+shz(p))*sx);}
@@ -25,7 +27,7 @@ export class DensityFunctionCompiler{
    case'shift_b':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.z*.25,p.x*.25,0)*4;}
    case'shift':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.x*.25,p.y*.25,p.z*.25)*4;}
    case'blend_density':case'blend_alpha':case'blend_offset':case'beardifier':return()=>0;
-   case'old_blended_noise':{const n=this.getNoise('base_3d_noise'),sx=684.412*Number(v.xz_scale??.25),sy=684.412*Number(v.y_scale??.125);return p=>n.sample(p.x*sx,p.y*sy,p.z*sx);}
+   case'old_blended_noise':{const n=this.getNoise('base_3d_noise'),sx=684.412*Number(v.xz_scale??.25),sy=684.412*Number(v.y_scale??.125);return p=>n.sample(p.x*sx/684.412,p.y*sy/684.412,p.z*sx/684.412);}
    case'spline':return p=>this.spline(v.spline,p);
    case'find_top_surface':return p=>p.y;
    case'distance_to_point':return p=>Math.hypot(p.x-Number(v.x??0),p.y-Number(v.y??0),p.z-Number(v.z??0));
