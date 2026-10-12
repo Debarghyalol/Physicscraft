@@ -1,18 +1,23 @@
 #!/usr/bin/env node
-/** Generate data.generated.ts from a decompiler ZIP: npx tsx scripts/generate-worldgen-data.ts client.jar_Decompiler.com.zip */
+/** Generate src/worldgen/data.generated.ts from a decompiler ZIP.
+ * Usage: npx tsx scripts/generate-worldgen-data.ts client.jar_Decompiler.com.zip
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import JSZip from 'jszip';
 const input=process.argv[2];
 if(!input){console.error('Usage: npx tsx scripts/generate-worldgen-data.ts <minecraft-decompiler.zip>');process.exit(2);}
-const zip=await JSZip.loadAsync(fs.readFileSync(input)),density:Record<string,unknown>={},noise:Record<string,unknown>={};
+const zip=await JSZip.loadAsync(fs.readFileSync(input));
+const densities:Record<string,unknown>={},noises:Record<string,unknown>={};
 for(const [name,entry] of Object.entries(zip.files)){
  if(entry.dir)continue;
- const dp='data/minecraft/worldgen/density_function/',np='data/minecraft/worldgen/noise/';
- if(name.startsWith(dp)&&name.endsWith('.json'))density[name.slice(dp.length,-5)]=JSON.parse(await entry.async('string'));
- if(name.startsWith(np)&&name.endsWith('.json'))noise[name.slice(np.length,-5)]=JSON.parse(await entry.async('string'));
+ const d='data/minecraft/worldgen/density_function/',n='data/minecraft/worldgen/noise/';
+ if(name.startsWith(d)&&name.endsWith('.json'))densities[name.slice(d.length,-5)]=JSON.parse(await entry.async('string'));
+ if(name.startsWith(n)&&name.endsWith('.json'))noises[name.slice(n.length,-5)]=JSON.parse(await entry.async('string'));
 }
-if(!density['overworld/final_density'])throw new Error('This ZIP does not contain overworld/final_density.json');
+if(!densities['overworld/final_density'])throw new Error('Missing overworld/final_density.json in archive');
 fs.mkdirSync(path.dirname('src/worldgen/data.generated.ts'),{recursive:true});
-fs.writeFileSync('src/worldgen/data.generated.ts','// Generated from Minecraft worldgen JSON. Do not hand-edit.\nexport const DENSITY_JSON: Record<string, any> = '+JSON.stringify(density)+';\nexport const NOISE_SETTINGS: Record<string, any> = '+JSON.stringify(noise)+';\n');
-console.log('Generated '+Object.keys(density).length+' density functions and '+Object.keys(noise).length+' noise settings.');
+fs.writeFileSync('src/worldgen/data.generated.ts','// Generated from Minecraft worldgen JSON. Do not hand-edit.\n'+
+ 'export const DENSITY_JSON: Record<string, any> = '+JSON.stringify(densities)+';\n'+
+ 'export const NOISE_SETTINGS: Record<string, any> = '+JSON.stringify(noises)+';\n');
+console.log('Generated '+Object.keys(densities).length+' density JSONs and '+Object.keys(noises).length+' noise settings.');
