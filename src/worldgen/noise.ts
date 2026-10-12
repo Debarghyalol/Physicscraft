@@ -10,7 +10,7 @@ export class PerlinNoise{
  protected sampleRelative(ix:number,iy:number,iz:number,rx:number,ry:number,rz:number,originalY:number,interpY:number):number{
  const x0=this.permute(ix),x1=this.permute(ix+1),xy00=this.permute(x0+iy),xy01=this.permute(x0+iy+1),xy10=this.permute(x1+iy),xy11=this.permute(x1+iy+1),dot=(h:number,x:number,y:number,z:number)=>{const g=G[h&15];return g[0]*x+g[1]*y+g[2]*z;};
  const d000=dot(this.permute(xy00+iz),rx,interpY,rz),d100=dot(this.permute(xy10+iz),rx-1,interpY,rz),d010=dot(this.permute(xy01+iz),rx,interpY-1,rz),d110=dot(this.permute(xy11+iz),rx-1,interpY-1,rz),d001=dot(this.permute(xy00+iz+1),rx,interpY,rz-1),d101=dot(this.permute(xy10+iz+1),rx-1,interpY,rz-1),d011=dot(this.permute(xy01+iz+1),rx,interpY-1,rz-1),d111=dot(this.permute(xy11+iz+1),rx-1,interpY-1,rz-1);
- const ax=smooth(rx),ay=smooth(originalY),az=smooth(rz);return lerp(az,lerp(ay,lerp(ax,d000,d100),lerp(ax,d010,d110)),lerp(ay,lerp(ax,d001,d101),lerp(ax,d011,d111));
+ const ax=smooth(rx),ay=smooth(originalY),az=smooth(rz);return lerp(az,lerp(ay,lerp(ax,d000,d100),lerp(ax,d010,d110)),lerp(ay,lerp(ax,d001,d101),lerp(ax,d011,d111)));
  }
 }
 export class SmearedPerlinNoise extends PerlinNoise{
