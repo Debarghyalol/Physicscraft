@@ -27,7 +27,7 @@ export class DensityFunctionCompiler{
    case'shift_b':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.z*.25,p.x*.25,0)*4;}
    case'shift':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.x*.25,p.y*.25,p.z*.25)*4;}
    case'blend_density':return input();case'blend_alpha':return()=>1;case'blend_offset':case'beardifier':return()=>0;
-   case'old_blended_noise':{const n=this.getNoise('base_3d_noise'),sx=Number(v.xz_scale??.25),sy=Number(v.y_scale??.125);return p=>n.sample(p.x*684.412*sx,p.y*684.412*sy,p.z*684.412*sx);}
+   case'old_blended_noise':{const n=this.getNoise('base_3d_noise'),sx=Number(v.xz_scale??.25),sy=Number(v.y_scale??.125);return p=>n.sample(p.x*sx,p.y*sy,p.z*sx);}
    case'spline':return p=>this.spline(v.spline,p);
    case'find_top_surface':return p=>p.y;
    case'cache_once':return input();
