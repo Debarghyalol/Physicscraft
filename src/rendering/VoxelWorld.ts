@@ -7,6 +7,9 @@ import { createConnectedGlassUV } from './GlassConnectedUV';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
+import { DensityFunctionCompiler, ChunkDensitySampler } from '../worldgen/density';
+import { chooseTreeKind, placeTreeFeature } from '../worldgen/trees';
+import type { TreeKind } from '../worldgen/trees';
 import { WaterTexture, spriteU, spriteV } from './WaterTexture';
 import { FluidAccess, getFlow, ownHeight } from '../fluid/fluid';
 
@@ -322,6 +325,10 @@ export class VoxelWorld {
   public scene: THREE.Scene;
   private noise: any;
   private treeNoise: any;
+  private densityCompiler!: DensityFunctionCompiler;
+  private finalDensity: ((p: { x: number; y: number; z: number }) => number) | null = null;
+  private treeWrites = new Map<number, Array<{x:number;y:number;z:number;type:VoxelType}>>();
+  private generatedTreeCandidates = new Set<string>();
 
   // Terrain collision is handled by PlayerController's voxel AABB collision.
   private mountainNoise: any;
@@ -425,6 +432,8 @@ export class VoxelWorld {
   }
 
   private initNoise() {
+    this.densityCompiler = new DensityFunctionCompiler(this.seed);
+    this.finalDensity = this.densityCompiler.compileRoot();
     this.noise = new FastNoiseLite(this.seed);
     this.noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
     this.noise.SetFrequency(0.035);
@@ -1075,123 +1084,117 @@ export class VoxelWorld {
     return (h ^ (h >>> 16)) >>> 0;
   }
 
-  /**
-   * Terrain for a full -64..319 column: bedrock floor with rough layer, stone, dirt/grass/sand,
-   * mountains up to ~y=130, cheese caves (with glowstone in cave ceilings) and trees.
-   * The flat plaza stays at y=8 so the physics presets keep working.
-   */
-  /** Terrain surface height (y of the top block) before lakes are carved. */
+  /** Evaluate the compiled overworld router; interpolation uses a lazy shared cell-corner grid per column. */
+  private createDensitySampler(cx: number, cz: number): ChunkDensitySampler {
+    if (!this.finalDensity) throw new Error('Worldgen density router was not initialized');
+    return new ChunkDensitySampler(this.finalDensity, cx * 16, cz * 16, WORLD_MIN_Y);
+  }
+
+  /** Density-derived height query. Uses the same density field as terrain filling. */
   private terrainHeightAt(wx: number, wz: number): number {
-    const dist = Math.hypot(wx, wz);
-    let height = 8;
-    if (dist >= 12) {
-      const amp = Math.min(1, (dist - 12) / 16);
-      const n = this.noise.GetNoise(wx, wz);
-      let h = (n + 1) * 4.5 * amp;
-      const m = this.mountainNoise.GetNoise(wx, wz);
-      if (m > 0.08) h += Math.pow((m - 0.08) / 0.92, 1.5) * 120 * amp;
-      const rim = Math.min(4, Math.floor(Math.pow(dist / 28, 2) * 3));
-      height = Math.max(5, Math.floor(8 + h + rim * amp));
+    const cx = wx >> 4, cz = wz >> 4;
+    const sampler = this.createDensitySampler(cx, cz);
+    for (let y = WORLD_MAX_Y - 1; y >= WORLD_MIN_Y; y--) {
+      if (sampler.sample(wx, y, wz) > 0) return y;
     }
-    return Math.min(height, WORLD_MAX_Y - 14);
+    return WORLD_MIN_Y;
   }
 
-  /** Water level of natural lakes. Every non-lake column is at least this high, so lakes never spill. */
-  private static readonly LAKE_LEVEL = 8;
+  private static readonly SEA_LEVEL = 63;
 
-  /** Lake depth (0 = no lake) at a column: low, gentle terrain away from the spawn plaza. */
-  private lakeDepthAt(wx: number, wz: number): number {
-    if (Math.hypot(wx, wz) < 26) return 0;
-    if (this.terrainHeightAt(wx, wz) > 13) return 0;
-    const v = this.lakeNoise.GetNoise(wx, wz);
-    if (v < 0.42) return 0;
-    return Math.min(4, 1 + Math.floor((v - 0.42) * 14));
-  }
-
+  /** Fill a complete terrain column before applying features; the central spawn plaza is removed. */
   private populateChunkTerrain(col: ChunkColumn) {
     const { cx, cz, blocks } = col;
-    // Lake depth for this chunk plus a one column border (caves keep away from lake edges).
-    const lakeGrid = new Uint8Array(18 * 18);
-    for (let gz = 0; gz < 18; gz++) {
-      for (let gx = 0; gx < 18; gx++) lakeGrid[gz * 18 + gx] = this.lakeDepthAt(cx * 16 + gx - 1, cz * 16 + gz - 1);
-    }
+    const density = this.createDensitySampler(cx, cz);
+    const surfaceY = new Int16Array(256);
+    surfaceY.fill(WORLD_MIN_Y - 1);
+
     for (let lx = 0; lx < 16; lx++) {
       for (let lz = 0; lz < 16; lz++) {
-        const wx = cx * 16 + lx;
-        const wz = cz * 16 + lz;
-        const dist = Math.hypot(wx, wz);
+        const wx = cx * 16 + lx, wz = cz * 16 + lz;
+        let top = WORLD_MIN_Y - 1;
+        for (let y = WORLD_MAX_Y - 1; y >= WORLD_MIN_Y; y--) {
+          if (density.sample(wx, y, wz) > 0) { top = y; break; }
+        }
+        surfaceY[lz * 16 + lx] = top;
 
-        let height = this.terrainHeightAt(wx, wz);
-        const lakeD = lakeGrid[(lz + 1) * 18 + lx + 1];
-        if (lakeD > 0) height = VoxelWorld.LAKE_LEVEL - lakeD;
-
-        // Bedrock: solid floor with a ragged 4-layer ceiling like vanilla
+        // Bedrock bottom plus four deterministic rough layers, as requested.
         blocks[this.idx(lx, WORLD_MIN_Y, lz)] = VoxelType.BEDROCK;
         for (let k = 1; k <= 4; k++) {
-          if ((this.hash3(wx, WORLD_MIN_Y + k, wz) % 5) < 5 - k) blocks[this.idx(lx, WORLD_MIN_Y + k, lz)] = VoxelType.BEDROCK;
+          if ((this.hash3(wx, WORLD_MIN_Y + k, wz) % 5) < 5 - k) {
+            blocks[this.idx(lx, WORLD_MIN_Y + k, lz)] = VoxelType.BEDROCK;
+          }
         }
 
-        for (let y = WORLD_MIN_Y + 1; y <= height; y++) {
-          let block = VoxelType.STONE;
-          if (y === height) block = lakeD > 0 ? VoxelType.SAND : height >= 110 ? VoxelType.STONE : y <= 6 ? VoxelType.SAND : VoxelType.GRASS;
-          else if (y >= height - 3) block = height >= 110 ? VoxelType.STONE : y <= 6 || lakeD > 0 ? VoxelType.SAND : VoxelType.DIRT;
+        for (let y = WORLD_MIN_Y + 1; y <= top; y++) {
+          if (density.sample(wx, y, wz) <= 0) continue;
+          let block: VoxelType = y < 0 ? VoxelType.DEEPSLATE : VoxelType.STONE;
+          const depth = top - y;
+          if (depth === 0) {
+            if (top <= VoxelWorld.SEA_LEVEL + 1) block = VoxelType.SAND;
+            else if (top >= 240) block = VoxelType.SNOW_BLOCK;
+            else block = VoxelType.GRASS;
+          } else if (depth <= 3) {
+            block = top <= VoxelWorld.SEA_LEVEL + 1 ? VoxelType.SAND : VoxelType.DIRT;
+          }
           blocks[this.idx(lx, y, lz)] = block;
         }
 
-        // Lakes: source water from the lake floor up to LAKE_LEVEL.
-        if (lakeD > 0) {
-          for (let y = height + 1; y <= VoxelWorld.LAKE_LEVEL; y++) blocks[this.idx(lx, y, lz)] = VoxelType.WATER; // fluid level 0 = source
-        }
-
-        // Caves (kept away from the central plaza, lakes, and sealed from the surface)
-        let nearLake = false;
-        for (let k = 0; k < 9 && !nearLake; k++) nearLake = lakeGrid[(lz + (k / 3 | 0)) * 18 + lx + (k % 3)] > 0;
-        if (dist > 20 && !nearLake) {
-          let prevCarved = false;
-          for (let y = WORLD_MIN_Y + 6; y <= height - 8; y++) {
-            const carved = this.caveNoise.GetNoise(wx, y * 1.6, wz) > 0.5;
+        // Fill water to sea level above the topmost solid block.
+        if (top < VoxelWorld.SEA_LEVEL) {
+          for (let y = Math.max(WORLD_MIN_Y + 1, top + 1); y <= VoxelWorld.SEA_LEVEL; y++) {
             const i = this.idx(lx, y, lz);
-            if (carved) {
-              blocks[i] = VoxelType.AIR;
-            } else if (prevCarved && blocks[i] === VoxelType.STONE && this.hash3(wx, y, wz) % 45 === 0) {
-              blocks[i] = VoxelType.GLOWSTONE; // glowing cave ceiling
-            }
-            prevCarved = carved;
-          }
-        }
-
-        // Procedural trees on grassy hills outside center
-        if (dist > 13 && height > 6 && height < 100) {
-          const treeVal = this.treeNoise.GetNoise(wx, wz);
-          if (treeVal > 0.55 && (wx + wz) % 5 === 0 && blocks[this.idx(lx, height, lz)] === VoxelType.GRASS) {
-            this.placeTree(col, lx, height + 1, lz, wx, wz);
+            if (blocks[i] === VoxelType.AIR) blocks[i] = VoxelType.WATER;
           }
         }
       }
+    }
+
+    // Feature pass: the biome placeholder chooses tree type from router temperature / vegetation.
+    // A deterministic coordinate gate avoids depending on chunk generation order.
+    for (let lx = 0; lx < 16; lx++) {
+      for (let lz = 0; lz < 16; lz++) {
+        const wx = cx * 16 + lx, wz = cz * 16 + lz;
+        const top = surfaceY[lz * 16 + lx];
+        if (top < 1 || top >= 250 || blocks[this.idx(lx, top, lz)] !== VoxelType.GRASS) continue;
+        const chance = this.hash3(wx, top, wz) / 0xffffffff;
+        if (chance > 0.018) continue;
+        const env = {x:wx,y:top,z:wz};
+        const temperature = this.densityCompiler.compileRef('minecraft:overworld/temperature')(env);
+        const vegetation = this.densityCompiler.compileRef('minecraft:overworld/vegetation')(env);
+        const kind: TreeKind = chooseTreeKind({temperature, vegetation}, chance);
+        const writes: Array<{x:number;y:number;z:number;type:VoxelType}> = [];
+        placeTreeFeature(kind, this.seed, wx, top + 1, wz, (x,y,z,type) => {
+          if (y >= WORLD_MIN_Y && y < WORLD_MAX_Y) writes.push({x,y,z,type});
+        });
+        for (const w of writes) this.applyTreeWrite(w.x,w.y,w.z,w.type);
+      }
+    }
+
+    // Consume cross-chunk feature writes now that this column's base terrain exists.
+    const pending = this.treeWrites.get(this.ckey(cx, cz));
+    if (pending) {
+      for (const w of pending) {
+        const i = this.idx(w.x & 15, w.y, w.z & 15);
+        if (blocks[i] === VoxelType.AIR) blocks[i] = w.type;
+      }
+      this.treeWrites.delete(this.ckey(cx, cz));
     }
   }
 
-  private placeTree(col: ChunkColumn, lx: number, baseY: number, lz: number, wx: number, wz: number) {
-    const trunkHeight = 4;
-    for (let ty = 0; ty < trunkHeight; ty++) {
-      const y = baseY + ty;
-      if (y < WORLD_MAX_Y) col.blocks[this.idx(lx, y, lz)] = VoxelType.WOOD;
+  private applyTreeWrite(wx: number, wy: number, wz: number, type: VoxelType) {
+    if (wy < WORLD_MIN_Y || wy >= WORLD_MAX_Y) return;
+    const cx = wx >> 4, cz = wz >> 4, key = this.ckey(cx, cz);
+    const col = this.chunks.get(key);
+    if (!col) {
+      const pending = this.treeWrites.get(key) ?? [];
+      pending.push({x:wx,y:wy,z:wz,type});
+      this.treeWrites.set(key,pending);
+      return;
     }
-    const leafBase = baseY + trunkHeight - 1;
-    for (let ox = -2; ox <= 2; ox++) {
-      for (let oz = -2; oz <= 2; oz++) {
-        for (let oy = 0; oy <= 2; oy++) {
-          if (Math.abs(ox) === 2 && Math.abs(oz) === 2 && oy === 2) continue;
-          const curWx = wx + ox;
-          const curWz = wz + oz;
-          const curY = leafBase + oy;
-          if (curY >= WORLD_MAX_Y) continue;
-          if (curWx >> 4 !== col.cx || curWz >> 4 !== col.cz) continue; // stays inside this chunk
-          const i = this.idx(curWx & 15, curY, curWz & 15);
-          if (col.blocks[i] === VoxelType.AIR) col.blocks[i] = VoxelType.LEAVES;
-        }
-      }
-    }
+    const i = this.idx(wx & 15,wy,wz & 15);
+    if (type !== VoxelType.AIR && col.blocks[i] !== VoxelType.AIR) return;
+    col.blocks[i] = type;
   }
 
   /** Recompute per-section counts, topmost block, light-blocking heightmap and emitter count. */
