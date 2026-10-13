@@ -1,8 +1,8 @@
 import {Xoroshiro128PlusPlus,PositionalRandomFactory,upgradeSeedTo128bit} from './random';
 /** Vanilla codec defaults: octave_count=1, base_amplitude=1, amplitude_modifiers=[] (all 1). */
 export interface NoiseParameters{base_octave:number;octave_count?:number;base_amplitude?:number;amplitude_modifiers?:number[];}
-const G:ReadonlyArray<readonly[number,number,number]>=[[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],[1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],[0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1],[1,1,0],[0,-1,1],[-1,1,0],[0,-1,-1]];
-const dotG=(h:number,x:number,y:number,z:number)=>{const g=G[h&15];return g[0]*x+g[1]*y+g[2]*z;};
+const GX=new Float64Array([1,-1,1,-1,1,-1,1,-1,0,0,0,0,1,0,-1,0]),GY=new Float64Array([1,1,-1,-1,0,0,0,0,1,-1,1,-1,1,-1,1,-1]),GZ=new Float64Array([0,0,0,0,1,1,-1,-1,1,1,-1,-1,0,1,0,-1]);
+const dotG=(h:number,x:number,y:number,z:number)=>{h&=15;return GX[h]*x+GY[h]*y+GZ[h]*z;};
 const floor=Math.floor,smooth=(t:number)=>t*t*t*(t*(t*6-15)+10),lerp=(t:number,a:number,b:number)=>a+t*(b-a),HALF_ROUND_OFF=16777215.999999998,wrap=(x:number)=>x>=-HALF_ROUND_OFF&&x<HALF_ROUND_OFF?x:x-Math.floor(x/33554432+.5)*33554432;
 export class PerlinNoise{
  protected p=new Uint8Array(256);protected ox:number;protected oy:number;protected oz:number;

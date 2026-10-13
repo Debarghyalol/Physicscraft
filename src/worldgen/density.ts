@@ -26,7 +26,7 @@ export class DensityFunctionCompiler{
    case'constant':return()=>Number(v.argument??v.value??0);
    case'y':return p=>p.y;
    case'zero':return()=>0;
-   case'cache':case'cache_2d':case'cache_once':return this.memo(input());
+   case'cache':case'cache_2d':case'cache_once':return this.cacheNode(v.input,input());
    case'interpolated':return this.interpolate(input(),Number(v.cell_size_xz??4),Number(v.cell_size_y??8));
    case'noise':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,'')),sx=Number(v.xz_scale??1),sy=Number(v.y_scale??1),shx=v.shift_x?c('shift_x'):()=>0,shz=v.shift_z?c('shift_z'):()=>0;return p=>n.sample(p.x*sx+shx(p),p.y*sy,p.z*sx+shz(p));}
    case'shift_a':{const n=this.getNoise(String(v.noise).replace(/^minecraft:/,''));return p=>n.sample(p.x*.25,0,p.z*.25)*4;}
@@ -61,11 +61,47 @@ export class DensityFunctionCompiler{
    default:throw new Error('Unsupported density function: '+t);
   }
  }
+ /** True when the node's value cannot depend on y (so it can be cached per (x,z) column like vanilla's flat/2D caches). Unknown nodes are treated as y-dependent. */
+ private yFreeMemo=new Map<string,boolean>();
+ private yFree(v:any):boolean{
+  if(typeof v==='number')return true;
+  if(typeof v==='string'){
+   const d=this.definitions.get(v);
+   if(d===undefined){if(v==='minecraft:y'||v==='minecraft:blend_density')return false;return v==='minecraft:zero'||v==='minecraft:blend_alpha'||v==='minecraft:blend_offset'||v==='minecraft:beardifier'||v.startsWith('minecraft:overworld/caves/');}
+   const hit=this.yFreeMemo.get(v);if(hit!==undefined)return hit;this.yFreeMemo.set(v,false);const r=this.yFree(d);this.yFreeMemo.set(v,r);return r;
+  }
+  if(!v||typeof v!=='object')return true;
+  const t=String(v.type??'').replace(/^minecraft:/,''),f=(k:string)=>this.yFree(v[k]);
+  switch(t){
+   case'constant':case'zero':case'blend_alpha':case'blend_offset':case'beardifier':case'end_outer_islands':case'shift_a':case'shift_b':case'slice':return true;
+   case'noise':return Number(v.y_scale??1)===0&&(!v.shift_x||f('shift_x'))&&(!v.shift_z||f('shift_z'));
+   case'cache':case'cache_2d':case'cache_once':case'interpolated':case'blend_density':case'abs':case'square':case'cube':case'sqrt':case'half_negative':case'quarter_negative':case'reciprocal':case'negate':case'squeeze':case'sign':case'pow':case'clamp':case'round':case'gradient_clamp':case'gradient_repeat':case'gradient_mirror':return f('input');
+   case'gradient':{const a=String(v.axis??'y');return a==='x'||a==='z';}
+   case'add':case'sub':case'mul':case'div':case'min':case'max':return this.yFree(v.argument1??v.left)&&this.yFree(v.argument2??v.right);
+   case'lerp':return f('alpha')&&f('first')&&f('second');
+   case'range_choice':return f('input')&&f('when_in_range')&&f('when_out_of_range');
+   case'interval_select':return f('input')&&(v.functions as any[]).every(x=>this.yFree(x));
+   case'spline':return this.splineYFree(v.spline);
+   case'find_top_surface':return f('upper_bound');
+   default:return false;
+  }
+ }
+ private splineYFree(sp:any):boolean{
+  if(typeof sp==='number')return true;if(sp&&sp.spline)sp=sp.spline;if(!sp||!Array.isArray(sp.points)||!sp.points.length)return true;
+  return this.yFree(sp.coordinate)&&(sp.points as any[]).every(q=>this.splineYFree(q.value));
+ }
+ /** Vanilla FlatCache/Cache2D: y-independent inputs are evaluated once per (x,z) column; anything else keeps the one-slot memo. */
+ private cacheNode(raw:any,f:Density):Density{
+  if(!this.yFree(raw))return this.memo(f);
+  const m=new Map<number,number>(),L=16777216;
+  return p=>{const x=p.x,z=p.z;if(!(x>-L&&x<L&&z>-L&&z<L&&x===Math.floor(x)&&z===Math.floor(z)))return f(p);
+   const k=(x+L)*33554432+(z+L);let v=m.get(k);if(v===undefined){v=f(p);if(m.size>=16384)m.clear();m.set(k,v);}return v;};
+ }
  private memo(f:Density):Density{let px=NaN,py=NaN,pz=NaN,pv=0;return p=>{if(p.x===px&&p.y===py&&p.z===pz)return pv;const v=f(p);px=p.x;py=p.y;pz=p.z;pv=v;return v;};}
  private interpolate(f:Density,sx:number,sy:number):Density{
   const cache=new Map<string,number>();return p=>{const bx=Math.floor(p.x/sx),by=Math.floor(p.y/sy),bz=Math.floor(p.z/sx),tx=p.x/sx-bx,ty=p.y/sy-by,tz=p.z/sx-bz;
    if(tx===0&&ty===0&&tz===0)return f({x:bx*sx,y:by*sy,z:bz*sx});
-   const at=(x:number,y:number,z:number)=>{const k=x+','+y+','+z;let n=cache.get(k);if(n===undefined){n=f({x:x*sx,y:y*sy,z:z*sx});cache.set(k,n);}return n;},l=(a:number,b:number,t:number)=>a+(b-a)*t;
+   const at=(x:number,y:number,z:number)=>{const k=x+','+y+','+z;let n=cache.get(k);if(n===undefined){n=f({x:x*sx,y:y*sy,z:z*sx});if(cache.size>=65536)cache.clear();cache.set(k,n);}return n;},l=(a:number,b:number,t:number)=>a+(b-a)*t;
    const a=l(at(bx,by,bz),at(bx+1,by,bz),tx),b=l(at(bx,by,bz+1),at(bx+1,by,bz+1),tx),c=l(at(bx,by+1,bz),at(bx+1,by+1,bz),tx),d=l(at(bx,by+1,bz+1),at(bx+1,by+1,bz+1),tx);return l(l(a,b,tz),l(c,d,tz),ty);};
  }
  /** Vanilla RandomState.getOrCreateNoise: NormalNoise seeded from random.fromHashOf('minecraft:<name>'). */
@@ -96,7 +132,7 @@ export class ChunkDensitySampler{
  private values=new Float64Array(5*49*5);private ready=new Uint8Array(5*49*5);
  constructor(private root:Density,private originX:number,private originZ:number,private minY=-64){}
  private index(x:number,y:number,z:number){return(y*5+z)*5+x;}
- private corner(x:number,y:number,z:number){const i=this.index(x,y,z);if(!this.ready[i]){this.values[i]=this.root({x:this.originX+x*4,y:this.minY+y*8,z:this.originZ+z*4});this.ready[i]=1;}return this.values[i];}
+ corner(x:number,y:number,z:number){const i=this.index(x,y,z);if(!this.ready[i]){this.values[i]=this.root({x:this.originX+x*4,y:this.minY+y*8,z:this.originZ+z*4});this.ready[i]=1;}return this.values[i];}
  sample(x:number,y:number,z:number):number{const rx=Math.max(0,Math.min(15.999999,x-this.originX)),rz=Math.max(0,Math.min(15.999999,z-this.originZ)),gx=rx/4,gz=rz/4,gy=Math.max(0,Math.min(383.999999,y-this.minY))/8,ix=Math.floor(gx),iz=Math.floor(gz),iy=Math.floor(gy),tx=gx-ix,tz=gz-iz,ty=gy-iy,l=(a:number,b:number,t:number)=>a+(b-a)*t;
   const a=l(this.corner(ix,iy,iz),this.corner(ix+1,iy,iz),tx),b=l(this.corner(ix,iy,iz+1),this.corner(ix+1,iy,iz+1),tx),c=l(this.corner(ix,iy+1,iz),this.corner(ix+1,iy+1,iz),tx),d=l(this.corner(ix,iy+1,iz+1),this.corner(ix+1,iy+1,iz+1),tx);return l(l(a,b,tz),l(c,d,tz),ty);}
 }

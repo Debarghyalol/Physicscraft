@@ -21,23 +21,38 @@ const fiddle = (rval: bigint): number => {
 };
 
 export class BiomeManager {
-  private fiddles = new Map<string, [number, number, number]>();
+  private fiddles = new Map<number, [number, number, number]>();
   constructor(private readonly source: BiomeResolver, private readonly zoomSeed: bigint) {}
 
   private cornerFiddle(x: number, y: number, z: number): [number, number, number] {
-    const key = x + ',' + y + ',' + z, hit = this.fiddles.get(key);
-    if (hit) return hit;
+    const cacheable = x > -2097152 && x < 2097152 && z > -2097152 && z < 2097152 && y >= -16 && y < 112;
+    const key = cacheable ? ((x + 2097152) * 4194304 + (z + 2097152)) * 128 + (y + 16) : 0;
+    if (cacheable) { const hit = this.fiddles.get(key); if (hit) return hit; }
     const bx = BigInt(x), by = BigInt(y), bz = BigInt(z), seed = this.zoomSeed;
     let r = lcg(seed, bx); r = lcg(r, by); r = lcg(r, bz); r = lcg(r, bx); r = lcg(r, by); r = lcg(r, bz);
     const fx = fiddle(r); r = lcg(r, seed); const fy = fiddle(r); r = lcg(r, seed); const fz = fiddle(r);
-    if (this.fiddles.size > 200000) this.fiddles.clear();
     const v: [number, number, number] = [fx, fy, fz];
-    this.fiddles.set(key, v);
+    if (cacheable) { if (this.fiddles.size > 100000) this.fiddles.clear(); this.fiddles.set(key, v); }
     return v;
   }
 
+  /** Per quart cell: the single biome when all 8 surrounding noise biomes agree (then jitter cannot change the answer), else null. */
+  private uniform = new Map<number, string | null>();
+
   getBiome(x: number, y: number, z: number): string {
     const ax = x - 2, ay = y - 2, az = z - 2, px = ax >> 2, py = ay >> 2, pz = az >> 2;
+    if (px > -2097152 && px < 2097151 && pz > -2097152 && pz < 2097151 && py >= -16 && py < 111) {
+      const ukey = ((px + 2097152) * 4194304 + (pz + 2097152)) * 128 + (py + 16);
+      let u = this.uniform.get(ukey);
+      if (u === undefined) {
+        const src = this.source, b0 = src.getNoiseBiome(px, py, pz);
+        u = b0;
+        for (let i = 1; i < 8 && u !== null; i++) if (src.getNoiseBiome(px + (i >> 2), py + ((i >> 1) & 1), pz + (i & 1)) !== b0) u = null;
+        if (this.uniform.size > 100000) this.uniform.clear();
+        this.uniform.set(ukey, u);
+      }
+      if (u !== null) return u;
+    }
     const fx = (ax & 3) / 4, fy = (ay & 3) / 4, fz = (az & 3) / 4;
     let minI = 0, minD = Infinity;
     for (let i = 0; i < 8; i++) {

@@ -53,7 +53,8 @@ class Context implements RuleContext {
   stoneDepthAbove = 0; stoneDepthBelow = 0; waterHeight = NO_WATER;
   xzVersion = 0; yVersion = 0;
   private biomeY = -1; private biomeName = ''; private secVer = -1; private sec = 0; private minLevelVer = -1; private minLevel = 0;
-  private noiseCache = new Map<string, { ver: number; v: number }>();
+  private noiseCache2 = new Map<string, { ver: number; v: number }>();
+  private noiseCache3 = new Map<string, { ver: number; v: number }>();
   private factories = new Map<string, PositionalRandomFactory>();
   constructor(private sys: SurfaceSystem, readonly minY: number, readonly height: number) {}
   updateXZ(x: number, z: number, gx: number, gz: number) {
@@ -79,10 +80,10 @@ class Context implements RuleContext {
     return this.minLevel;
   }
   noise(name: string, is3d: boolean): number {
-    const key = (is3d ? '3:' : '2:') + name, ver = is3d ? this.yVersion : this.xzVersion, hit = this.noiseCache.get(key);
+    const cache = is3d ? this.noiseCache3 : this.noiseCache2, ver = is3d ? this.yVersion : this.xzVersion, hit = cache.get(name);
     if (hit && hit.ver === ver) return hit.v;
     const v = this.sys.compiler.getNoise(name).sample(this.blockX, is3d ? this.blockY : 0, this.blockZ);
-    this.noiseCache.set(key, { ver, v });
+    if (hit) { hit.ver = ver; hit.v = v; } else cache.set(name, { ver, v });
     return v;
   }
   randomFactory(name: string): PositionalRandomFactory {
@@ -113,7 +114,17 @@ export class SurfaceSystem {
     this.rule = new MaterialRuleCompiler(this.ctx).compileRule(OVERWORLD_SETTINGS.material_rule);
   }
 
-  preliminarySurface(x: number, z: number): number { return this.prelim({ x, y: 0, z }); }
+  private readonly prelimCache = new Map<number, number>();
+  /** NoiseChunk.preliminarySurfaceLevel: resolved at quart (4-block) resolution and cached, exactly like vanilla. */
+  preliminarySurface(x: number, z: number): number {
+    const qx = (x >> 2) << 2, qz = (z >> 2) << 2;
+    const cacheable = qx > -8388608 && qx < 8388608 && qz > -8388608 && qz < 8388608;
+    const key = cacheable ? (qx + 8388608) * 16777216 + (qz + 8388608) : 0;
+    if (cacheable) { const hit = this.prelimCache.get(key); if (hit !== undefined) return hit; }
+    const v = this.prelim({ x: qx, y: 0, z: qz });
+    if (cacheable) { if (this.prelimCache.size > 50000) this.prelimCache.clear(); this.prelimCache.set(key, v); }
+    return v;
+  }
   /** MaterialSystem.getSurfaceDepth */
   getSurfaceDepth(x: number, z: number): number {
     const n = this.compiler.getNoise('surface').sample(x, 0, z);

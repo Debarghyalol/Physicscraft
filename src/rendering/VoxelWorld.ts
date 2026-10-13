@@ -7,14 +7,8 @@ import { createConnectedGlassUV } from './GlassConnectedUV';
 import { resourcePacks } from '../resourcepack/ResourcePackManager';
 import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
-import { DensityFunctionCompiler, ChunkDensitySampler } from '../worldgen/density';
-import { chooseTreeKind, placeTreeFeature } from '../worldgen/trees';
-import { MultiNoiseBiomeSource } from '../worldgen/biome/MultiNoiseBiomeSource';
-import { BiomeManager, obfuscateSeed } from '../worldgen/biome/BiomeManager';
-import { SurfaceSystem } from '../worldgen/material/SurfaceSystem';
-import type { SurfaceChunk } from '../worldgen/material/SurfaceSystem';
-import { vanillaBlockToVoxel } from '../worldgen/blocks';
-import type { TreeKind } from '../worldgen/trees';
+import { ChunkGenerator } from '../worldgen/ChunkGenerator';
+import { ChunkGenPool, type PoolResult } from '../worldgen/ChunkGenPool';
 import { WaterTexture, spriteU, spriteV } from './WaterTexture';
 import { FluidAccess, getFlow, ownHeight } from '../fluid/fluid';
 
@@ -336,10 +330,12 @@ export class VoxelWorld {
   public scene: THREE.Scene;
   private noise: any;
   private treeNoise: any;
-  private densityCompiler!: DensityFunctionCompiler;
-  private biomeManager!: BiomeManager;
-  private surfaceSystem!: SurfaceSystem;
-  private finalDensity: ((p: { x: number; y: number; z: number }) => number) | null = null;
+  /** Main-thread generator, created lazily (synchronous edits / startup grid / worker fallback). */
+  private mainGen: ChunkGenerator | null = null;
+  private genPool: ChunkGenPool | null = null;
+  private genEpoch = 0;
+  private genInFlight = new Set<number>();
+  private genResults: PoolResult[] = [];
   private treeWrites = new Map<number, Array<{x:number;y:number;z:number;type:VoxelType}>>();
   private generatedTreeCandidates = new Set<string>();
 
@@ -436,6 +432,7 @@ export class VoxelWorld {
     this.scene = scene;
     this.initNoise();
     this.createTextureAtlas();
+    this.startGenPool();
     this.generateWorldChunks();
   }
 
@@ -445,10 +442,7 @@ export class VoxelWorld {
   }
 
   private initNoise() {
-    this.densityCompiler = new DensityFunctionCompiler(this.seed);
-    this.finalDensity = this.densityCompiler.compileRoot();
-    this.biomeManager = new BiomeManager(new MultiNoiseBiomeSource(this.densityCompiler), obfuscateSeed(BigInt(this.seed)));
-    this.surfaceSystem = new SurfaceSystem(this.densityCompiler, this.biomeManager, { minY: WORLD_MIN_Y, height: WORLD_MAX_Y - WORLD_MIN_Y });
+    this.mainGen = null;
     this.noise = new FastNoiseLite(this.seed);
     this.noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
     this.noise.SetFrequency(0.035);
@@ -1064,18 +1058,54 @@ export class VoxelWorld {
     this.lcCol = null;
   }
 
-  /** Get (generating terrain if needed) the column at chunk coords. */
+  /** Get (generating terrain synchronously if needed) the column at chunk coords. */
   public getChunk(cx: number, cz: number): ChunkColumn {
     const key = this.ckey(cx, cz);
     let col = this.chunks.get(key);
     if (!col) {
-      col = new ChunkColumn(cx, cz);
-      this.chunks.set(key, col);
-      this.invalidateColCache();
-      this.populateChunkTerrain(col);
-      this.finalizeColumn(col);
+      if (!this.mainGen || this.mainGen.seed !== this.seed) this.mainGen = new ChunkGenerator(this.seed);
+      const g = this.mainGen.generate(cx, cz);
+      col = this.installGenerated(cx, cz, g.blocks, g.writes);
     }
     return col;
+  }
+
+  /** Registers a generated column: flushes feature writes queued by neighbours, places this column's overflow, finalizes. */
+  private installGenerated(cx: number, cz: number, blocks: Uint8Array, writes: Int32Array): ChunkColumn {
+    const key = this.ckey(cx, cz);
+    const col = new ChunkColumn(cx, cz);
+    col.blocks = blocks;
+    this.chunks.set(key, col);
+    this.invalidateColCache();
+    const pending = this.treeWrites.get(key);
+    if (pending) {
+      for (const w of pending) {
+        const i = this.idx(w.x & 15, w.y, w.z & 15);
+        if (blocks[i] === VoxelType.AIR) blocks[i] = w.type;
+      }
+      this.treeWrites.delete(key);
+    }
+    for (let i = 0; i < writes.length; i += 4) this.applyTreeWrite(writes[i], writes[i + 1], writes[i + 2], writes[i + 3] as VoxelType);
+    this.finalizeColumn(col);
+    return col;
+  }
+
+  private startGenPool() {
+    if (typeof Worker === 'undefined') return;
+    try {
+      this.genPool = new ChunkGenPool(ChunkGenPool.defaultSize(), (r) => this.genResults.push(r), () => this.onGenPoolFailed());
+    } catch {
+      this.genPool = null;
+    }
+  }
+
+  private onGenPoolFailed() {
+    console.warn('[worldgen] chunk workers unavailable, generating on the main thread');
+    this.genPool = null;
+    this.genInFlight.clear();
+    this.genResults.length = 0;
+    this.streamCx = NaN; // force the terrain queue to be rebuilt on the next position update
+    this.streamCz = NaN;
   }
 
   private idx(lx: number, wy: number, lz: number): number {
@@ -1092,113 +1122,6 @@ export class VoxelWorld {
   // ======================================================================
   //  Terrain generation
   // ======================================================================
-
-  private hash3(x: number, y: number, z: number): number {
-    let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 1274126177);
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    return (h ^ (h >>> 16)) >>> 0;
-  }
-
-  /** Evaluate the compiled overworld router; interpolation uses a lazy shared cell-corner grid per column. */
-  private createDensitySampler(cx: number, cz: number): ChunkDensitySampler {
-    if (!this.finalDensity) throw new Error('Worldgen density router was not initialized');
-    return new ChunkDensitySampler(this.finalDensity, cx * 16, cz * 16, WORLD_MIN_Y);
-  }
-
-  /** Density-derived height query, using the same router as terrain filling. */
-  private terrainHeightAt(wx: number, wz: number): number {
-    const sampler = this.createDensitySampler(wx >> 4, wz >> 4);
-    for (let y = WORLD_MAX_Y - 1; y >= WORLD_MIN_Y; y--) {
-      if (sampler.sample(wx, y, wz) > 0) return y;
-    }
-    return WORLD_MIN_Y;
-  }
-
-  private static readonly SEA_LEVEL = 63;
-
-  /** Base terrain pass. Tree features run only after solid terrain and sea fill are finished. */
-  private populateChunkTerrain(col: ChunkColumn) {
-    const { cx, cz, blocks } = col;
-    const density = this.createDensitySampler(cx, cz);
-    const surfaceY = new Int16Array(256);
-    surfaceY.fill(WORLD_MIN_Y - 1);
-
-    // WORLD_SURFACE_WG heightmap (highest non-air block incl. water); the surface system reads and updates it.
-    const worldSurface = new Int16Array(256);
-
-    // Pass 1: noise fill. Solid (stone) where density > 0; open space under sea level becomes water.
-    for (let lx = 0; lx < 16; lx++) {
-      for (let lz = 0; lz < 16; lz++) {
-        const wx = cx * 16 + lx, wz = cz * 16 + lz;
-        let top = WORLD_MIN_Y - 1;
-        for (let y = WORLD_MAX_Y - 1; y >= WORLD_MIN_Y; y--) {
-          if (density.sample(wx, y, wz) > 0) { top = y; break; }
-        }
-        surfaceY[lz * 16 + lx] = top;
-        blocks[this.idx(lx, WORLD_MIN_Y, lz)] = VoxelType.STONE;
-        for (let y = WORLD_MIN_Y + 1; y <= top; y++) {
-          if (density.sample(wx, y, wz) > 0) blocks[this.idx(lx, y, lz)] = VoxelType.STONE;
-        }
-        if (top < VoxelWorld.SEA_LEVEL) {
-          for (let y = Math.max(WORLD_MIN_Y + 1, top + 1); y <= VoxelWorld.SEA_LEVEL; y++) {
-            const i = this.idx(lx, y, lz);
-            if (blocks[i] === VoxelType.AIR) blocks[i] = VoxelType.WATER;
-          }
-        }
-        worldSurface[lz * 16 + lx] = Math.max(top, top < VoxelWorld.SEA_LEVEL ? VoxelWorld.SEA_LEVEL : top);
-      }
-    }
-
-    // Pass 2: vanilla surface rules (biomes, grass/dirt/sand/terracotta/snow, deepslate, bedrock).
-    const chunk: SurfaceChunk = {
-      minBlockX: cx * 16, minBlockZ: cz * 16, minY: WORLD_MIN_Y, maxY: WORLD_MAX_Y - 1,
-      height: (lx, lz) => worldSurface[lz * 16 + lx],
-      kind: (lx, lz, y) => {
-        if (y < WORLD_MIN_Y || y >= WORLD_MAX_Y) return 0;
-        const t = blocks[this.idx(lx, y, lz)];
-        return t === VoxelType.AIR ? 0 : t === VoxelType.WATER ? 1 : 2;
-      },
-      isWater: (lx, lz, y) => y >= WORLD_MIN_Y && y < WORLD_MAX_Y && blocks[this.idx(lx, y, lz)] === VoxelType.WATER,
-      isDefaultBlock: (lx, lz, y) => y >= WORLD_MIN_Y && y < WORLD_MAX_Y && blocks[this.idx(lx, y, lz)] === VoxelType.STONE,
-      set: (lx, lz, y, name) => {
-        if (y < WORLD_MIN_Y || y >= WORLD_MAX_Y) return;
-        const t = vanillaBlockToVoxel(name);
-        blocks[this.idx(lx, y, lz)] = t;
-        const h = lz * 16 + lx;
-        if (t !== VoxelType.AIR && y > worldSurface[h]) worldSurface[h] = y;
-      },
-    };
-    this.surfaceSystem.buildSurface(chunk);
-
-    // Flush feature writes generated by an already-loaded neighbouring column.
-    const pending = this.treeWrites.get(this.ckey(cx, cz));
-    if (pending) {
-      for (const w of pending) {
-        const i = this.idx(w.x & 15, w.y, w.z & 15);
-        if (blocks[i] === VoxelType.AIR) blocks[i] = w.type;
-      }
-      this.treeWrites.delete(this.ckey(cx, cz));
-    }
-
-    // A second pass lets features write beyond their source chunk; candidate coordinates are stable
-    // across generation order. Real biome selection is deferred, so temperature + vegetation route.
-    for (let lx = 0; lx < 16; lx++) {
-      for (let lz = 0; lz < 16; lz++) {
-        const wx = cx * 16 + lx, wz = cz * 16 + lz, top = surfaceY[lz * 16 + lx];
-        if (top < 1 || top >= 250 || blocks[this.idx(lx, top, lz)] !== VoxelType.GRASS) continue;
-        const roll = this.hash3(wx, 0, wz) / 0xffffffff;
-        if (roll > 0.018) continue;
-        const env = { x: wx, y: top, z: wz };
-        const temperature = this.densityCompiler.compileRef('minecraft:overworld/temperature')(env);
-        const vegetation = this.densityCompiler.compileRef('minecraft:overworld/vegetation')(env);
-        const kind = chooseTreeKind({ temperature, vegetation }, roll);
-        placeTreeFeature(kind, this.seed, wx, top + 1, wz, (x, y, z, type) => {
-          if (y < WORLD_MIN_Y || y >= WORLD_MAX_Y) return;
-          this.applyTreeWrite(x, y, z, type);
-        });
-      }
-    }
-  }
 
   private applyTreeWrite(wx: number, wy: number, wz: number, type: VoxelType) {
     if (wy < WORLD_MIN_Y || wy >= WORLD_MAX_Y) return;
@@ -2190,7 +2113,8 @@ export class VoxelWorld {
     const q: Array<[number, number, number]> = [];
     for (let cx = pcx - r - 2; cx <= pcx + r + 2; cx++) {
       for (let cz = pcz - r - 2; cz <= pcz + r + 2; cz++) {
-        if (!this.chunks.has(this.ckey(cx, cz))) q.push([cx, cz, (cx - pcx) ** 2 + (cz - pcz) ** 2]);
+        const k = this.ckey(cx, cz);
+        if (!this.chunks.has(k) && !this.genInFlight.has(k)) q.push([cx, cz, (cx - pcx) ** 2 + (cz - pcz) ** 2]);
       }
     }
     q.sort((a, b) => a[2] - b[2]);
@@ -2280,13 +2204,34 @@ export class VoxelWorld {
 
   /** Generate terrain -> light -> mesh for chunks around the player within a time budget. */
   private streamWork(deadline: number) {
-    // 1. Terrain generation. getChunk() can be expensive, so check the deadline before
-    // every column and let subsequent frames continue the queue.
-    while (this.terrainQueueIndex < this.terrainQueue.length && performance.now() < deadline) {
-      const [cx, cz] = this.terrainQueue[this.terrainQueueIndex++];
-      if (!this.chunks.has(this.ckey(cx, cz))) {
-        const col = this.getChunk(cx, cz);
-        this.queueLight(col);
+    // 1. Terrain generation. Workers generate columns off-thread; the main thread only installs finished columns
+    // (at least one per call, then as many as fit the budget). Without workers it falls back to budgeted sync generation.
+    let installed = 0;
+    while (this.genResults.length && (installed === 0 || performance.now() < deadline)) {
+      const r = this.genResults.shift()!;
+      if (r.epoch !== this.genEpoch) continue;
+      const key = this.ckey(r.cx, r.cz);
+      this.genInFlight.delete(key);
+      if (this.chunks.has(key)) continue;
+      this.queueLight(this.installGenerated(r.cx, r.cz, r.blocks, r.writes));
+      installed++;
+    }
+    const pool = this.genPool;
+    if (pool && pool.alive) {
+      while (this.terrainQueueIndex < this.terrainQueue.length && pool.hasCapacity) {
+        const [cx, cz] = this.terrainQueue[this.terrainQueueIndex++];
+        const key = this.ckey(cx, cz);
+        if (this.chunks.has(key) || this.genInFlight.has(key)) continue;
+        this.genInFlight.add(key);
+        pool.request(this.seed, this.genEpoch, cx, cz);
+      }
+    } else {
+      while (this.terrainQueueIndex < this.terrainQueue.length && performance.now() < deadline) {
+        const [cx, cz] = this.terrainQueue[this.terrainQueueIndex++];
+        if (!this.chunks.has(this.ckey(cx, cz))) {
+          const col = this.getChunk(cx, cz);
+          this.queueLight(col);
+        }
       }
     }
     if (this.terrainQueueIndex >= this.terrainQueue.length) {
@@ -2330,7 +2275,7 @@ export class VoxelWorld {
   }
 
   private streamIdle(): boolean {
-    if (this.terrainQueueIndex < this.terrainQueue.length || this.lightQueue.length || this.readyQueue.length || this.dirty.size) return false;
+    if (this.terrainQueueIndex < this.terrainQueue.length || this.genInFlight.size || this.genResults.length || this.lightQueue.length || this.readyQueue.length || this.dirty.size) return false;
     const r = this.renderDistance;
     for (let cx = this.streamCx - r; cx <= this.streamCx + r; cx++) {
       for (let cz = this.streamCz - r; cz <= this.streamCz + r; cz++) {
@@ -2387,6 +2332,9 @@ export class VoxelWorld {
   public clearAllChunks() {
     for (const col of this.chunks.values()) this.disposeColumnMeshes(col);
     this.chunks.clear();
+    this.genEpoch++;
+    this.genInFlight.clear();
+    this.genResults.length = 0;
     this.dirty.clear();
     this.terrainQueue = [];
     this.terrainQueueIndex = 0;
@@ -2535,6 +2483,8 @@ export class VoxelWorld {
   }
 
   public dispose() {
+    this.genPool?.dispose();
+    this.genPool = null;
     this.clearAllChunks();
     this.atlasTexture.dispose();
     this.material.dispose();
