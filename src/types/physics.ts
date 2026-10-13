@@ -182,6 +182,21 @@ export enum VoxelType {
   BOOKSHELF = 118,
   CRAFTING_TABLE = 119,
   FURNACE = 120,
+  // Worldgen surface blocks (textures resolve from the lowercase name, see voxelTexturePath)
+  SANDSTONE = 121,
+  RED_SAND = 122,
+  RED_SANDSTONE = 123,
+  TERRACOTTA = 124,
+  WHITE_TERRACOTTA = 125,
+  ORANGE_TERRACOTTA = 126,
+  YELLOW_TERRACOTTA = 127,
+  BROWN_TERRACOTTA = 128,
+  RED_TERRACOTTA = 129,
+  LIGHT_GRAY_TERRACOTTA = 130,
+  COARSE_DIRT = 131,
+  PODZOL = 132,
+  MYCELIUM = 133,
+  CALCITE = 134,
 }
 export type StructurePreset =
   | 'jenga'

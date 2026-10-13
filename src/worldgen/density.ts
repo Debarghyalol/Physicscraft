@@ -8,6 +8,10 @@ export class DensityFunctionCompiler{
  private definitions=new Map<string,any>();private compiled=new Map<string,Density>();private noises=new Map<string,NormalNoise>();
  /** RandomState.random: Xoroshiro(seed).forkPositional(), shared by every noise and BlendedNoise. */
  private readonly factory:PositionalRandomFactory;
+ /** RandomState.random (root positional factory); also used by the surface system. */
+ get rootFactory():PositionalRandomFactory{return this.factory;}
+ /** RandomState.getOrCreateRandomFactory(name) = random.fromHashOf(name).forkPositional(). */
+ randomFactoryFor(name:string):PositionalRandomFactory{return this.factory.fromHashOf(name).forkPositional();}
  constructor(private readonly seed:number){this.factory=Xoroshiro128PlusPlus.fromSeed(BigInt(seed)).forkPositional();for(const [n,j] of Object.entries(DENSITY_JSON))this.definitions.set('minecraft:'+n,j);}
  compileRoot(name='minecraft:overworld/final_density'):Density{return this.compileRef(name);}
  compileRef(name:string):Density{
@@ -64,7 +68,8 @@ export class DensityFunctionCompiler{
    const at=(x:number,y:number,z:number)=>{const k=x+','+y+','+z;let n=cache.get(k);if(n===undefined){n=f({x:x*sx,y:y*sy,z:z*sx});cache.set(k,n);}return n;},l=(a:number,b:number,t:number)=>a+(b-a)*t;
    const a=l(at(bx,by,bz),at(bx+1,by,bz),tx),b=l(at(bx,by,bz+1),at(bx+1,by,bz+1),tx),c=l(at(bx,by+1,bz),at(bx+1,by+1,bz),tx),d=l(at(bx,by+1,bz+1),at(bx+1,by+1,bz+1),tx);return l(l(a,b,tz),l(c,d,tz),ty);};
  }
- private getNoise(name:string):NormalNoise{
+ /** Vanilla RandomState.getOrCreateNoise: NormalNoise seeded from random.fromHashOf('minecraft:<name>'). */
+ getNoise(name:string):NormalNoise{
   if(this.noises.has(name))return this.noises.get(name)!;const key=Object.keys(NOISE_SETTINGS).find(k=>k===name||k.endsWith('/'+name)),s=key?NOISE_SETTINGS[key]:undefined;
   if(!s||!key)throw new Error('Missing noise settings: '+name);const n=new NormalNoise(this.factory.fromHashOf('minecraft:'+key),s);this.noises.set(name,n);return n;
  }

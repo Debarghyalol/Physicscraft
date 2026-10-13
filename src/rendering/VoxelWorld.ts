@@ -9,6 +9,11 @@ import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
 import { DensityFunctionCompiler, ChunkDensitySampler } from '../worldgen/density';
 import { chooseTreeKind, placeTreeFeature } from '../worldgen/trees';
+import { MultiNoiseBiomeSource } from '../worldgen/biome/MultiNoiseBiomeSource';
+import { BiomeManager, obfuscateSeed } from '../worldgen/biome/BiomeManager';
+import { SurfaceSystem } from '../worldgen/material/SurfaceSystem';
+import type { SurfaceChunk } from '../worldgen/material/SurfaceSystem';
+import { vanillaBlockToVoxel } from '../worldgen/blocks';
 import type { TreeKind } from '../worldgen/trees';
 import { WaterTexture, spriteU, spriteV } from './WaterTexture';
 import { FluidAccess, getFlow, ownHeight } from '../fluid/fluid';
@@ -85,6 +90,8 @@ const BASE_ATLAS_TEXTURES = [
 ] as const;
 
 const EXTRA_ATLAS_TEXTURES = [
+  'block/sandstone_top', 'block/sandstone_bottom', 'block/red_sandstone_top', 'block/red_sandstone_bottom',
+  'block/podzol_top', 'block/podzol_side', 'block/mycelium_top', 'block/mycelium_side',
   'block/grass_block_side_overlay', 'block/short_grass', 'block/tall_grass',
   'block/tall_grass_top', 'block/tall_grass_bottom', 'block/fern', 'block/large_fern',
   'block/large_fern_top', 'block/large_fern_bottom', 'block/dead_bush', 'block/bush',
@@ -153,6 +160,10 @@ function voxelTexturePath(voxel: VoxelType, faceIndex: number): string {
       return top ? 'block/crafting_table_top' : faceIndex === 0 ? 'block/crafting_table_front' : 'block/crafting_table_side';
     case VoxelType.FURNACE:
       return top ? 'block/furnace_top' : faceIndex === 0 ? 'block/furnace_front' : 'block/furnace_side';
+    case VoxelType.SANDSTONE: return top ? 'block/sandstone_top' : bottom ? 'block/sandstone_bottom' : 'block/sandstone';
+    case VoxelType.RED_SANDSTONE: return top ? 'block/red_sandstone_top' : bottom ? 'block/red_sandstone_bottom' : 'block/red_sandstone';
+    case VoxelType.PODZOL: return top ? 'block/podzol_top' : bottom ? 'block/dirt' : 'block/podzol_side';
+    case VoxelType.MYCELIUM: return top ? 'block/mycelium_top' : bottom ? 'block/dirt' : 'block/mycelium_side';
     case VoxelType.FERN: return 'block/fern';
     default: {
       const name = VoxelType[voxel] as string | undefined;
@@ -326,6 +337,8 @@ export class VoxelWorld {
   private noise: any;
   private treeNoise: any;
   private densityCompiler!: DensityFunctionCompiler;
+  private biomeManager!: BiomeManager;
+  private surfaceSystem!: SurfaceSystem;
   private finalDensity: ((p: { x: number; y: number; z: number }) => number) | null = null;
   private treeWrites = new Map<number, Array<{x:number;y:number;z:number;type:VoxelType}>>();
   private generatedTreeCandidates = new Set<string>();
@@ -434,6 +447,8 @@ export class VoxelWorld {
   private initNoise() {
     this.densityCompiler = new DensityFunctionCompiler(this.seed);
     this.finalDensity = this.densityCompiler.compileRoot();
+    this.biomeManager = new BiomeManager(new MultiNoiseBiomeSource(this.densityCompiler), obfuscateSeed(BigInt(this.seed)));
+    this.surfaceSystem = new SurfaceSystem(this.densityCompiler, this.biomeManager, { minY: WORLD_MIN_Y, height: WORLD_MAX_Y - WORLD_MIN_Y });
     this.noise = new FastNoiseLite(this.seed);
     this.noise.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
     this.noise.SetFrequency(0.035);
@@ -1108,6 +1123,10 @@ export class VoxelWorld {
     const surfaceY = new Int16Array(256);
     surfaceY.fill(WORLD_MIN_Y - 1);
 
+    // WORLD_SURFACE_WG heightmap (highest non-air block incl. water); the surface system reads and updates it.
+    const worldSurface = new Int16Array(256);
+
+    // Pass 1: noise fill. Solid (stone) where density > 0; open space under sea level becomes water.
     for (let lx = 0; lx < 16; lx++) {
       for (let lz = 0; lz < 16; lz++) {
         const wx = cx * 16 + lx, wz = cz * 16 + lz;
@@ -1116,36 +1135,40 @@ export class VoxelWorld {
           if (density.sample(wx, y, wz) > 0) { top = y; break; }
         }
         surfaceY[lz * 16 + lx] = top;
-
-        blocks[this.idx(lx, WORLD_MIN_Y, lz)] = VoxelType.BEDROCK;
-        for (let k = 1; k <= 4; k++) {
-          if ((this.hash3(wx, WORLD_MIN_Y + k, wz) % 5) < 5 - k) {
-            blocks[this.idx(lx, WORLD_MIN_Y + k, lz)] = VoxelType.BEDROCK;
-          }
-        }
-
+        blocks[this.idx(lx, WORLD_MIN_Y, lz)] = VoxelType.STONE;
         for (let y = WORLD_MIN_Y + 1; y <= top; y++) {
-          if (density.sample(wx, y, wz) <= 0) continue;
-          let block: VoxelType = y < 0 ? VoxelType.DEEPSLATE : VoxelType.STONE;
-          const depth = top - y;
-          if (depth === 0) {
-            block = top <= VoxelWorld.SEA_LEVEL + 1 ? VoxelType.SAND
-              : top >= 240 ? VoxelType.SNOW_BLOCK : VoxelType.GRASS;
-          } else if (depth <= 3) {
-            block = top <= VoxelWorld.SEA_LEVEL + 1 ? VoxelType.SAND : VoxelType.DIRT;
-          }
-          blocks[this.idx(lx, y, lz)] = block;
+          if (density.sample(wx, y, wz) > 0) blocks[this.idx(lx, y, lz)] = VoxelType.STONE;
         }
-
-        // Surface water fills open space up to Y=63, without carving the terrain below.
         if (top < VoxelWorld.SEA_LEVEL) {
           for (let y = Math.max(WORLD_MIN_Y + 1, top + 1); y <= VoxelWorld.SEA_LEVEL; y++) {
             const i = this.idx(lx, y, lz);
             if (blocks[i] === VoxelType.AIR) blocks[i] = VoxelType.WATER;
           }
         }
+        worldSurface[lz * 16 + lx] = Math.max(top, top < VoxelWorld.SEA_LEVEL ? VoxelWorld.SEA_LEVEL : top);
       }
     }
+
+    // Pass 2: vanilla surface rules (biomes, grass/dirt/sand/terracotta/snow, deepslate, bedrock).
+    const chunk: SurfaceChunk = {
+      minBlockX: cx * 16, minBlockZ: cz * 16, minY: WORLD_MIN_Y, maxY: WORLD_MAX_Y - 1,
+      height: (lx, lz) => worldSurface[lz * 16 + lx],
+      kind: (lx, lz, y) => {
+        if (y < WORLD_MIN_Y || y >= WORLD_MAX_Y) return 0;
+        const t = blocks[this.idx(lx, y, lz)];
+        return t === VoxelType.AIR ? 0 : t === VoxelType.WATER ? 1 : 2;
+      },
+      isWater: (lx, lz, y) => y >= WORLD_MIN_Y && y < WORLD_MAX_Y && blocks[this.idx(lx, y, lz)] === VoxelType.WATER,
+      isDefaultBlock: (lx, lz, y) => y >= WORLD_MIN_Y && y < WORLD_MAX_Y && blocks[this.idx(lx, y, lz)] === VoxelType.STONE,
+      set: (lx, lz, y, name) => {
+        if (y < WORLD_MIN_Y || y >= WORLD_MAX_Y) return;
+        const t = vanillaBlockToVoxel(name);
+        blocks[this.idx(lx, y, lz)] = t;
+        const h = lz * 16 + lx;
+        if (t !== VoxelType.AIR && y > worldSurface[h]) worldSurface[h] = y;
+      },
+    };
+    this.surfaceSystem.buildSurface(chunk);
 
     // Flush feature writes generated by an already-loaded neighbouring column.
     const pending = this.treeWrites.get(this.ckey(cx, cz));
