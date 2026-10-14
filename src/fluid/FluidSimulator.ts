@@ -1,5 +1,5 @@
 import { VoxelType } from '../types/physics';
-import { VoxelWorld, WORLD_MAX_Y, WORLD_MIN_Y } from '../rendering/VoxelWorld';
+import { VoxelWorld, WORLD_MAX_Y, WORLD_MIN_Y, type ChunkColumn } from '../rendering/VoxelWorld';
 import { HDX, HDZ, WATER, flowingLevel, isSolidType, levelAmount, levelIsFalling, levelIsSource } from './fluid';
 
 /** WaterFluid: getTickDelay 5, getDropOff 1, getSlopeFindDistance 4. */
@@ -29,6 +29,55 @@ export class FluidSimulator {
 
   constructor(private world: VoxelWorld) {
     world.blockListeners.push((x, y, z) => this.blockChanged(x, y, z));
+    world.columnListeners.push((col) => this.columnGenerated(col));
+    world.forEachColumn((col) => this.scanColumn(col, 15));
+  }
+
+  /**
+   * Vanilla ticks every fluid cell once when a generated chunk loads (ProtoChunk post-processing), so generated water
+   * that can flow (waterfalls, cave openings, cliff edges) starts moving on its own. A new column is scanned in full,
+   * and the shared edge of each loaded neighbour is rescanned because unloaded columns were treated as solid before.
+   */
+  private columnGenerated(col: ChunkColumn) {
+    this.scanColumn(col, 15);
+    const w = this.world;
+    const nb = w.getLoadedColumn(col.cx - 1, col.cz); if (nb) this.scanColumn(nb, 2);      // its +x edge touches col
+    const pb = w.getLoadedColumn(col.cx + 1, col.cz); if (pb) this.scanColumn(pb, 1);      // its -x edge
+    const sb = w.getLoadedColumn(col.cx, col.cz - 1); if (sb) this.scanColumn(sb, 8);      // its +z edge
+    const eb = w.getLoadedColumn(col.cx, col.cz + 1); if (eb) this.scanColumn(eb, 4);      // its -z edge
+  }
+
+  /** faces: bit 1 = lx 0, 2 = lx 15, 4 = lz 0, 8 = lz 15 (15 = whole column). Generated water only reaches y <= 64. */
+  private scanColumn(col: ChunkColumn, faces: number) {
+    const b = col.blocks, bx = col.cx * 16, bz = col.cz * 16, AIR = VoxelType.AIR;
+    const full = faces === 15;
+    for (let y = WORLD_MIN_Y + 1; y <= 64; y++) {
+      const ybase = (y - WORLD_MIN_Y) * 256;
+      for (let lz = 0; lz < 16; lz++) {
+        for (let lx = 0; lx < 16; lx++) {
+          if (!full && !((faces & 1 && lx === 0) || (faces & 2 && lx === 15) || (faces & 4 && lz === 0) || (faces & 8 && lz === 15))) continue;
+          const i = ybase + lz * 16 + lx;
+          if (b[i] !== WATER) continue;
+          if (b[i - 256] === AIR || this.sideDrop(b, bx, bz, lx, y, lz)) this.schedule(bx + lx, y, bz + lz, TICK_DELAY + ((lx * 7 + lz * 13) & 7));
+        }
+      }
+    }
+  }
+
+  /** Water can spill sideways into an air cell only where that cell is itself a drop; flat shores must not flood. */
+  private sideDrop(b: Uint8Array, bx: number, bz: number, lx: number, y: number, lz: number): boolean {
+    for (let d = 0; d < 4; d++) {
+      const nlx = lx + HDX[d], nlz = lz + HDZ[d];
+      let t: number, below: number;
+      if (nlx >= 0 && nlx < 16 && nlz >= 0 && nlz < 16) {
+        const ni = (y - WORLD_MIN_Y) * 256 + nlz * 16 + nlx;
+        t = b[ni]; below = b[ni - 256];
+      } else {
+        t = this.type(bx + nlx, y, bz + nlz); below = this.type(bx + nlx, y - 1, bz + nlz);
+      }
+      if (t === VoxelType.AIR && (below === VoxelType.AIR || below === WATER)) return true;
+    }
+    return false;
   }
 
   // ---------------------------------------------------------------- scheduling

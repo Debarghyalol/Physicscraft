@@ -393,6 +393,10 @@ export class VoxelWorld {
   };
   /** Called after any voxel changes: (x, y, z, oldType, newType). The fluid simulator listens here. */
   public blockListeners: Array<(x: number, y: number, z: number, oldType: number, newType: number) => void> = [];
+  /** Called after a freshly generated column is installed (the fluid simulator ticks generated water from here). */
+  public columnListeners: Array<(col: ChunkColumn) => void> = [];
+  public getLoadedColumn(cx: number, cz: number): ChunkColumn | undefined { return this.chunks.get(this.ckey(cx, cz)); }
+  public forEachColumn(fn: (col: ChunkColumn) => void) { for (const c of this.chunks.values()) fn(c); }
   public waterTexture!: WaterTexture;
   public waterMaterial!: MeshBasicNodeMaterial;
   private waterTexNode = uniformTexture();
@@ -1095,6 +1099,7 @@ export class VoxelWorld {
     }
     for (let i = 0; i < writes.length; i += 4) this.applyTreeWrite(writes[i], writes[i + 1], writes[i + 2], writes[i + 3] as VoxelType);
     this.finalizeColumn(col);
+    for (const fn of this.columnListeners) fn(col);
     return col;
   }
 
