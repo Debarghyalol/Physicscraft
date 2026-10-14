@@ -40,6 +40,11 @@ OPACITY[VoxelType.AIR] = 0;
 OPACITY[VoxelType.GLASS] = 0;
 OPACITY[VoxelType.LEAVES] = 1;
 OPACITY[VoxelType.WATER] = 1;
+// Every leaf variant dims light by 1 per block like vanilla (generated trees use these, not LEAVES, and were fully opaque to light).
+for (const t of [
+  VoxelType.OAK_LEAVES, VoxelType.SPRUCE_LEAVES, VoxelType.BIRCH_LEAVES, VoxelType.JUNGLE_LEAVES, VoxelType.ACACIA_LEAVES,
+  VoxelType.DARK_OAK_LEAVES, VoxelType.MANGROVE_LEAVES, VoxelType.CHERRY_LEAVES, VoxelType.PALE_OAK_LEAVES,
+]) OPACITY[t] = 1;
 /** Crossed plants do not occlude sunlight or block light. */
 for (const type of CROSS_PLANT_TYPES) OPACITY[type] = 0;
 /** Block light emitted by each block type. */
@@ -1338,10 +1343,10 @@ export class VoxelWorld {
           const i = this.idx(lx, y, lz);
           const op = OPACITY[blocks[i]];
           if (op >= 15) break;
-          if (op > 0) {
-            cur = Math.max(0, cur - op);
-            if (lt < WORLD_MIN_Y) lt = y;
-          }
+          // Vanilla: sky light only falls without loss at full strength through clear cells. Once a leaf/water cell has
+          // dimmed it, every further cell down loses at least 1 (matches propagateAdd), so it fades below canopies.
+          if (op > 0 && lt < WORLD_MIN_Y) lt = y;
+          if (op > 0 || cur < 15) cur = Math.max(0, cur - (op > 1 ? op : 1));
           L[i] = cur << 4;
         }
         leafTop[lz * 16 + lx] = lt;
@@ -1367,7 +1372,13 @@ export class VoxelWorld {
         const hE = lx < 15 ? col.heightmap[c + 1] : east ? east.heightmap[lz * 16] : hm;
         const hN = lz > 0 ? col.heightmap[c - 16] : north ? north.heightmap[15 * 16 + lx] : hm;
         const hS = lz < 15 ? col.heightmap[c + 16] : south ? south.heightmap[lx] : hm;
-        const yTo = Math.max(hW, hE, hN, hS, leafTop[c]);
+        // Open columns next to a leaf/water-shaded column must feed light sideways into it, so include the
+        // neighbours' dimming tops (in-chunk; chunk borders are flooded by edge() below).
+        const yTo = Math.max(
+          hW, hE, hN, hS, leafTop[c],
+          lx > 0 ? leafTop[c - 1] : WORLD_MIN_Y, lx < 15 ? leafTop[c + 1] : WORLD_MIN_Y,
+          lz > 0 ? leafTop[c - 16] : WORLD_MIN_Y, lz < 15 ? leafTop[c + 16] : WORLD_MIN_Y,
+        );
         for (let y = hm + 1; y <= yTo; y++) {
           if (((L[this.idx(lx, y, lz)] >> 4) & 15) > 1) skyQ.push(wx0 + lx, y, wz0 + lz);
         }
