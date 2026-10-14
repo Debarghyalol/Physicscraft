@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { attribute, float, mrt, uniform as tslUniform, uniformTexture, uv, vec4 } from 'three/tsl';
+import { attribute, float, mix, mrt, smoothstep, uniform as tslUniform, uniformTexture, uv, vec3, vec4 } from 'three/tsl';
 import { voxelLightmap } from '../shaderpack/ShaderPackWebGPUFinalPass';
 import { buildGlassConnectTables, glassConnectMask } from './glassConnect';
 import { createConnectedGlassUV } from './GlassConnectedUV';
@@ -775,13 +775,25 @@ export class VoxelWorld {
     };
   }
 
+  /**
+   * Per-pixel voxel light colour for the translucent layers (water, glass). Mirrors patchLightShader so they match
+   * the terrain beside them: the same l/(4-3l) curve, blue moonlight tint on sky light only, warm block light,
+   * and the same slightly blue minimum brightness. Geometry without the aLight attribute (z = 0) stays fully lit.
+   */
+  private voxelLightColor(light: any) {
+    const curve = (l: any) => l.div(l.mul(-3.0).add(4.0));
+    const skyLevel = light.x.sub(this.skyDimNode.mul(SKY_DIM_LEVELS / 15)).max(0.0);
+    const skyCol = mix(vec3(1.0, 1.0, 1.0), vec3(0.52, 0.68, 1.0), smoothstep(0.05, 1.0, this.skyDimNode));
+    const skyLight = skyCol.mul(curve(skyLevel));
+    const blockLight = vec3(1.0, 0.82, 0.6).mul(curve(light.y));
+    const lc = skyLight.max(blockLight).max(vec3(0.03, 0.032, 0.045));
+    return light.z.greaterThan(0.5).select(lc.pow(2.2), vec3(1.0, 1.0, 1.0));
+  }
+
   /** Water output for the translucent attachment: animated texture x tint x face shade x voxel light. */
   private createWaterMRT() {
     const light = voxelLightmap() as any;
-    const curve = (l: any) => l.div(l.mul(-3.0).add(4.0));
-    const skyLevel = light.x.sub(this.skyDimNode.mul(SKY_DIM_LEVELS / 15)).max(0.0);
-    const voxelLit = curve(skyLevel).pow(2.2).max(curve(light.y).pow(2.2)).max(0.03);
-    const lit = light.z.greaterThan(0.5).select(voxelLit, float(1.0));
+    const lit = this.voxelLightColor(light);
     const sampled = this.waterTexNode.sample(uv()) as any;
     const vcol = attribute('color', 'vec3') as any;
     const water = vec4(sampled.rgb.mul(vcol).mul(this.glassTintNode).mul(lit), sampled.a);
@@ -809,11 +821,7 @@ export class VoxelWorld {
     // contraption glass (PhysicsEngine) shares this material but has no voxel light, so it
     // falls back to fully lit instead of being treated as pitch black.
     const light = voxelLightmap() as any;
-    // Same non-linear light curve + gamma as the vanilla voxel shader (l / (4 - 3l)).
-    const curve = (l: any) => l.div(l.mul(-3.0).add(4.0));
-    const skyLevel = light.x.sub(this.skyDimNode.mul(SKY_DIM_LEVELS / 15)).max(0.0);
-    const voxelLit = curve(skyLevel).pow(2.2).max(curve(light.y).pow(2.2)).max(0.03);
-    const lit = light.z.greaterThan(0.5).select(voxelLit, float(1.0));
+    const lit = this.voxelLightColor(light);
 
     // Atlas sample with connected-glass UVs (frame removed on edges shared with other glass),
     // tinted like the other voxel materials. Keeps the texture's real alpha.
