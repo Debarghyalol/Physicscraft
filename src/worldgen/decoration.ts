@@ -8,7 +8,7 @@
  */
 import { VoxelType } from '../types/physics';
 import { Xoroshiro128PlusPlus } from './random';
-import { NormalNoise } from './noise';
+import { LegacyRandom, NormalNoise, SimplexNoise } from './vanillaNoise';
 import { DECORATION_BIOME_FEATURES, DECORATION_BIOME_LIST, DECORATION_FEATURES } from './decoration.data';
 
 export interface DecorationWorld {
@@ -42,76 +42,9 @@ const SOIL = new Set<number>([VoxelType.GRASS, VoxelType.DIRT, VoxelType.COARSE_
 const biomeIndex = new Map<string, number>(DECORATION_BIOME_LIST.map((n, i) => [n, i]));
 const strip = (s: string) => s.replace(/^minecraft:/, '');
 
-// ---------------------------------------------------------------------------------------------------------------------
-// java.util.Random (LegacyRandomSource) and the 2D SimplexNoise behind Biome.BIOME_INFO_NOISE
-// ---------------------------------------------------------------------------------------------------------------------
-class LegacyRandom {
-  private sh: number;
-  private sl: number;
-  constructor(seed: number) {
-    const s = (BigInt(seed) ^ 0x5deece66dn) & 0xffffffffffffn;
-    this.sh = Number(s >> 24n);
-    this.sl = Number(s & 0xffffffn);
-  }
-  next(bits: number): number {
-    const p = this.sl * 0xece66d + 0xb;
-    const nsl = p % 16777216;
-    const nsh = (Math.floor(p / 16777216) + this.sh * 0xece66d + this.sl * 0x5de) % 16777216;
-    this.sh = nsh;
-    this.sl = nsl;
-    const v = Math.floor((nsh * 16777216 + nsl) / 2 ** (48 - bits));
-    return bits === 32 ? v | 0 : v;
-  }
-  nextInt(bound: number): number {
-    if ((bound & (bound - 1)) === 0) return Math.floor((bound * this.next(31)) / 2147483648);
-    for (;;) {
-      const sample = this.next(31), modulo = sample % bound;
-      if (sample - modulo + (bound - 1) < 2147483648) return modulo;
-    }
-  }
-  nextDouble(): number {
-    return (this.next(26) * 134217728 + this.next(27)) * 1.1102230246251565e-16;
-  }
-}
-
-const GRAD: ReadonlyArray<readonly [number, number]> = [
-  [1, 1], [-1, 1], [1, -1], [-1, -1], [1, 0], [-1, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [0, 1], [0, -1], [1, 1], [0, -1], [-1, 1], [0, -1],
-]; // x/y components of the vanilla gradient table (z is 0 for the 2D lookups)
-class Simplex2D {
-  private perm = new Uint8Array(256);
-  constructor(random: LegacyRandom) {
-    random.nextDouble(); random.nextDouble(); random.nextDouble(); // offsets are discarded but still consume the stream
-    for (let i = 0; i < 256; i++) this.perm[i] = i;
-    for (let i = 0; i < 256; i++) {
-      const o = random.nextInt(256 - i), t = this.perm[i];
-      this.perm[i] = this.perm[o + i];
-      this.perm[o + i] = t;
-    }
-  }
-  private p(x: number): number { return this.perm[x & 255]; }
-  private corner(gi: number, x: number, y: number): number {
-    let t = 0.5 - x * x - y * y;
-    if (t < 0) return 0;
-    t *= t;
-    const g = GRAD[gi & 15];
-    return t * t * (g[0] * x + g[1] * y);
-  }
-  get(xin: number, yin: number): number {
-    const F2 = 0.5 * (Math.sqrt(3) - 1), G2 = (3 - Math.sqrt(3)) / 6;
-    const s = (xin + yin) * F2;
-    const i = Math.floor(xin + s), j = Math.floor(yin + s);
-    const t = (i + j) * G2;
-    const x0 = xin - (i - t), y0 = yin - (j - t);
-    const i1 = x0 > y0 ? 1 : 0, j1 = x0 > y0 ? 0 : 1;
-    const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
-    const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
-    const ii = i & 255, jj = j & 255;
-    const gi0 = this.p(ii + this.p(jj)) % 12, gi1 = this.p(ii + i1 + this.p(jj + j1)) % 12, gi2 = this.p(ii + 1 + this.p(jj + 1)) % 12;
-    return Math.fround(70 * (this.corner(gi0, x0, y0) + this.corner(gi1, x1, y1) + this.corner(gi2, x2, y2)));
-  }
-}
-let biomeInfoNoise: Simplex2D | null = null;
-const getBiomeInfoNoise = () => (biomeInfoNoise ??= new Simplex2D(new LegacyRandom(2345)));
+let biomeInfoNoise: SimplexNoise | null = null;
+/** Biome.BIOME_INFO_NOISE = new SimplexNoise(new WorldgenRandom(new LegacyRandomSource(2345L)), true) */
+const getBiomeInfoNoise = () => (biomeInfoNoise ??= new SimplexNoise(new LegacyRandom(2345n)));
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Int providers / state providers
@@ -135,17 +68,25 @@ function sampleInt(p: any, r: Rng): number {
 }
 
 const noiseCache = new Map<string, NormalNoise>();
+/** NoiseBasedStateProvider: `parameters.create(new WorldgenRandom(new LegacyRandomSource(seed)))` */
 function providerNoise(spec: any, seed: number): NormalNoise {
   const key = `${seed}:${spec.base_octave}:${spec.base_amplitude}`;
   let n = noiseCache.get(key);
   if (!n) {
-    n = new NormalNoise(Xoroshiro128PlusPlus.fromSeed(BigInt(seed)), { base_octave: spec.base_octave, octave_count: 1, base_amplitude: spec.base_amplitude });
+    n = new NormalNoise(new LegacyRandom(BigInt(seed)), { base_octave: spec.base_octave, base_amplitude: spec.base_amplitude, octave_count: spec.octave_count, amplitude_modifiers: spec.amplitude_modifiers });
     noiseCache.set(key, n);
   }
   return n;
 }
 
 function stateOf(name: string): VoxelType { return BLOCKS[name]; }
+const fr = Math.fround;
+/** NoiseProvider.getRandomState(states, noiseValue) */
+function noiseState(states: string[], v: number): VoxelType {
+  const t = fr(fr(1 + v) / 2);
+  const placement = t < 0 ? 0 : Math.min(t, fr(0.9999));
+  return stateOf(states[Math.trunc(fr(placement * states.length))]);
+}
 
 function sampleState(p: any, r: Rng, x: number, y: number, z: number): VoxelType {
   switch (p.type) {
@@ -158,24 +99,28 @@ function sampleState(p: any, r: Rng, x: number, y: number, z: number): VoxelType
       return stateOf(p.entries[p.entries.length - 1].state);
     }
     case 'noise_threshold': {
-      const v = providerNoise(p.noise, p.seed).sample(x * p.scale, y * p.scale, z * p.scale);
-      if (v < p.threshold) return stateOf(p.low_states[r.nextIntBounded(p.low_states.length)]);
-      return r.nextFloat() < p.high_chance ? stateOf(p.high_states[r.nextIntBounded(p.high_states.length)]) : stateOf(p.default_state);
+      const sc = fr(p.scale);
+      const v = providerNoise(p.noise, p.seed).get(x * sc, y * sc, z * sc);
+      if (v < fr(p.threshold)) return stateOf(p.low_states[r.nextIntBounded(p.low_states.length)]);
+      return r.nextFloat() < fr(p.high_chance) ? stateOf(p.high_states[r.nextIntBounded(p.high_states.length)]) : stateOf(p.default_state);
     }
     case 'noise': {
-      const v = providerNoise(p.noise, p.seed).sample(x * p.scale, y * p.scale, z * p.scale);
-      const n = p.states.length;
-      return stateOf(p.states[Math.min(n - 1, Math.max(0, Math.floor(((1 + v) / 2) * n)))]);
+      const sc = fr(p.scale);
+      return noiseState(p.states, providerNoise(p.noise, p.seed).get(x * sc, y * sc, z * sc));
     }
     case 'dual_noise': {
-      // Patchwork meadow: the slow noise decides how many kinds are in play around here, the fast noise picks among them.
-      const slow = providerNoise(p.slow_noise, p.seed).sample(x * p.slow_scale, y * p.slow_scale, z * p.slow_scale);
-      const fast = providerNoise(p.noise, p.seed).sample(x * p.scale, y * p.scale, z * p.scale);
-      const n = p.states.length, [vmin, vmax] = p.variety as [number, number];
-      const count = Math.min(vmax, Math.max(vmin, Math.floor(vmin + ((slow + 1) / 2) * (vmax + 1 - vmin))));
-      const start = Math.min(n - 1, Math.max(0, Math.floor(((slow * 7.3 + 1) / 2 + 1) * n) % n));
-      const pick = Math.min(count - 1, Math.max(0, Math.floor(((1 + fast) / 2) * count)));
-      return stateOf(p.states[(start + pick * 3) % n]);
+      const sc = fr(p.scale), slowSc = fr(p.slow_scale), slow = providerNoise(p.slow_noise, p.seed), fast = providerNoise(p.noise, p.seed);
+      const slowAt = (px: number, py: number, pz: number) => slow.get(fr(fr(px) * slowSc), fr(fr(py) * slowSc), fr(fr(pz) * slowSc));
+      const [vmin, vmax] = p.variety as [number, number];
+      const f01 = (slowAt(x, y, z) + 1) / 2; // Mth.clampedMap(v, -1, 1, min, max + 1)
+      const count = Math.trunc(f01 < 0 ? vmin : f01 > 1 ? vmax + 1 : vmin + f01 * (vmax + 1 - vmin));
+      const possible: string[] = [];
+      for (let i = 0; i < count; i++) {
+        const t = fr(fr(1 + slowAt(x + i * 54545, y, z + i * 34298)) / 2);
+        const pl = t < 0 ? 0 : Math.min(t, fr(0.9999));
+        possible.push(p.states[Math.trunc(fr(pl * p.states.length))]);
+      }
+      return noiseState(possible, fast.get(x * sc, y * sc, z * sc));
     }
     default: throw new Error('unsupported state provider ' + p.type);
   }
