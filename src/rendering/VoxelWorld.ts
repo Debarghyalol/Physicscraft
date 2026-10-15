@@ -375,6 +375,7 @@ export class VoxelWorld {
   private streamCx = NaN;
   private streamCz = NaN;
   public seed: number = 1337;
+  public worldSpawn = { x: 0, z: 0 };
   public renderDistance: number = 3; // chunks meshed around the player
 
   /** Change the streamed/meshed radius without forcing synchronous world generation. */
@@ -450,7 +451,8 @@ export class VoxelWorld {
     this.initNoise();
     this.createTextureAtlas();
     this.startGenPool();
-    this.generateWorldChunks();
+    this.worldSpawn = this.findWorldSpawn();
+    this.generateWorldChunks(this.worldSpawn.x, this.worldSpawn.z);
   }
 
   public setRapierWorld(_world: unknown) {
@@ -2457,15 +2459,21 @@ export class VoxelWorld {
     this.streamCx = NaN; // force the real radius to be streamed in on the next update
   }
 
-  public generateWorldChunks() {
-    this.buildAround(0, 0, CHUNK_GRID_RADIUS);
+  private findWorldSpawn(): { x: number; z: number } {
+    if (!this.mainGen || this.mainGen.seed !== this.seed) this.mainGen = new ChunkGenerator(this.seed);
+    return this.mainGen.findSpawnPosition();
+  }
+
+  public generateWorldChunks(spawnX = this.worldSpawn.x, spawnZ = this.worldSpawn.z) {
+    this.buildAround(Math.floor(spawnX / 16), Math.floor(spawnZ / 16), CHUNK_GRID_RADIUS);
   }
 
   public setSeed(newSeed: number) {
     this.seed = newSeed;
     this.initNoise();
     this.clearAllChunks();
-    this.generateWorldChunks();
+    this.worldSpawn = this.findWorldSpawn();
+    this.generateWorldChunks(this.worldSpawn.x, this.worldSpawn.z);
     this.buildPhysicsColliders();
   }
 

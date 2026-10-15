@@ -107,9 +107,9 @@ export class PhysicsEngine {
 
     this.voxelWorld.setRapierWorld(this.world);
 
-    // Create Rapier-powered Player Character (Steve) standing safely on grass outside structure zone
-    const spawnX = 0;
-    const spawnZ = 6.0;
+    // Spawn at the seed-specific Minecraft-style world spawn, on the generated surface.
+    const spawnX = this.voxelWorld.worldSpawn.x + 0.5;
+    const spawnZ = this.voxelWorld.worldSpawn.z + 0.5;
     const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
     this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
     this.mobs = new MobManager(this.scene, this.voxelWorld);
@@ -1292,8 +1292,10 @@ export class PhysicsEngine {
   public setWorldSeed(seed: number) {
     this.voxelWorld.setSeed(seed);
     if (this.player) {
-      const groundY = this.voxelWorld.getElevationAt(0, 6.0);
-      this.player.teleport(0, groundY + 1.25, 6.0);
+      const spawnX = this.voxelWorld.worldSpawn.x + 0.5;
+      const spawnZ = this.voxelWorld.worldSpawn.z + 0.5;
+      const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
+      this.player.teleport(spawnX, groundY + 1.25, spawnZ);
       this.player.yaw = 0;
       this.player.pitch = -0.05;
     }

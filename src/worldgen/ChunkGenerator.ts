@@ -55,6 +55,60 @@ export class ChunkGenerator {
     this.vegetationFn = this.compiler.compileRef('minecraft:overworld/vegetation');
   }
 
+  /** Vanilla NoiseSpawnFinder search, using overworld spawn-target climate intervals. */
+  findSpawnPosition(): { x: number; z: number } {
+    const targets = [
+      { continents: [-0.11, 1], erosion: [-1, 1], ridges: [-1, -0.16] },
+      { continents: [-0.11, 1], erosion: [-1, 1], ridges: [0.16, 1] },
+    ];
+    const sample = {
+      continents: this.compiler.compileRef('minecraft:overworld/continents'),
+      erosion: this.compiler.compileRef('minecraft:overworld/erosion'),
+      ridges: this.compiler.compileRef('minecraft:overworld/ridges'),
+    };
+    const sampleCache = new Map<string, { continents: number; erosion: number; ridges: number }>();
+    const fitnessAt = (x: number, z: number): number => {
+      const qx = Math.floor(x / 4) * 4, qz = Math.floor(z / 4) * 4;
+      const key = `${qx},${qz}`;
+      let values = sampleCache.get(key);
+      if (!values) {
+        const p = { x: qx, y: 0, z: qz };
+        values = {
+          continents: Math.trunc(sample.continents(p) * 10000),
+          erosion: Math.trunc(sample.erosion(p) * 10000),
+          ridges: Math.trunc(sample.ridges(p) * 10000),
+        };
+        sampleCache.set(key, values);
+      }
+      let minFitness = Number.POSITIVE_INFINITY;
+      for (const target of targets) {
+        const dist = (v: number, range: number[]) => Math.max(range[0] * 10000 - v, 0, v - range[1] * 10000);
+        const dc = dist(values.continents, target.continents);
+        const de = dist(values.erosion, target.erosion);
+        const dr = dist(values.ridges, target.ridges);
+        minFitness = Math.min(minFitness, dc * dc + de * de + dr * dr);
+      }
+      return minFitness * 2048 * 2048 + x * x + z * z;
+    };
+
+    let bestX = 0, bestZ = 0, bestFitness = fitnessAt(0, 0);
+    const radialSearch = (maxRadius: number, increment: number) => {
+      let angle = 0, radius = increment;
+      const originX = bestX, originZ = bestZ;
+      while (radius <= maxRadius) {
+        const x = originX + Math.trunc(Math.sin(angle) * radius);
+        const z = originZ + Math.trunc(Math.cos(angle) * radius);
+        const fitness = fitnessAt(x, z);
+        if (fitness < bestFitness) { bestX = x; bestZ = z; bestFitness = fitness; }
+        angle += increment / radius;
+        if (angle > Math.PI * 2) { angle = 0; radius += increment; }
+      }
+    };
+    radialSearch(2048, 512);
+    radialSearch(512, 32);
+    return { x: bestX, z: bestZ };
+  }
+
   generate(cx: number, cz: number): GeneratedChunk {
     const blocks = new Uint8Array(256 * GEN_HEIGHT);
     const top = this.top, worldSurface = this.worldSurface;
