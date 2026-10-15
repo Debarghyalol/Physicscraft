@@ -10,6 +10,9 @@ import { BiomeManager, obfuscateSeed } from './biome/BiomeManager';
 import { SurfaceSystem, type SurfaceChunk } from './material/SurfaceSystem';
 import { vanillaBlockToVoxel } from './blocks';
 import { chooseTreeKind, placeTreeFeature } from './trees';
+import { DECORATION_BIOME_LIST } from './decoration.data';
+
+const BIOME_ID = new Map<string, number>(DECORATION_BIOME_LIST.map((n, i) => [n, i]));
 
 export const GEN_MIN_Y = -64;
 export const GEN_MAX_Y = 320; // exclusive
@@ -22,6 +25,8 @@ export interface GeneratedChunk {
   blocks: Uint8Array;
   /** Tree/feature writes that landed outside this column, as flat [x, y, z, type] quadruples. */
   writes: Int32Array;
+  /** Biome ids (index into DECORATION_BIOME_LIST) on a 4x4 quart grid at the surface, [qz*4+qx]. */
+  biomes: Uint8Array;
 }
 
 const idx = (lx: number, wy: number, lz: number): number => (((wy - GEN_MIN_Y) << 4 | lz) << 4) | lx;
@@ -35,6 +40,7 @@ export class ChunkGenerator {
   private readonly compiler: DensityFunctionCompiler;
   private readonly finalDensity: Density;
   private readonly surfaceSystem: SurfaceSystem;
+  private readonly biomeManager: BiomeManager;
   private readonly temperatureFn: Density;
   private readonly vegetationFn: Density;
   private readonly top = new Int16Array(256);
@@ -43,7 +49,7 @@ export class ChunkGenerator {
   constructor(readonly seed: number) {
     this.compiler = new DensityFunctionCompiler(seed);
     this.finalDensity = this.compiler.compileRoot();
-    const biomeManager = new BiomeManager(new MultiNoiseBiomeSource(this.compiler), obfuscateSeed(BigInt(seed)));
+    const biomeManager = this.biomeManager = new BiomeManager(new MultiNoiseBiomeSource(this.compiler), obfuscateSeed(BigInt(seed)));
     this.surfaceSystem = new SurfaceSystem(this.compiler, biomeManager, { minY: GEN_MIN_Y, height: GEN_HEIGHT });
     this.temperatureFn = this.compiler.compileRef('minecraft:overworld/temperature');
     this.vegetationFn = this.compiler.compileRef('minecraft:overworld/vegetation');
@@ -154,6 +160,15 @@ export class ChunkGenerator {
         placeTreeFeature(kind, this.seed, wx, t + 1, wz, write);
       }
     }
-    return { blocks, writes: Int32Array.from(outside) };
+    // Surface biome per quart column, used by the decoration pass (possible-biome set and BiomeFilter).
+    const biomes = new Uint8Array(16);
+    for (let qz = 0; qz < 4; qz++) {
+      for (let qx = 0; qx < 4; qx++) {
+        const lx = qx * 4 + 2, lz = qz * 4 + 2;
+        const y = Math.max(GEN_MIN_Y, Math.min(GEN_MAX_Y - 1, worldSurface[lz * 16 + lx]));
+        biomes[qz * 4 + qx] = BIOME_ID.get(this.biomeManager.getBiome(cx * 16 + lx, y, cz * 16 + lz).replace(/^minecraft:/, '')) ?? 0;
+      }
+    }
+    return { blocks, writes: Int32Array.from(outside), biomes };
   }
 }

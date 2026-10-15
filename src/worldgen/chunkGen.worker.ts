@@ -7,5 +7,5 @@ ctx.onmessage = (e: MessageEvent) => {
   const { seed, epoch, cx, cz } = e.data as { seed: number; epoch: number; cx: number; cz: number };
   if (!gen || gen.seed !== seed) gen = new ChunkGenerator(seed);
   const r = gen.generate(cx, cz);
-  ctx.postMessage({ seed, epoch, cx, cz, blocks: r.blocks, writes: r.writes }, [r.blocks.buffer, r.writes.buffer]);
+  ctx.postMessage({ seed, epoch, cx, cz, blocks: r.blocks, writes: r.writes, biomes: r.biomes }, [r.blocks.buffer, r.writes.buffer, r.biomes.buffer]);
 };

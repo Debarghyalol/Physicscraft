@@ -9,6 +9,7 @@ import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
 import { ChunkGenerator } from '../worldgen/ChunkGenerator';
 import { ChunkGenPool, type PoolResult } from '../worldgen/ChunkGenPool';
+import { Decorator, type DecorationWorld, type HeightmapKind } from '../worldgen/decoration';
 import { WaterTexture, spriteU, spriteV } from './WaterTexture';
 import { FluidAccess, getFlow, ownHeight } from '../fluid/fluid';
 
@@ -308,6 +309,9 @@ export class ChunkColumn {
   lit = false; // initial light computed
   ready = false; // all 8 neighbours lit -> safe to mesh
   modified = false; // edited by the player: never discarded when far away
+  decorated = false; // grass / flowers pass has run for this column
+  /** Surface biome ids on a 4x4 quart grid (see ChunkGenerator), used by the decoration pass. */
+  biomes: Uint8Array | null = null;
   opaqueMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   cutoutMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   transMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
@@ -364,6 +368,10 @@ export class VoxelWorld {
   private readyQueue: ChunkColumn[] = [];
   private queuedLight = new Set<number>();
   private queuedReady = new Set<number>();
+  private decorQueue: ChunkColumn[] = [];
+  private queuedDecor = new Set<number>();
+  private decorator: Decorator | null = null;
+  private decorSeed = NaN;
   private streamCx = NaN;
   private streamCz = NaN;
   public seed: number = 1337;
@@ -1082,16 +1090,17 @@ export class VoxelWorld {
     if (!col) {
       if (!this.mainGen || this.mainGen.seed !== this.seed) this.mainGen = new ChunkGenerator(this.seed);
       const g = this.mainGen.generate(cx, cz);
-      col = this.installGenerated(cx, cz, g.blocks, g.writes);
+      col = this.installGenerated(cx, cz, g.blocks, g.writes, g.biomes);
     }
     return col;
   }
 
   /** Registers a generated column: flushes feature writes queued by neighbours, places this column's overflow, finalizes. */
-  private installGenerated(cx: number, cz: number, blocks: Uint8Array, writes: Int32Array): ChunkColumn {
+  private installGenerated(cx: number, cz: number, blocks: Uint8Array, writes: Int32Array, biomes: Uint8Array): ChunkColumn {
     const key = this.ckey(cx, cz);
     const col = new ChunkColumn(cx, cz);
     col.blocks = blocks;
+    col.biomes = biomes;
     this.chunks.set(key, col);
     this.invalidateColCache();
     const pending = this.treeWrites.get(key);
@@ -1105,7 +1114,93 @@ export class VoxelWorld {
     for (let i = 0; i < writes.length; i += 4) this.applyTreeWrite(writes[i], writes[i + 1], writes[i + 2], writes[i + 3] as VoxelType);
     this.finalizeColumn(col);
     for (const fn of this.columnListeners) fn(col);
+    // Neighbours decorated before this column existed (it was unloaded and regenerated) never placed plants here: patch them in.
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dz === 0) continue;
+        const n = this.chunks.get(this.ckey(cx + dx, cz + dz));
+        if (n && n.decorated) this.decorateColumn(n, col);
+      }
+    }
+    this.queueDecorNeighborhood(col);
     return col;
+  }
+
+  // ======================================================================
+  //  Ground cover (grass, tall grass, ferns, flowers)
+  // ======================================================================
+
+  private readonly decorationWorld: DecorationWorld = {
+    minY: WORLD_MIN_Y,
+    block: (x, y, z) => this.getVoxel(x, y, z),
+    place: (x, y, z, type) => {
+      if (y < WORLD_MIN_Y || y >= WORLD_MAX_Y) return;
+      const col = this.colAt(x, z);
+      if (!col || col.modified) return;
+      const i = this.idx(x & 15, y, z & 15);
+      if (col.blocks[i] !== VoxelType.AIR) return;
+      col.blocks[i] = type;
+      col.counts[(y - WORLD_MIN_Y) >> 4]++;
+      const h = ((z & 15) << 4) | (x & 15);
+      if (y > col.topY[h]) {
+        col.topY[h] = y;
+        if (y > col.maxTop) col.maxTop = y;
+      }
+      if (col.ready) this.markAround(x, y, z, true);
+    },
+    // Plants are ignored so repeating a column's decoration (see installGenerated) re-picks exactly the same cells.
+    height: (x: number, z: number, _kind: HeightmapKind) => {
+      const col = this.colAt(x, z);
+      if (!col) return WORLD_MIN_Y;
+      const lx = x & 15, lz = z & 15, b = col.blocks;
+      let y = col.topY[(lz << 4) | lx];
+      while (y >= WORLD_MIN_Y) {
+        const t = b[this.idx(lx, y, lz)];
+        if (t === VoxelType.AIR || CROSS_PLANT_TYPES.has(t)) y--;
+        else break;
+      }
+      return y >= WORLD_MIN_Y ? y + 1 : WORLD_MIN_Y;
+    },
+    biome: (x, z) => {
+      const col = this.colAt(x, z);
+      return col && col.biomes ? col.biomes[(((z & 15) >> 2) << 2) | ((x & 15) >> 2)] : -1;
+    },
+  };
+
+  /** Runs the vegetal-step ground cover for a column; `only` restricts writes to one (freshly regenerated) neighbour. */
+  private decorateColumn(col: ChunkColumn, only?: ChunkColumn) {
+    if (!this.decorator || this.decorSeed !== this.seed) {
+      this.decorator = new Decorator(this.seed);
+      this.decorSeed = this.seed;
+    }
+    const grids: Array<Uint8Array | null> = [];
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) grids.push(this.chunks.get(this.ckey(col.cx + dx, col.cz + dz))?.biomes ?? null);
+    }
+    try {
+      this.decorator.decorate(col.cx, col.cz, this.decorationWorld, grids, only ? (x, z) => (x >> 4) === only.cx && (z >> 4) === only.cz : undefined);
+    } catch (err) {
+      console.warn('[worldgen] ground cover failed for chunk', col.cx, col.cz, err);
+    }
+  }
+
+  private queueDecor(col: ChunkColumn) {
+    if (col.decorated) return;
+    const d = Math.max(Math.abs(col.cx - this.streamCx), Math.abs(col.cz - this.streamCz));
+    if (d > this.renderDistance + 1) return;
+    const key = this.ckey(col.cx, col.cz);
+    if (this.queuedDecor.has(key)) return;
+    this.queuedDecor.add(key);
+    this.decorQueue.push(col);
+  }
+
+  private queueDecorNeighborhood(col: ChunkColumn) {
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = this.chunks.get(this.ckey(col.cx + dx, col.cz + dz));
+        if (n) this.queueDecor(n);
+      }
+    }
   }
 
   private startGenPool() {
@@ -2152,6 +2247,8 @@ export class VoxelWorld {
     this.readyQueue.length = 0;
     this.queuedLight.clear();
     this.queuedReady.clear();
+    this.decorQueue.length = 0;
+    this.queuedDecor.clear();
 
     // Unload far chunks: drop meshes beyond r+1, delete untouched columns beyond r+3.
     for (const [key, col] of this.chunks) {
@@ -2164,6 +2261,7 @@ export class VoxelWorld {
       }
       if (d <= r + 1 && !col.lit) this.queueLight(col);
       if (d <= r && col.lit && !col.ready) this.queueReady(col);
+      if (d <= r + 1 && !col.decorated) this.queueDecor(col);
     }
   }
 
@@ -2237,7 +2335,7 @@ export class VoxelWorld {
       const key = this.ckey(r.cx, r.cz);
       this.genInFlight.delete(key);
       if (this.chunks.has(key)) continue;
-      this.queueLight(this.installGenerated(r.cx, r.cz, r.blocks, r.writes));
+      this.queueLight(this.installGenerated(r.cx, r.cz, r.blocks, r.writes, r.biomes));
       installed++;
     }
     const pool = this.genPool;
@@ -2273,7 +2371,25 @@ export class VoxelWorld {
       this.queueReadyNeighborhood(col);
     }
 
-    // 3. Mark chunks mesh-ready only after their 3x3 neighbourhood is lit.
+    // 2b. Ground cover: a column is decorated once its whole 3x3 neighbourhood exists (patches spread up to 7 blocks over borders).
+    while (this.decorQueue.length && performance.now() < deadline) {
+      const col = this.decorQueue.pop()!;
+      const key = this.ckey(col.cx, col.cz);
+      this.queuedDecor.delete(key);
+      if (this.chunks.get(key) !== col || col.decorated) continue;
+      let complete = true;
+      for (let dz = -1; dz <= 1 && complete; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!this.chunks.has(this.ckey(col.cx + dx, col.cz + dz))) { complete = false; break; }
+        }
+      }
+      if (!complete) continue; // queued again when the missing neighbour is installed
+      this.decorateColumn(col);
+      col.decorated = true;
+      this.queueReadyNeighborhood(col);
+    }
+
+    // 3. Mark chunks mesh-ready only after their 3x3 neighbourhood is lit and decorated.
     while (this.readyQueue.length && performance.now() < deadline) {
       const col = this.readyQueue.pop()!;
       this.queuedReady.delete(this.ckey(col.cx, col.cz));
@@ -2283,7 +2399,7 @@ export class VoxelWorld {
       for (let dz = -1; dz <= 1 && ok; dz++) {
         for (let dx = -1; dx <= 1; dx++) {
           const n = this.chunks.get(this.ckey(col.cx + dx, col.cz + dz));
-          if (!n || !n.lit) {
+          if (!n || !n.lit || !n.decorated) {
             ok = false;
             break;
           }
@@ -2299,7 +2415,7 @@ export class VoxelWorld {
   }
 
   private streamIdle(): boolean {
-    if (this.terrainQueueIndex < this.terrainQueue.length || this.genInFlight.size || this.genResults.length || this.lightQueue.length || this.readyQueue.length || this.dirty.size) return false;
+    if (this.terrainQueueIndex < this.terrainQueue.length || this.genInFlight.size || this.genResults.length || this.lightQueue.length || this.readyQueue.length || this.decorQueue.length || this.dirty.size) return false;
     const r = this.renderDistance;
     for (let cx = this.streamCx - r; cx <= this.streamCx + r; cx++) {
       for (let cz = this.streamCz - r; cz <= this.streamCz + r; cz++) {
@@ -2364,8 +2480,10 @@ export class VoxelWorld {
     this.terrainQueueIndex = 0;
     this.lightQueue.length = 0;
     this.readyQueue.length = 0;
+    this.decorQueue.length = 0;
     this.queuedLight.clear();
     this.queuedReady.clear();
+    this.queuedDecor.clear();
     this.invalidateColCache();
     this.streamCx = NaN;
     this.streamCz = NaN;
