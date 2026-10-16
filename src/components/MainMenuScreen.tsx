@@ -10,10 +10,11 @@ export interface WorldSave {
   seed: number;
   preset: StructurePreset;
   lastPlayed: string;
+  thumbnail?: string;
 }
-interface ServerEntry { id: string; name: string; address: string; }
+interface ServerEntry { id: string; name: string; address: string; resourcePacks: 'enabled' | 'prompt' | 'disabled'; }
 type MenuView = 'title' | 'singleplayer' | 'create_world' | 'multiplayer' | 'language' | 'accessibility';
-type ServerForm = { id?: string; name: string; address: string };
+type ServerForm = { id?: string; name: string; address: string; resourcePacks: 'enabled' | 'prompt' | 'disabled' };
 
 export interface MainMenuScreenProps {
   onPlayWorld: (world: WorldSave) => void;
@@ -43,9 +44,15 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
   const [newWorldName, setNewWorldName] = useState('New World');
   const [newWorldMode, setNewWorldMode] = useState<'Survival' | 'Creative'>('Survival');
   const [newWorldSeed, setNewWorldSeed] = useState(() => String(Math.floor(Math.random() * 900000) + 100000));
+  const [createTab, setCreateTab] = useState<'game' | 'world'>('game');
+  const [generateStructures, setGenerateStructures] = useState(true);
+  const [bonusChest, setBonusChest] = useState(false);
   const [servers, setServers] = useState<ServerEntry[]>(loadServers);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [serverForm, setServerForm] = useState<ServerForm | null>(null);
+  const [directConnect, setDirectConnect] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<WorldSave | null>(null);
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [notice, setNotice] = useState('');
   const [splashText] = useState(() => SPLASH_TEXTS[Math.floor(Math.random() * SPLASH_TEXTS.length)]);
   const [selectedLanguage, setSelectedLanguage] = useState(() => localStorage.getItem('physicscraft-language') || 'English (US)');
@@ -72,6 +79,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
   const selectedWorld = worlds.find((world) => world.id === selectedWorldId);
   const filteredWorlds = useMemo(() => worlds.filter((world) => world.name.toLowerCase().includes(worldSearch.toLowerCase())), [worlds, worldSearch]);
   const selectedServer = servers.find((server) => server.id === selectedServerId);
+  const panorama = worlds.find((world) => world.thumbnail)?.thumbnail;
 
   const playSelected = () => { if (selectedWorld) onPlayWorld(selectedWorld); };
   const createWorld = (event: React.FormEvent) => {
@@ -90,8 +98,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
     void saveWorld(world).catch((error) => console.warn('Could not save new world metadata', error));
     onPlayWorld(world);
   };
-  const deleteWorld = (id: string, event: React.MouseEvent) => {
-    event.stopPropagation();
+  const deleteWorld = (id: string) => {
     if (worlds.length <= 1) return;
     const next = worlds.filter((world) => world.id !== id);
     setWorlds(next);
@@ -101,7 +108,13 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
   const saveServer = (event: React.FormEvent) => {
     event.preventDefault();
     if (!serverForm?.address.trim()) return;
-    const next: ServerEntry = { id: serverForm.id || `server_${Date.now()}`, name: serverForm.name.trim() || serverForm.address.trim(), address: serverForm.address.trim() };
+    if (directConnect) {
+      setServerForm(null);
+      setDirectConnect(false);
+      announceUnsupportedConnection();
+      return;
+    }
+    const next: ServerEntry = { id: serverForm.id || `server_${Date.now()}`, name: serverForm.name.trim() || serverForm.address.trim(), address: serverForm.address.trim(), resourcePacks: serverForm.resourcePacks || 'prompt' };
     setServers((list) => serverForm.id ? list.map((item) => item.id === next.id ? next : item) : [...list, next]);
     setSelectedServerId(next.id);
     setServerForm(null);
@@ -112,7 +125,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
   const back = () => setView(view === 'create_world' ? 'singleplayer' : 'title');
 
   return (
-    <div className={`fixed inset-0 z-50 flex flex-col mc-dirt-bg select-none text-white font-mono overflow-hidden ${highContrast ? 'mc-menu-high-contrast' : ''} ${largeUi ? 'mc-menu-large' : ''}`}>
+    <div className={`fixed inset-0 z-50 flex flex-col mc-dirt-bg select-none text-white font-mono overflow-hidden ${highContrast ? 'mc-menu-high-contrast' : ''} ${largeUi ? 'mc-menu-large' : ''}`} style={{ backgroundImage: `linear-gradient(rgba(0,0,0,.50),rgba(0,0,0,.62)),url(${panorama || '/textures/gui/title/background/physicscraft_panorama.svg'})`, backgroundSize: 'cover', backgroundPosition: 'center', animation: 'mc-panorama-drift 70s linear infinite alternate' }}>
       <div className="absolute inset-0 bg-black/50 pointer-events-none" />
       {view === 'title' && <div className="relative z-10 flex h-full w-full flex-col items-center justify-between px-4 py-5 sm:px-8 sm:py-8">
         <div className="relative mt-[5vh] flex flex-col items-center">
@@ -149,24 +162,30 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
           </label>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-black/30 p-2">
             {filteredWorlds.map((world) => <div key={world.id} onClick={() => setSelectedWorldId(world.id)} onDoubleClick={playSelected} className={`flex cursor-pointer items-center justify-between border-2 p-3 ${world.id === selectedWorldId ? 'border-white bg-black/80' : 'border-[#333] bg-black/50 hover:border-[#777]'}`}>
-              <div className="flex min-w-0 items-center gap-3"><div className="flex h-12 w-12 shrink-0 items-center justify-center border border-neutral-600 bg-gradient-to-b from-[#66a342] to-[#6e4828] text-2xl">▧</div><div className="min-w-0"><div className="truncate text-sm font-bold">{world.name}</div><div className="mt-1 text-[10px] text-neutral-400">{world.mode} · Seed: {world.seed} · {world.lastPlayed}</div></div></div>
-              <button className="ml-2 p-2 text-neutral-400 hover:text-red-400" title="Delete world" onClick={(event) => deleteWorld(world.id, event)}><Trash2 size={16} /></button>
+              <div className="flex min-w-0 items-center gap-3"><div className="h-12 w-12 shrink-0 overflow-hidden border border-neutral-600 bg-gradient-to-b from-[#66a342] to-[#6e4828]">{world.thumbnail ? <img src={world.thumbnail} alt={`${world.name} screenshot`} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-2xl">▧</div>}</div><div className="min-w-0"><div className="truncate text-sm font-bold">{world.name}</div><div className="mt-1 text-[10px] text-neutral-400">{world.mode} · Seed: {world.seed} · {world.lastPlayed}</div></div></div>
             </div>)}
             {filteredWorlds.length === 0 && <div className="p-8 text-center text-sm text-neutral-400">No worlds found.</div>}
           </div>
-          <div className="mt-3 grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="mt-3 grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-5">
             <Btn disabled={!selectedWorld} onClick={playSelected}>Play Selected</Btn>
-            <Btn onClick={() => setView('create_world')}>Create New</Btn>
+            <Btn onClick={() => { setCreateTab('game'); setView('create_world'); }}>Create New</Btn>
             <Btn disabled={!selectedWorld} onClick={() => setNotice('World editing is not available yet.')}>Edit</Btn>
+            <Btn disabled={!selectedWorld} onClick={() => { if (selectedWorld) { setPendingDelete(selectedWorld); setDeleteConfirmed(false); } }}>Delete</Btn>
             <Btn disabled={!selectedWorld} onClick={() => { if (selectedWorld) onPlayWorld({ ...selectedWorld, id: `world_${Date.now()}`, name: `${selectedWorld.name} (Copy)` }); }}>Re-create</Btn>
           </div>
         </>}
 
         {view === 'create_world' && <form onSubmit={createWorld} className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto p-2 sm:p-6">
-          <div className="flex gap-2 border-b border-white/20 pb-2"><span className="border-b-2 border-white px-3 pb-2 text-sm">Game</span><span className="px-3 pb-2 text-sm text-neutral-500" title="More world options will be added">World</span></div>
-          <label className="text-xs text-neutral-300">World Name<input value={newWorldName} onChange={(event) => setNewWorldName(event.target.value)} maxLength={32} className="mt-1 w-full border-2 border-[#555] bg-black px-3 py-2 text-white outline-none focus:border-white" /></label>
-          <div><span className="text-xs text-neutral-300">Game Mode</span><Btn type="button" className="mt-1 w-full" onClick={() => setNewWorldMode((mode) => mode === 'Survival' ? 'Creative' : 'Survival')}>Game Mode: {newWorldMode} · Click to change</Btn><p className="mt-1 text-[10px] text-neutral-500">{newWorldMode === 'Survival' ? 'Explore and build in Survival mode.' : 'Build freely in Creative mode.'}</p></div>
-          <label className="text-xs text-neutral-300">Seed<input value={newWorldSeed} onChange={(event) => setNewWorldSeed(event.target.value)} className="mt-1 w-full border-2 border-[#555] bg-black px-3 py-2 text-white outline-none focus:border-white" placeholder="Leave blank for random seed" /></label>
+          <div className="flex gap-2 border-b border-white/20 pb-2"><button type="button" onClick={() => setCreateTab('game')} className={`px-3 pb-2 text-sm ${createTab === 'game' ? 'border-b-2 border-white' : 'text-neutral-500'}`}>Game</button><button type="button" onClick={() => setCreateTab('world')} className={`px-3 pb-2 text-sm ${createTab === 'world' ? 'border-b-2 border-white' : 'text-neutral-500'}`}>World</button></div>
+          {createTab === 'game' ? <>
+            <label className="text-xs text-neutral-300">World Name<input value={newWorldName} onChange={(event) => setNewWorldName(event.target.value)} maxLength={32} className="mt-1 w-full border-2 border-[#555] bg-black px-3 py-2 text-white outline-none focus:border-white" /></label>
+            <div><span className="text-xs text-neutral-300">Game Mode</span><Btn type="button" className="mt-1 w-full" onClick={() => setNewWorldMode((mode) => mode === 'Survival' ? 'Creative' : 'Survival')}>Game Mode: {newWorldMode} · Click to change</Btn><p className="mt-1 text-[10px] text-neutral-500">{newWorldMode === 'Survival' ? 'Explore and build in Survival mode.' : 'Build freely in Creative mode.'}</p></div>
+          </> : <>
+            <label className="text-xs text-neutral-300">Seed for the World Generator<input value={newWorldSeed} onChange={(event) => setNewWorldSeed(event.target.value)} className="mt-1 w-full border-2 border-[#555] bg-black px-3 py-2 text-white outline-none focus:border-white" placeholder="Leave blank for random seed" /></label>
+            <label className="flex items-center gap-2 border border-white/15 p-3 text-sm"><input type="checkbox" checked={generateStructures} onChange={(event) => setGenerateStructures(event.target.checked)} />Generate Structures</label>
+            <label className="flex items-center gap-2 border border-white/15 p-3 text-sm"><input type="checkbox" checked={bonusChest} onChange={(event) => setBonusChest(event.target.checked)} />Bonus Chest</label>
+            <p className="text-[10px] text-neutral-500">Structure and bonus-chest generation controls are saved in the UI but not yet applied by the world generator.</p>
+          </>}
           <div className="mt-auto flex gap-2 pt-3"><Btn type="submit" className="flex-1">Create New World</Btn><Btn type="button" className="flex-1" onClick={() => setView('singleplayer')}>Cancel</Btn></div>
         </form>}
 
@@ -180,10 +199,12 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Btn disabled={!selectedServer} onClick={announceUnsupportedConnection}>Join Server</Btn>
-            <Btn onClick={() => setServerForm({ name: '', address: '' })}>Add Server</Btn>
-            <Btn disabled={!selectedServer} onClick={() => selectedServer && setServerForm({ ...selectedServer })}>Edit</Btn>
+            <Btn onClick={() => { setDirectConnect(true); setServerForm({ name: '', address: '', resourcePacks: 'prompt' }); }}>Direct Connect</Btn>
+            <Btn onClick={() => { setDirectConnect(false); setServerForm({ name: '', address: '', resourcePacks: 'prompt' }); }}>Add Server</Btn>
+            <Btn disabled={!selectedServer} onClick={() => selectedServer && setServerForm({ ...selectedServer, resourcePacks: selectedServer.resourcePacks || 'prompt' })}>Edit</Btn>
             <Btn disabled={!selectedServer} onClick={() => { setServers((list) => list.filter((server) => server.id !== selectedServerId)); setSelectedServerId(null); }}>Delete</Btn>
-            <Btn className="col-span-2 sm:col-span-4" onClick={() => setNotice('Server list refreshed. Physicscraft does not probe Minecraft servers.')}>Refresh</Btn>
+            <Btn onClick={() => setNotice('Server list refreshed. Physicscraft does not probe Minecraft servers.')}>Refresh</Btn>
+            <Btn onClick={() => setView('title')}>Done</Btn>
           </div>
         </>}
 
@@ -199,15 +220,19 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
         </div>}
       </div>}
 
+      {pendingDelete && <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-4"><div className="w-full max-w-md border-2 border-[#aaa] bg-[#202020] p-5 shadow-2xl"><h2 className="mb-3 text-center text-base font-bold">Delete World</h2><p className="mb-4 text-center text-sm">Delete <strong>{pendingDelete.name}</strong>?</p><label className="mb-5 flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={deleteConfirmed} onChange={(event) => setDeleteConfirmed(event.target.checked)} />I understand this world will be permanently deleted.</label><div className="flex gap-2"><Btn disabled={!deleteConfirmed} className="flex-1" onClick={() => { deleteWorld(pendingDelete.id); setPendingDelete(null); }}>Delete</Btn><Btn className="flex-1" onClick={() => setPendingDelete(null)}>Cancel</Btn></div></div></div>}
+
       {serverForm && <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-4"><form onSubmit={saveServer} className="w-full max-w-md border-2 border-[#aaa] bg-[#202020] p-5 shadow-2xl">
-        <h2 className="mb-4 text-center text-base font-bold">{serverForm.id ? 'Edit Server Info' : 'Add Server'}</h2>
+        <h2 className="mb-4 text-center text-base font-bold">{directConnect ? 'Direct Connection' : serverForm.id ? 'Edit Server Info' : 'Add Server'}</h2>
         <label className="mb-3 block text-xs text-neutral-300">Server Name<input autoFocus value={serverForm.name} onChange={(event) => setServerForm({ ...serverForm, name: event.target.value })} className="mt-1 w-full border-2 border-[#555] bg-black px-2 py-2 text-sm text-white outline-none focus:border-white" /></label>
         <label className="mb-4 block text-xs text-neutral-300">Server Address<input value={serverForm.address} onChange={(event) => setServerForm({ ...serverForm, address: event.target.value })} className="mt-1 w-full border-2 border-[#555] bg-black px-2 py-2 text-sm text-white outline-none focus:border-white" placeholder="example.com:25565" /></label>
-        <p className="mb-4 text-[10px] text-amber-300">Physicscraft saves server addresses, but cannot connect using Minecraft’s multiplayer protocol yet.</p>
+        <label className="mb-4 flex items-center justify-between text-xs text-neutral-300">Server Resource Packs<select value={serverForm.resourcePacks || 'prompt'} onChange={(event) => setServerForm({ ...serverForm, resourcePacks: event.target.value as ServerEntry['resourcePacks'] })} className="border-2 border-[#555] bg-black px-2 py-1.5 text-white"><option value="enabled">Enabled</option><option value="prompt">Prompt</option><option value="disabled">Disabled</option></select></label>
+        <p className="mb-4 text-[10px] text-amber-300">Server addresses are stored locally. Connecting to Minecraft servers is not supported yet.</p>
         <div className="flex gap-2"><Btn type="submit" className="flex-1">Done</Btn><Btn type="button" className="flex-1" onClick={() => setServerForm(null)}>Cancel</Btn></div>
       </form></div>}
 
-      {notice && <div role="status" className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 border-2 border-[#aaa] bg-[#202020] px-4 py-3 text-center text-xs shadow-xl">{notice}</div>}
+      <style>{'@keyframes mc-panorama-drift{from{background-position:50% 50%}to{background-position:58% 46%}}'}</style>
+      {notice && <div role="status" className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 border-2 border-[#aaa] bg-[#202020] px-4 py-3 text-center text-xs shadow-xl">{notice}</div>
       {highContrast && <style>{'.mc-menu-high-contrast .mc-button{filter:contrast(1.35)}'}</style>}
       {largeUi && <style>{'.mc-menu-large .mc-button{font-size:15px}.mc-menu-large label,.mc-menu-large p{font-size:14px}'}</style>}
     </div>

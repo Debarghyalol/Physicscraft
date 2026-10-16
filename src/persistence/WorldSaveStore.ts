@@ -7,6 +7,7 @@ export interface SavedWorldMeta {
   seed: number;
   preset: StructurePreset;
   lastPlayed: string;
+  thumbnail?: string;
 }
 
 export interface SavedChunk {
@@ -45,7 +46,7 @@ export async function listSavedWorlds(): Promise<SavedWorldMeta[]> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll();
-    request.onsuccess = () => resolve((request.result as StoredWorld[]).map(({ id, name, mode, seed, preset, lastPlayed }) => ({ id, name, mode, seed, preset, lastPlayed })));
+    request.onsuccess = () => resolve((request.result as StoredWorld[]).map(({ id, name, mode, seed, preset, lastPlayed, thumbnail }) => ({ id, name, mode, seed, preset, lastPlayed, thumbnail })));
     request.onerror = () => reject(request.error ?? new Error('Could not list saved worlds'));
   });
 }

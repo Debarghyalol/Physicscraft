@@ -139,6 +139,18 @@ export default function App() {
     setGameState('playing');
   };
 
+  const handleWorldThumbnail = useCallback((thumbnail: string) => {
+    setCurrentWorld((world) => ({ ...world, thumbnail }));
+    void (async () => {
+      try {
+        const stored = await loadSavedWorld(currentWorld.id);
+        await saveWorld({ ...(stored ?? currentWorld), thumbnail });
+      } catch (error) {
+        console.warn('Could not save world thumbnail', error);
+      }
+    })();
+  }, [currentWorld.id]);
+
   const saveActiveWorld = useCallback(async (target = engineRef.current) => {
     if (!target) return;
     const position = target.player?.getPosition();
@@ -303,6 +315,7 @@ export default function App() {
           {/* 3D Physics Viewport with Rapier 3D + Voxel Streaming + Dynamic Shader Lighting */}
           <Viewport3D
             onEngineReady={handleEngineReady}
+            onWorldThumbnail={handleWorldThumbnail}
             activeTool={activeTool}
             selectedShape={selectedShape}
             selectedMaterial={selectedMaterial}

@@ -25,6 +25,7 @@ import { activateNostalgiaGBuffer, compositeNostalgiaGlass, createNostalgiaDefer
 
 interface Viewport3DProps {
   onEngineReady: (engine: PhysicsEngine) => void;
+  onWorldThumbnail: (thumbnail: string) => void;
   activeTool: ActiveTool;
   selectedShape: BlockShape;
   selectedMaterial: BlockMaterial;
@@ -39,6 +40,7 @@ interface Viewport3DProps {
 
 export const Viewport3D: React.FC<Viewport3DProps> = ({
   onEngineReady,
+  onWorldThumbnail,
   graphics,
   viewMode,
   onToggleViewMode,
@@ -108,6 +110,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     let disposed = false;
     let cleanupRenderer: (() => void) | null = null;
+    let thumbnailFrames = 0;
+    let thumbnailCaptured = false;
 
     const initializeRenderer = async () => {
       const renderer = new WebGPURenderer({
@@ -402,6 +406,21 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       // Shadow map must be rendered from the world scene (see updateNostalgiaShadowMap).
       updateNostalgiaShadowMap(renderer, scene, camera);
       renderPipeline.render();
+      if (!thumbnailCaptured && ++thumbnailFrames >= 24) {
+        thumbnailCaptured = true;
+        try {
+          const source = renderer.domElement;
+          const thumb = document.createElement('canvas');
+          thumb.width = 160; thumb.height = 100;
+          const ctx = thumb.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(source, 0, 0, thumb.width, thumb.height);
+            onWorldThumbnail(thumb.toDataURL('image/jpeg', 0.78));
+          }
+        } catch (error) {
+          console.warn('Could not capture world thumbnail', error);
+        }
+      }
       const renderEnd = performance.now();
       if (graphicsRef.current.debugMode) {
         const info = renderer.info;
@@ -484,7 +503,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       disposed = true;
       cleanupRenderer?.();
     };
-  }, [onEngineReady, onUpdateStats]);
+  }, [onEngineReady, onUpdateStats, onWorldThumbnail]);
 
   useEffect(() => {
     const handleInventoryKey = (event: KeyboardEvent) => {
