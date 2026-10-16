@@ -110,8 +110,8 @@ export class PhysicsEngine {
     // Spawn at the seed-specific Minecraft-style world spawn, on the generated surface.
     const spawnX = this.voxelWorld.worldSpawn.x + 0.5;
     const spawnZ = this.voxelWorld.worldSpawn.z + 0.5;
-    const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
-    this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 1.25, spawnZ]);
+    const groundY = this.voxelWorld.getSpawnElevationAt(spawnX, spawnZ);
+    this.player = new PlayerController(this.scene, this.camera, this.voxelWorld, [spawnX, groundY + 0.90, spawnZ]);
     this.mobs = new MobManager(this.scene, this.voxelWorld);
     this.fluids = new FluidSimulator(this.voxelWorld);
     if (import.meta.env.DEV) (window as any).__engine = this; // dev-only debugging hook
@@ -1294,8 +1294,8 @@ export class PhysicsEngine {
     if (this.player) {
       const spawnX = this.voxelWorld.worldSpawn.x + 0.5;
       const spawnZ = this.voxelWorld.worldSpawn.z + 0.5;
-      const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
-      this.player.teleport(spawnX, groundY + 1.25, spawnZ);
+      const groundY = this.voxelWorld.getSpawnElevationAt(spawnX, spawnZ);
+      this.player.teleport(spawnX, groundY + 0.90, spawnZ);
       this.player.yaw = 0;
       this.player.pitch = -0.05;
     }

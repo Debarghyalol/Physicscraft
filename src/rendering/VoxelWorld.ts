@@ -453,6 +453,7 @@ export class VoxelWorld {
     this.startGenPool();
     this.worldSpawn = this.findWorldSpawn();
     this.generateWorldChunks(this.worldSpawn.x, this.worldSpawn.z);
+    this.worldSpawn = this.findSafeWorldSpawn(this.worldSpawn.x, this.worldSpawn.z);
   }
 
   public setRapierWorld(_world: unknown) {
@@ -2464,6 +2465,28 @@ export class VoxelWorld {
     return this.mainGen.findSpawnPosition();
   }
 
+  /** Choose a nearby generated column with opaque ground, no liquid, and two clear blocks above. */
+  private findSafeWorldSpawn(originX: number, originZ: number): { x: number; z: number } {
+    const candidates: Array<{ x: number; z: number; d2: number }> = [];
+    for (let dz = -16; dz <= 16; dz++) for (let dx = -16; dx <= 16; dx++) {
+      candidates.push({ x: originX + dx, z: originZ + dz, d2: dx * dx + dz * dz });
+    }
+    candidates.sort((a, b) => a.d2 - b.d2);
+    for (const { x, z } of candidates) {
+      const col = this.getChunk(Math.floor(x / 16), Math.floor(z / 16));
+      const groundY = col.heightmap[(z & 15) * 16 + (x & 15)] + 1;
+      if (groundY <= WORLD_MIN_Y || groundY >= WORLD_MAX_Y - 2) continue;
+      const ground = this.getVoxel(x, groundY - 1, z);
+      if (ground === VoxelType.AIR || ground === VoxelType.WATER) continue;
+      let clear = true;
+      for (let y = groundY; y <= groundY + 1; y++) {
+        if (this.isSolidAt(x, y, z) || this.getVoxel(x, y, z) === VoxelType.WATER) { clear = false; break; }
+      }
+      if (clear) return { x, z };
+    }
+    return { x: originX, z: originZ };
+  }
+
   public generateWorldChunks(spawnX = this.worldSpawn.x, spawnZ = this.worldSpawn.z) {
     this.buildAround(Math.floor(spawnX / 16), Math.floor(spawnZ / 16), CHUNK_GRID_RADIUS);
   }
@@ -2474,6 +2497,7 @@ export class VoxelWorld {
     this.clearAllChunks();
     this.worldSpawn = this.findWorldSpawn();
     this.generateWorldChunks(this.worldSpawn.x, this.worldSpawn.z);
+    this.worldSpawn = this.findSafeWorldSpawn(this.worldSpawn.x, this.worldSpawn.z);
     this.buildPhysicsColliders();
   }
 
@@ -2620,6 +2644,15 @@ export class VoxelWorld {
   /** True when the chunk column containing world (x, z) is loaded. */
   public hasColumnAt(wx: number, wz: number): boolean {
     return !!this.colAt(Math.floor(wx), Math.floor(wz));
+  }
+
+  /** First free Y above opaque terrain, suitable for standing on the world-spawn surface. */
+  public getSpawnElevationAt(wx: number, wz: number): number {
+    const bx = Math.floor(wx), bz = Math.floor(wz);
+    const col = this.colAt(bx, bz);
+    if (!col) return 1.0;
+    const top = col.heightmap[(bz & 15) * 16 + (bx & 15)];
+    return top >= WORLD_MIN_Y ? top + 1.0 : 1.0;
   }
 
   /** Height of the first free cell above the highest block at world (x, z). */
