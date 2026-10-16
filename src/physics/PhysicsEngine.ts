@@ -655,10 +655,10 @@ export class PhysicsEngine {
 
     // Position player cleanly outside any preset structure area so player never clips inside blocks
     if (this.player) {
-      const spawnX = 0;
-      const spawnZ = 6.0;
-      const groundY = this.voxelWorld.getElevationAt(spawnX, spawnZ);
-      this.player.teleport(spawnX, groundY + 1.25, spawnZ);
+      const spawnX = this.voxelWorld.worldSpawn.x + 0.5;
+      const spawnZ = this.voxelWorld.worldSpawn.z + 0.5;
+      const groundY = this.voxelWorld.getSpawnElevationAt(spawnX, spawnZ);
+      this.player.teleport(spawnX, groundY + 0.90, spawnZ);
       this.player.yaw = 0;
       this.player.pitch = -0.05;
     }
