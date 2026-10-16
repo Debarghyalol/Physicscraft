@@ -232,7 +232,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({ onPlayWorld, onO
       </form></div>}
 
       <style>{'@keyframes mc-panorama-drift{from{background-position:50% 50%}to{background-position:58% 46%}}'}</style>
-      {notice && <div role="status" className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 border-2 border-[#aaa] bg-[#202020] px-4 py-3 text-center text-xs shadow-xl">{notice}</div>
+      {notice && <div role="status" className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 border-2 border-[#aaa] bg-[#202020] px-4 py-3 text-center text-xs shadow-xl">{notice}</div>}
       {highContrast && <style>{'.mc-menu-high-contrast .mc-button{filter:contrast(1.35)}'}</style>}
       {largeUi && <style>{'.mc-menu-large .mc-button{font-size:15px}.mc-menu-large label,.mc-menu-large p{font-size:14px}'}</style>}
     </div>
