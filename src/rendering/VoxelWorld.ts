@@ -2195,7 +2195,7 @@ export class VoxelWorld {
   /** True for blocks entities collide with: everything except air and water. */
   public isSolidAt(wx: number, wy: number, wz: number): boolean {
     const v = this.getVoxel(wx, wy, wz);
-    return v !== VoxelType.AIR && v !== VoxelType.WATER;
+    return v !== VoxelType.AIR && v !== VoxelType.WATER && !CROSS_PLANT_TYPES.has(v); // plants have no collision
   }
 
   /** Place or update water in a cell (source = level 0). Replaces whatever was there. */
