@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Globe, Plus, Trash2 } from 'lucide-react';
+import { deleteSavedWorld, listSavedWorlds, saveWorld } from '../persistence/WorldSaveStore';
 import { StructurePreset } from '../types/physics';
 
 export interface WorldSave {
@@ -54,6 +55,16 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
   const [worlds, setWorlds] = useState<WorldSave[]>(DEFAULT_WORLDS);
   const [selectedWorldId, setSelectedWorldId] = useState<string>(DEFAULT_WORLDS[0].id);
 
+  useEffect(() => {
+    listSavedWorlds().then((saved) => {
+      setWorlds((current) => {
+        const byId = new Map(current.map((world) => [world.id, world]));
+        for (const world of saved) byId.set(world.id, world);
+        return [...byId.values()];
+      });
+    }).catch((error) => console.warn('Could not load saved world list', error));
+  }, []);
+
   // Random splash text
   const [splashText] = useState<string>(
     () => SPLASH_TEXTS[Math.floor(Math.random() * SPLASH_TEXTS.length)]
@@ -87,6 +98,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
 
     setWorlds([newWorld, ...worlds]);
     setSelectedWorldId(newWorld.id);
+    void saveWorld(newWorld).catch((error) => console.warn('Could not save new world metadata', error));
     onPlayWorld(newWorld);
   };
 
@@ -95,6 +107,7 @@ export const MainMenuScreen: React.FC<MainMenuScreenProps> = ({
     if (worlds.length <= 1) return;
     const remaining = worlds.filter((w) => w.id !== id);
     setWorlds(remaining);
+    void deleteSavedWorld(id).catch((error) => console.warn('Could not delete saved world', error));
     if (selectedWorldId === id) {
       setSelectedWorldId(remaining[0].id);
     }

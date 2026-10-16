@@ -9,6 +9,7 @@ import FastNoiseLite from 'fastnoise-lite';
 import { VoxelType } from '../types/physics';
 import { ChunkGenerator } from '../worldgen/ChunkGenerator';
 import { ChunkGenPool, type PoolResult } from '../worldgen/ChunkGenPool';
+import type { SavedChunk } from '../persistence/WorldSaveStore';
 import { Decorator, type DecorationWorld, type HeightmapKind } from '../worldgen/decoration';
 import { WaterTexture, spriteU, spriteV } from './WaterTexture';
 import { FluidAccess, getFlow, ownHeight } from '../fluid/fluid';
@@ -2132,6 +2133,46 @@ export class VoxelWorld {
   // ======================================================================
   //  Editing
   // ======================================================================
+
+  public getModifiedChunks(): SavedChunk[] {
+    const chunks: SavedChunk[] = [];
+    for (const col of this.chunks.values()) {
+      if (!col.modified) continue;
+      chunks.push({ cx: col.cx, cz: col.cz, blocks: col.blocks.slice(), fluid: col.fluid.slice() });
+    }
+    return chunks;
+  }
+
+  /** Reapply saved block/fluid edits over newly generated terrain. */
+  public restoreModifiedChunks(chunks: SavedChunk[]) {
+    this.beginBatch();
+    try {
+      for (const saved of chunks) {
+        if (!(saved.blocks instanceof Uint8Array) || saved.blocks.length !== 16 * 16 * WORLD_HEIGHT) continue;
+        const baseX = saved.cx * 16, baseZ = saved.cz * 16;
+        const col = this.getChunk(saved.cx, saved.cz);
+        for (let i = 0; i < saved.blocks.length; i++) {
+          const next = saved.blocks[i] as VoxelType;
+          if (col.blocks[i] === next) continue;
+          const lx = i & 15, lz = (i >> 4) & 15, y = WORLD_MIN_Y + (i >> 8);
+          this.setVoxel(baseX + lx, y, baseZ + lz, next);
+        }
+        if (saved.fluid instanceof Uint8Array && saved.fluid.length === col.fluid.length) {
+          for (let i = 0; i < saved.fluid.length; i++) {
+            if (col.fluid[i] === saved.fluid[i]) continue;
+            col.fluid[i] = saved.fluid[i];
+            if (col.blocks[i] === VoxelType.WATER) {
+              const lx = i & 15, lz = (i >> 4) & 15, y = WORLD_MIN_Y + (i >> 8);
+              this.markAround(baseX + lx, y, baseZ + lz, true);
+            }
+          }
+        }
+        col.modified = true;
+      }
+    } finally {
+      this.endBatch();
+    }
+  }
 
   public beginBatch() {
     this.batchDepth++;

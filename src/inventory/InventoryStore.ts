@@ -26,18 +26,24 @@ class InventoryStore {
   private listeners = new Set<Listener>();
 
   constructor() {
+    this.resetToDefaults(false);
+  }
+
+  resetToDefaults(notify = true) {
+    this.slots = Array(INVENTORY_SIZE).fill(null);
     [VoxelType.GRASS, VoxelType.DIRT, VoxelType.STONE, VoxelType.WOOD, VoxelType.LEAVES, VoxelType.SAND, VoxelType.COBBLESTONE, VoxelType.GLASS, VoxelType.GLOWSTONE]
       .forEach((v, i) => (this.slots[i] = { id: blockItemId(v), count: 64 }));
-    // A few extras in the main inventory so the tools are within reach from the start.
     this.slots[9] = { id: 'tool:flint_and_steel', count: 1 };
     this.slots[10] = { id: 'disc:13', count: 1 };
     this.slots[11] = { id: blockItemId(VoxelType.TNT), count: 64 };
     this.slots[12] = { id: blockItemId(VoxelType.JUKEBOX), count: 64 };
     this.slots[22] = { id: 'item:bucket', count: 1 };
     this.slots[23] = { id: 'item:water_bucket', count: 1 };
-    ['wooden_sword', 'stone_sword', 'iron_sword', 'diamond_sword', 'iron_axe', 'iron_pickaxe', 'iron_shovel', 'iron_hoe', 'netherite_sword'].forEach(
-      (n, i) => (this.slots[13 + i] = { id: `tool:${n}`, count: 1 })
-    );
+    ['wooden_sword', 'stone_sword', 'iron_sword', 'diamond_sword', 'iron_axe', 'iron_pickaxe', 'iron_shovel', 'iron_hoe', 'netherite_sword']
+      .forEach((name, i) => (this.slots[13 + i] = { id: `tool:${name}`, count: 1 }));
+    this.selected = 0;
+    this.cursor = null;
+    if (notify) this.emit();
   }
 
   subscribe = (fn: Listener) => {
@@ -45,6 +51,19 @@ class InventoryStore {
     return () => this.listeners.delete(fn);
   };
   getVersion = () => this.version;
+
+  snapshot(): { slots: (ItemStack | null)[]; selected: number } {
+    return { slots: this.slots.map((stack) => stack ? { ...stack } : null), selected: this.selected };
+  }
+
+  restore(snapshot: { slots: (ItemStack | null)[]; selected: number }) {
+    if (!Array.isArray(snapshot.slots) || snapshot.slots.length !== INVENTORY_SIZE) return;
+    this.slots = snapshot.slots.map((stack) => stack && typeof stack.id === 'string' && Number.isFinite(stack.count) ? { id: stack.id, count: stack.count } : null);
+    this.selected = Math.max(0, Math.min(HOTBAR_SIZE - 1, Math.floor(snapshot.selected || 0)));
+    this.cursor = null;
+    this.emit();
+  }
+
   private emit() {
     const h = this.held;
     if (h?.disc) this.lastDisc = h.disc;

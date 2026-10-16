@@ -9,6 +9,8 @@ import { resourcePacks } from './resourcepack/ResourcePackManager';
 import { shaderPacks } from './shaderpack/ShaderPackManager';
 import { soundManager } from './audio/SoundEffects';
 import { musicEngine } from './audio/MusicEngine';
+import { inventory } from './inventory/InventoryStore';
+import { loadSavedWorld, saveWorld } from './persistence/WorldSaveStore';
 
 export default function App() {
   // Load persisted resource packs once
@@ -99,10 +101,27 @@ export default function App() {
   const handleEngineReady = useCallback(
     (readyEngine: PhysicsEngine) => {
       setEngine(readyEngine);
-      readyEngine.setWorldSeed(currentWorld.seed);
-      readyEngine.loadPreset(currentWorld.preset);
+      void (async () => {
+        try {
+          const saved = await loadSavedWorld(currentWorld.id);
+          readyEngine.setWorldSeed(saved?.seed ?? currentWorld.seed);
+          readyEngine.loadPreset(saved?.preset ?? currentWorld.preset);
+          if (saved?.chunks?.length) readyEngine.voxelWorld.restoreModifiedChunks(saved.chunks);
+          if (saved?.playerPosition && readyEngine.player) {
+            const [x, y, z] = saved.playerPosition;
+            readyEngine.voxelWorld.getChunk(Math.floor(x / 16), Math.floor(z / 16));
+            readyEngine.player.teleport(x, y, z);
+          }
+          if (saved?.inventorySlots) inventory.restore({ slots: saved.inventorySlots, selected: saved.inventorySelected ?? 0 });
+          else inventory.resetToDefaults();
+        } catch (error) {
+          console.error('Could not load saved world state', error);
+          readyEngine.setWorldSeed(currentWorld.seed);
+          readyEngine.loadPreset(currentWorld.preset);
+        }
+      })();
     },
-    [currentWorld.seed, currentWorld.preset]
+    [currentWorld.id, currentWorld.seed, currentWorld.preset]
   );
 
   // Update telemetry
@@ -120,8 +139,40 @@ export default function App() {
     setGameState('playing');
   };
 
-  // Leave active world and return to main menu
+  const saveActiveWorld = useCallback(async (target = engineRef.current) => {
+    if (!target) return;
+    const position = target.player?.getPosition();
+    const inv = inventory.snapshot();
+    try {
+      await saveWorld({
+        ...currentWorld,
+        seed: target.voxelWorld.seed,
+        preset: currentPreset,
+        lastPlayed: new Date().toISOString(),
+        playerPosition: position ? [position.x, position.y, position.z] : undefined,
+        inventorySlots: inv.slots,
+        inventorySelected: inv.selected,
+        chunks: target.voxelWorld.getModifiedChunks(),
+      });
+    } catch (error) {
+      console.error('Could not save world state', error);
+    }
+  }, [currentWorld, currentPreset]);
+
+  useEffect(() => {
+    if (gameState !== 'playing') return;
+    const timer = window.setInterval(() => { void saveActiveWorld(); }, 10000);
+    const onVisibility = () => { if (document.visibilityState === 'hidden') void saveActiveWorld(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [gameState, saveActiveWorld]);
+
+  // Leave active world and return to the main menu after snapshotting current state.
   const handleLeaveWorld = () => {
+    void saveActiveWorld(engine);
     setIsSettingsOpen(false);
     setGameState('menu');
     setEngine(null);
