@@ -2649,8 +2649,7 @@ export class VoxelWorld {
   /** First free Y above opaque terrain, suitable for standing on the world-spawn surface. */
   public getSpawnElevationAt(wx: number, wz: number): number {
     const bx = Math.floor(wx), bz = Math.floor(wz);
-    const col = this.colAt(bx, bz);
-    if (!col) return 1.0;
+    const col = this.getChunk(bx >> 4, bz >> 4); // generate now if streaming dropped or has not delivered it yet
     const top = col.heightmap[(bz & 15) * 16 + (bx & 15)];
     return top >= WORLD_MIN_Y ? top + 1.0 : 1.0;
   }

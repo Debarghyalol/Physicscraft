@@ -1444,7 +1444,10 @@ export class PhysicsEngine {
 
     // Update Player character controller & infinite procedural chunk streaming
     if (this.player && playerInput) {
-      this.player.update(scaledDt, playerInput);
+      // Hold the player in place until the terrain under them exists; otherwise they fall through the empty
+      // (unloaded) column and end up underground once it streams in.
+      const cur = this.player.getPosition();
+      if (this.voxelWorld.hasColumnAt(cur.x, cur.z)) this.player.update(scaledDt, playerInput);
       const pos = this.player.getPosition();
       this.voxelWorld.updatePlayerPosition(pos.x, pos.z);
       this.voxelWorld.update();
