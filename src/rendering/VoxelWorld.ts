@@ -2660,7 +2660,9 @@ export class VoxelWorld {
     const bz = Math.floor(wz);
     const col = this.colAt(bx, bz);
     if (!col) return 1.0;
-    const top = col.topY[(bz & 15) * 16 + (bx & 15)];
+    let top = col.topY[(bz & 15) * 16 + (bx & 15)];
+    // Ground cover (grass, flowers) sits on the surface: stand on the block under it, not on the plant.
+    while (top >= WORLD_MIN_Y && CROSS_PLANT_TYPES.has(col.blocks[this.idx(bx & 15, top, bz & 15)])) top--;
     return top >= WORLD_MIN_Y ? top + 1.0 : 1.0;
   }
 
