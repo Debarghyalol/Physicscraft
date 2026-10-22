@@ -12,6 +12,7 @@ import { ChunkGenPool, type PoolResult } from '../worldgen/ChunkGenPool';
 import type { SavedChunk } from '../persistence/WorldSaveStore';
 import { Decorator, type DecorationWorld, type HeightmapKind } from '../worldgen/decoration';
 import { isLeafBlock, isLogBlock } from '../worldgen/treefeature';
+import { biomeFoliageColor, biomeGrassColor, biomeWaterColor } from '../worldgen/biomeTint';
 import { WaterTexture, spriteU, spriteV } from './WaterTexture';
 import { FluidAccess, getFlow, ownHeight } from '../fluid/fluid';
 
@@ -36,6 +37,23 @@ const CROSS_PLANT_TYPES = new Set<number>([
   VoxelType.CORNFLOWER, VoxelType.LILY_OF_THE_VALLEY, VoxelType.SUNFLOWER, VoxelType.LILAC,
   VoxelType.ROSE_BUSH, VoxelType.PEONY, VoxelType.VINE,
 ]);
+
+/** Colours baked into the atlas tiles (vanilla plains defaults); vertex tints are relative to these. */
+const GRASS_BAKED_HEX = '#91bd59';
+const GRASS_BAKED = [0x91 / 255, 0xbd / 255, 0x59 / 255];
+const FOLIAGE_BAKED = [0x77 / 255, 0xab / 255, 0x2f / 255];
+/** Leaf tiles that vanilla tints: biome foliage colour (#77ab2f default), or a fixed colour (birch, spruce). */
+const LEAF_BAKED_HEX: Record<string, string> = {
+  'block/oak_leaves': '#77ab2f', 'block/jungle_leaves': '#77ab2f', 'block/acacia_leaves': '#77ab2f',
+  'block/dark_oak_leaves': '#77ab2f', 'block/mangrove_leaves': '#77ab2f',
+  'block/birch_leaves': '#80a755', 'block/spruce_leaves': '#619961',
+};
+/** Leaf voxels whose colour follows the biome. */
+const FOLIAGE_LEAVES = new Set<number>([
+  VoxelType.LEAVES, VoxelType.OAK_LEAVES, VoxelType.JUNGLE_LEAVES, VoxelType.ACACIA_LEAVES, VoxelType.DARK_OAK_LEAVES, VoxelType.MANGROVE_LEAVES,
+]);
+/** Cross plants drawn from grey textures that take the biome grass colour. */
+const GRASS_PLANTS = new Set<number>([VoxelType.SHORT_GRASS, VoxelType.TALL_GRASS, VoxelType.FERN, VoxelType.LARGE_FERN]);
 
 /** How much each block type dims light passing through it (15 = fully opaque). */
 const OPACITY = new Uint8Array(256).fill(15);
@@ -314,6 +332,8 @@ export class ChunkColumn {
   decorated = false; // grass / flowers pass has run for this column
   /** Surface biome ids on a 4x4 quart grid (see ChunkGenerator), used by the decoration pass. */
   biomes: Uint8Array | null = null;
+  /** Blended (5x5) biome colours per block column, RGB bytes: grass [0..767], foliage [768..1535], water [1536..2303]. */
+  tint: Uint8Array | null = null;
   opaqueMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   cutoutMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
   transMeshes: (THREE.Mesh | null)[] = new Array(SECTION_COUNT).fill(null);
@@ -955,13 +975,13 @@ export class VoxelWorld {
    * UVs are resolution independent, so no remeshing is needed.
    */
   public async applyResourcePack() {
-    const grassTint = '#91bd59';
-    const leafTint = '#77ab2f';
+    // Tiles keep the plains default colour; the mesher multiplies in (biome colour / default) per vertex. The grass side
+    // is the plain dirt-with-fringe tile; its overlay is drawn as a separate, absolutely tinted quad.
     const tiles = ATLAS_TEXTURE_PATHS.map((path, index) => ({
       index,
       path,
-      tint: path === 'block/grass_block_top' ? grassTint : path.endsWith('_leaves') ? leafTint : null,
-      overlay: index === 1 ? 'block/grass_block_side_overlay' : null,
+      tint: path === 'block/grass_block_top' ? GRASS_BAKED_HEX : (LEAF_BAKED_HEX[path] ?? null),
+      overlay: null as string | null,
     }));
 
     const loaded = await Promise.all(
@@ -1001,7 +1021,6 @@ export class VoxelWorld {
       g.imageSmoothingEnabled = false;
       const base = t.tint ? tinted(t.img, t.tint) : t.img;
       g.drawImage(base, 0, 0, base.width, base.width, 0, 0, res, res);
-      if (t.overlay) g.drawImage(tinted(t.overlay, grassTint), 0, 0, res, res);
       prepared.set(t.index, c);
     }
 
@@ -1688,6 +1707,7 @@ export class VoxelWorld {
     cut.reset();
     wat.reset();
 
+    this.meshCol = col;
     if (count > 0) {
       this.fillPad(col, sy);
       const B = this.padB;
@@ -1709,7 +1729,7 @@ export class VoxelWorld {
               this.meshWaterCell(wat, pi, wx0 + lx, baseWy + ly, wz0 + lz);
               continue;
             }
-            const renderClass = voxel === VoxelType.GLASS ? 'translucent' : (voxel === VoxelType.LEAVES || CROSS_PLANT_TYPES.has(voxel)) ? 'cutout' : 'opaque';
+            const renderClass = voxel === VoxelType.GLASS ? 'translucent' : (isLeafBlock(voxel) || CROSS_PLANT_TYPES.has(voxel)) ? 'cutout' : 'opaque';
             const mb = renderClass === 'translucent' ? tr : renderClass === 'cutout' ? cut : op;
             const wy = baseWy + ly;
 
@@ -1733,14 +1753,14 @@ export class VoxelWorld {
               const neighbourOccludes =
                 !neighbourIsCrossPlant && (
                   renderClass === 'cutout'
-                    ? nb !== 0 && nb !== VoxelType.LEAVES
+                    ? nb !== 0 && !isLeafBlock(nb)
                     : renderClass === 'translucent'
                       // Connected glass: the face shared with another glass block is hidden (so a
                       // glass wall is one seamless sheet), and so is a face pressed against an
                       // opaque solid. A face against leaves stays: the leaf cutout path culls its
                       // own side, so culling both here would leave a see-through hole.
-                      ? nb === VoxelType.GLASS || (nb !== 0 && nb !== VoxelType.LEAVES)
-                      : nb !== 0 && nb !== VoxelType.GLASS && nb !== VoxelType.LEAVES
+                      ? nb === VoxelType.GLASS || (nb !== 0 && !isLeafBlock(nb))
+                      : nb !== 0 && nb !== VoxelType.GLASS && !isLeafBlock(nb)
                 );
               if (neighbourOccludes) continue;
 
@@ -1756,6 +1776,16 @@ export class VoxelWorld {
               const v0 = 1 - (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS; // tile bottom
               const v1 = 1 - (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS; // tile top
               const infos = FACE_INFO[f];
+
+              // Biome colour relative to what the atlas tile already carries.
+              let tr_ = 1, tg_ = 1, tb_ = 1;
+              if (voxel === VoxelType.GRASS && f === 2) {
+                this.tintAt(col, 0, lx, lz);
+                tr_ = this.tintOut[0] / GRASS_BAKED[0]; tg_ = this.tintOut[1] / GRASS_BAKED[1]; tb_ = this.tintOut[2] / GRASS_BAKED[2];
+              } else if (FOLIAGE_LEAVES.has(voxel)) {
+                this.tintAt(col, 1, lx, lz);
+                tr_ = this.tintOut[0] / FOLIAGE_BAKED[0]; tg_ = this.tintOut[1] / FOLIAGE_BAKED[1]; tb_ = this.tintOut[2] / FOLIAGE_BAKED[2];
+              }
 
               mb.ensure(1);
               const vb = mb.vc;
@@ -1793,9 +1823,9 @@ export class VoxelWorld {
                 mb.normal[o * 3 + 2] = FACE_NORMALS[f][2];
                 mb.ctm[o] = ctmMask;
                 const shade = SHADE_LINEAR[f * 4 + aoLevel];
-                mb.col[o * 3] = shade;
-                mb.col[o * 3 + 1] = shade;
-                mb.col[o * 3 + 2] = shade;
+                mb.col[o * 3] = shade * tr_;
+                mb.col[o * 3 + 1] = shade * tg_;
+                mb.col[o * 3 + 2] = shade * tb_;
                 mb.lit[o * 2] = sky;
                 mb.lit[o * 2 + 1] = blk;
                 mb.uv[o * 2] = k === 0 || k === 3 ? u0 : u1;
@@ -1810,6 +1840,11 @@ export class VoxelWorld {
                 mb.idx[mb.ic++] = vb + 1; mb.idx[mb.ic++] = vb + 3; mb.idx[mb.ic++] = vb;
               }
               mb.vc += 4;
+
+              if (voxel === VoxelType.GRASS && f !== 2 && f !== 3) {
+                this.tintAt(col, 0, lx, lz);
+                this.emitGrassOverlay(cut, wx0 + lx, wy, wz0 + lz, f, infos, aoIdx, skyV, blkV);
+              }
             }
           }
         }
@@ -1846,14 +1881,10 @@ export class VoxelWorld {
     let tintR = 1.0, tintG = 1.0, tintB = 1.0;
     let height = 0.92;
     switch (voxel) {
-      case VoxelType.SHORT_GRASS:
-        tintR = 0.72; tintG = 1.0; tintB = 0.62; height = 0.68; break;
-      case VoxelType.TALL_GRASS:
-        tintR = 0.68; tintG = 1.0; tintB = 0.58; height = 1.0; break;
-      case VoxelType.FERN:
-        tintR = 0.60; tintG = 0.92; tintB = 0.58; height = 0.82; break;
-      case VoxelType.LARGE_FERN:
-        tintR = 0.58; tintG = 0.9; tintB = 0.52; height = 1.0; break;
+      case VoxelType.SHORT_GRASS: height = 0.68; break;
+      case VoxelType.TALL_GRASS: height = 1.0; break;
+      case VoxelType.FERN: height = 0.82; break;
+      case VoxelType.LARGE_FERN: height = 1.0; break;
       case VoxelType.DEAD_BUSH:
         tintR = 0.72; tintG = 0.48; tintB = 0.24; height = 0.82; break;
       case VoxelType.BUSH:
@@ -1884,6 +1915,12 @@ export class VoxelWorld {
         tintR = 1.0; tintG = 0.82; tintB = 0.2; height = 1.0; break;
       case VoxelType.VINE:
         tintR = 0.55; tintG = 0.85; tintB = 0.48; height = 0.95; break;
+    }
+
+    if (GRASS_PLANTS.has(voxel) && this.meshCol) {
+      // Grey textures: the blended biome grass colour is the whole tint (vanilla BlockTintSources.grass).
+      this.tintAt(this.meshCol, 0, X & 15, Z & 15);
+      tintR = this.tintOut[0]; tintG = this.tintOut[1]; tintB = this.tintOut[2];
     }
 
     // Allocation-free crossed planes; vegetation is common, so avoid per-block arrays.
@@ -1936,11 +1973,15 @@ export class VoxelWorld {
    * and side/bottom faces only where the neighbour is neither water nor an opaque block.
    */
   private meshWaterCell(mb: MeshBuilder, pi: number, X: number, Y: number, Z: number) {
+    if (this.meshCol) {
+      this.tintAt(this.meshCol, 2, X & 15, Z & 15);
+      this.waterTint[0] = this.tintOut[0]; this.waterTint[1] = this.tintOut[1]; this.waterTint[2] = this.tintOut[2];
+    }
     const B = this.padB;
     const F = this.padF;
     const Lt = this.padL;
     const W = VoxelType.WATER;
-    const occ = (v: number) => v !== 0 && v !== VoxelType.GLASS && v !== VoxelType.LEAVES && v !== W;
+    const occ = (v: number) => v !== 0 && v !== VoxelType.GLASS && !isLeafBlock(v) && v !== W;
     const up = B[pi + PAD_Y];
     const down = B[pi - PAD_Y];
     const north = B[pi - PAD];
@@ -2054,6 +2095,95 @@ export class VoxelWorld {
   }
 
   private waterQuadScratch = new Float32Array(20);
+  private waterTint = [WATER_TINT.r, WATER_TINT.g, WATER_TINT.b];
+  private meshCol: ChunkColumn | null = null;
+  private readonly tintOut = [1, 1, 1];
+
+  /**
+   * Blended biome colour (0..1 RGB into `tintOut`) of a block column: kind 0 grass, 1 foliage, 2 water.
+   * Vanilla averages the biome colour over a (2r+1)^2 square, r = 2 with the default biome blend setting.
+   */
+  private tintAt(col: ChunkColumn, kind: 0 | 1 | 2, lx: number, lz: number) {
+    const t = col.tint ?? this.buildTint(col);
+    const i = kind * 768 + (lz * 16 + lx) * 3;
+    this.tintOut[0] = t[i] / 255;
+    this.tintOut[1] = t[i + 1] / 255;
+    this.tintOut[2] = t[i + 2] / 255;
+  }
+
+  private static readonly TINT_R = 2;
+  private tintGrid = new Float32Array(20 * 20 * 3);
+
+  private buildTint(col: ChunkColumn): Uint8Array {
+    const R = VoxelWorld.TINT_R, N = 16 + 2 * R;
+    const out = new Uint8Array(768 * 3);
+    const wx0 = col.cx * 16, wz0 = col.cz * 16;
+    let complete = true;
+    const around: Array<ChunkColumn | undefined> = [];
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const n = dx === 0 && dz === 0 ? col : this.chunks.get(this.ckey(col.cx + dx, col.cz + dz));
+      if (!n || !n.biomes) complete = false;
+      around.push(n);
+    }
+    const grid = this.tintGrid;
+    for (let kind = 0; kind < 3; kind++) {
+      for (let gz = 0; gz < N; gz++) {
+        for (let gx = 0; gx < N; gx++) {
+          const bx = gx - R, bz = gz - R; // block offset from the column's corner
+          const n = around[(bz < 0 ? 0 : bz > 15 ? 2 : 1) * 3 + (bx < 0 ? 0 : bx > 15 ? 2 : 1)] ?? col;
+          const bio = (n.biomes ?? col.biomes)?.[(((bz & 15) >> 2) << 2) | ((bx & 15) >> 2)] ?? 0;
+          const c = kind === 0 ? biomeGrassColor(bio, wx0 + bx, wz0 + bz) : kind === 1 ? biomeFoliageColor(bio) : biomeWaterColor(bio);
+          const o = (gz * N + gx) * 3;
+          grid[o] = (c >> 16) & 255; grid[o + 1] = (c >> 8) & 255; grid[o + 2] = c & 255;
+        }
+      }
+      const area = (2 * R + 1) * (2 * R + 1);
+      for (let lz = 0; lz < 16; lz++) {
+        for (let lx = 0; lx < 16; lx++) {
+          let r = 0, g = 0, b = 0;
+          for (let dz = 0; dz <= 2 * R; dz++) {
+            for (let dx = 0; dx <= 2 * R; dx++) {
+              const o = ((lz + dz) * N + lx + dx) * 3;
+              r += grid[o]; g += grid[o + 1]; b += grid[o + 2];
+            }
+          }
+          const o = kind * 768 + (lz * 16 + lx) * 3;
+          out[o] = Math.round(r / area); out[o + 1] = Math.round(g / area); out[o + 2] = Math.round(b / area);
+        }
+      }
+    }
+    if (complete) col.tint = out; // otherwise a neighbour is missing: use it once, rebuild next time
+    return out;
+  }
+
+  /** Grass-side overlay: the fringe texture on top of the dirt side, tinted with the biome grass colour (`tintOut`). */
+  private emitGrassOverlay(mb: MeshBuilder, X: number, Y: number, Z: number, f: number, infos: FaceVertexInfo[], ao: Uint8Array | number[], sky: Float32Array | number[], blk: Float32Array | number[]) {
+    const tile = ATLAS_TILE_BY_PATH.get('block/grass_block_side_overlay');
+    if (tile === undefined) return;
+    const tileCol = tile % ATLAS_COLUMNS, tileRow = Math.floor(tile / ATLAS_COLUMNS);
+    const u0 = (tileCol + ATLAS_INNER_MIN) / ATLAS_COLUMNS, u1 = (tileCol + ATLAS_INNER_MAX) / ATLAS_COLUMNS;
+    const v0 = 1 - (tileRow + ATLAS_INNER_MAX_V) / ATLAS_ROWS, v1 = 1 - (tileRow + ATLAS_INNER_MIN_V) / ATLAS_ROWS;
+    const n = FACE_NORMALS[f];
+    const [tr, tg, tb] = this.tintOut;
+    mb.ensure(1);
+    const vb = mb.vc;
+    for (let k = 0; k < 4; k++) {
+      const inf = infos[k], o = vb + k;
+      mb.pos[o * 3] = X + inf.px + n[0] * 0.002;
+      mb.pos[o * 3 + 1] = Y + inf.py + n[1] * 0.002;
+      mb.pos[o * 3 + 2] = Z + inf.pz + n[2] * 0.002;
+      mb.normal[o * 3] = n[0]; mb.normal[o * 3 + 1] = n[1]; mb.normal[o * 3 + 2] = n[2];
+      mb.ctm[o] = 0;
+      const shade = SHADE_LINEAR[f * 4 + ao[k]];
+      mb.col[o * 3] = shade * tr; mb.col[o * 3 + 1] = shade * tg; mb.col[o * 3 + 2] = shade * tb;
+      mb.lit[o * 2] = sky[k]; mb.lit[o * 2 + 1] = blk[k];
+      mb.uv[o * 2] = k === 0 || k === 3 ? u0 : u1;
+      mb.uv[o * 2 + 1] = k < 2 ? v0 : v1;
+    }
+    mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 1; mb.idx[mb.ic++] = vb + 2;
+    mb.idx[mb.ic++] = vb; mb.idx[mb.ic++] = vb + 2; mb.idx[mb.ic++] = vb + 3;
+    mb.vc += 4;
+  }
 
   /** Append a water quad (4 verts: x,y,z,u,v with v growing downwards) plus an optional back face. */
   private emitWaterQuad(mb: MeshBuilder, q: Float32Array, shade: number, sky: number, blk: number, nx: number, ny: number, nz: number, back: boolean) {
@@ -2070,9 +2200,9 @@ export class VoxelWorld {
       mb.normal[o * 3] = nx;
       mb.normal[o * 3 + 1] = ny;
       mb.normal[o * 3 + 2] = nz;
-      mb.col[o * 3] = WATER_TINT.r * shade;
-      mb.col[o * 3 + 1] = WATER_TINT.g * shade;
-      mb.col[o * 3 + 2] = WATER_TINT.b * shade;
+      mb.col[o * 3] = this.waterTint[0] * shade;
+      mb.col[o * 3 + 1] = this.waterTint[1] * shade;
+      mb.col[o * 3 + 2] = this.waterTint[2] * shade;
       mb.lit[o * 2] = sky;
       mb.lit[o * 2 + 1] = blk;
       mb.ctm[o] = 0;
