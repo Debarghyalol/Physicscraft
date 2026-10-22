@@ -10,19 +10,34 @@ import { VoxelType } from '../types/physics';
 import { Xoroshiro128PlusPlus } from './random';
 import { LegacyRandom, NormalNoise, SimplexNoise } from './vanillaNoise';
 import { DECORATION_BIOME_FEATURES, DECORATION_BIOME_LIST, DECORATION_FEATURES } from './decoration.data';
+import { placeTree, type TreeWorld } from './treefeature';
 
 export interface DecorationWorld {
   /** Block id at a world cell (AIR when unloaded). */
   block(x: number, y: number, z: number): number;
   /** Place a plant in an air cell. */
   place(x: number, y: number, z: number, type: VoxelType): void;
-  /** Vanilla getHeight(): highest solid-or-fluid cell + 1 (plants ignored); `minY` when the column is empty or missing. */
+  /** Overwrite a cell (trees; the caller has already checked it may be replaced). Unloaded columns ignore it. */
+  set(x: number, y: number, z: number, type: VoxelType): void;
+  /**
+   * Vanilla getHeight(): highest counted cell + 1; `minY` when the column is empty or missing. Plants never count.
+   * surface/motion/floorWG are the terrain-time (_WG) heightmaps and ignore trees; floor/surfaceTop see trees unless `pristine`.
+   */
   height(x: number, z: number, kind: HeightmapKind): number;
+  /** Set while re-decorating a border chunk whose neighbours already hold trees: heightmaps then ignore them. */
+  pristine?: boolean;
+  /** Exclusive build limit. */
+  readonly maxY: number;
   /** Biome id (index into DECORATION_BIOME_LIST) at a world column, or -1 when unknown. */
   biome(x: number, z: number): number;
   readonly minY: number;
 }
-export type HeightmapKind = 'surface' | 'motion';
+export type HeightmapKind =
+  | 'surface'     // WORLD_SURFACE_WG / WORLD_SURFACE as used by ground cover: fluids count
+  | 'motion'      // MOTION_BLOCKING*
+  | 'floorWG'     // OCEAN_FLOOR_WG: fluids do not count
+  | 'floor'       // OCEAN_FLOOR: fluids do not count, trees do
+  | 'surfaceTop'; // WORLD_SURFACE as seen by surface_water_depth_filter (trees count)
 
 const STEP = 9; // GenerationStep.Decoration.VEGETAL_DECORATION
 
@@ -53,9 +68,19 @@ type Rng = Xoroshiro128PlusPlus;
 
 function sampleInt(p: any, r: Rng): number {
   if (typeof p === 'number') return p;
-  switch (strip(p.type)) {
+  switch (p.type ? strip(p.type) : 'uniform') {
     case 'constant': return p.value;
     case 'uniform': return r.nextIntBounded(p.max_inclusive - p.min_inclusive + 1) + p.min_inclusive;
+    case 'weighted_list': {
+      let total = 0;
+      for (const e of p.distribution) total += e.weight;
+      let roll = r.nextIntBounded(total);
+      for (const e of p.distribution) {
+        roll -= e.weight;
+        if (roll < 0) return sampleInt(e.data, r);
+      }
+      throw new Error('weighted_list');
+    }
     case 'clamped': return Math.min(p.max_inclusive, Math.max(p.min_inclusive, sampleInt(p.source, r)));
     case 'trapezoid': {
       const { min, max, plateau } = p;
@@ -189,7 +214,8 @@ export class Decorator {
           break;
         }
         case 'heightmap': {
-          const h = world.height(x, z, m.heightmap === 'WORLD_SURFACE_WG' || m.heightmap === 'WORLD_SURFACE' ? 'surface' : 'motion');
+          const hm = m.heightmap as string;
+          const h = world.height(x, z, hm === 'WORLD_SURFACE_WG' || hm === 'WORLD_SURFACE' ? 'surface' : hm === 'OCEAN_FLOOR' ? 'floor' : hm === 'OCEAN_FLOOR_WG' ? 'floorWG' : 'motion');
           if (h > world.minY) next(x, h, z);
           break;
         }
@@ -212,7 +238,16 @@ export class Decorator {
           next(x + dx, y + dy, z + dz);
           break;
         }
+        case 'surface_water_depth_filter': {
+          if (world.height(x, z, 'surfaceTop') - world.height(x, z, 'floor') <= m.max_water_depth) next(x, y, z);
+          break;
+        }
         case 'block_predicate_filter': {
+          if (m.predicate.type === 'minecraft:would_survive') {
+            // Every sapling placed by the tree features needs the dirt tag below (BushBlock.mayPlaceOn).
+            if (SOIL.has(world.block(x, y - 1, z))) next(x, y, z);
+            break;
+          }
           if (world.block(x, y, z) !== VoxelType.AIR) break;
           if (JSON.stringify(m.predicate).includes('podzol') && world.block(x, y - 1, z) === VoxelType.PODZOL) break;
           next(x, y, z);
@@ -225,6 +260,40 @@ export class Decorator {
   }
 
   private place(topName: string, feature: any, r: Rng, x: number, y: number, z: number, world: DecorationWorld, accept?: (x: number, z: number) => boolean) {
+    if (feature.type === 'random_selector') {
+      for (const e of feature.features) {
+        if (r.nextFloat() < Math.fround(e.chance)) {
+          this.placeFeature(topName, e.feature, e.placement, r, x, y, z, world, accept);
+          return;
+        }
+      }
+      this.placeFeature(topName, feature.default.feature, feature.default.placement, r, x, y, z, world, accept);
+      return;
+    }
+    if (feature.type === 'weighted_random_selector') {
+      let total = 0;
+      for (const e of feature.features) total += e.weight;
+      let roll = r.nextIntBounded(total);
+      for (const e of feature.features) {
+        roll -= e.weight;
+        if (roll < 0) {
+          this.placeFeature(topName, e.feature, e.placement, r, x, y, z, world, accept);
+          return;
+        }
+      }
+      return;
+    }
+    if (feature.type === 'none') return;
+    if (feature.type === 'tree') {
+      const tw: TreeWorld = {
+        minY: world.minY,
+        maxY: world.maxY,
+        block: (bx, by, bz) => world.block(bx, by, bz),
+        set: (bx, by, bz, t) => { if (!accept || accept(bx, bz)) world.set(bx, by, bz, t); },
+      };
+      placeTree(feature, r, x, y, z, tw, sampleInt);
+      return;
+    }
     if (feature.type === 'simple_random_selector') {
       const pick = feature.features[r.nextIntBounded(feature.features.length)];
       this.placeFeature(topName, pick.feature, pick.placement, r, x, y, z, world, accept);

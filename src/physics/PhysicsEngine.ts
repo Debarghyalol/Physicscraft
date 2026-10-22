@@ -1437,6 +1437,9 @@ export class PhysicsEngine {
   /**
    * Main Simulation Step
    */
+  /** True while the player is held waiting for the terrain (and its trees) under them. */
+  private playerHeld = true;
+
   public step(deltaTime: number, playerInput?: PlayerInput) {
     if (!this.isReady || !this.world) return;
 
@@ -1447,7 +1450,19 @@ export class PhysicsEngine {
       // Hold the player in place until the terrain under them exists; otherwise they fall through the empty
       // (unloaded) column and end up underground once it streams in.
       const cur = this.player.getPosition();
-      if (this.voxelWorld.hasColumnAt(cur.x, cur.z)) this.player.update(scaledDt, playerInput);
+      if (this.voxelWorld.isColumnSettled(cur.x, cur.z)) {
+        if (this.playerHeld) {
+          // Trees may have grown over the spawn point while the terrain streamed in: step up to the first free spot.
+          this.playerHeld = false;
+          const vw = this.voxelWorld;
+          let y = Math.floor(cur.y);
+          for (let n = 0; n < 128 && (vw.isSolidAt(cur.x, y, cur.z) || vw.isSolidAt(cur.x, y + 1, cur.z)); n++) y++;
+          if (y > Math.floor(cur.y)) this.player.teleport(cur.x, y, cur.z);
+        }
+        this.player.update(scaledDt, playerInput);
+      } else {
+        this.playerHeld = true;
+      }
       const pos = this.player.getPosition();
       this.voxelWorld.updatePlayerPosition(pos.x, pos.z);
       this.voxelWorld.update();

@@ -72,9 +72,36 @@ const providerBlocks = (p) => {
   if (p.type === 'weighted') return p.entries.map((e) => e.state);
   return [...(p.states ?? []), ...(p.high_states ?? []), ...(p.low_states ?? []), ...(p.default_state ? [p.default_state] : [])];
 };
+const cleanMod = (m) => ({ ...m, type: strip(m.type) });
+const TRUNK_TYPES = new Set(['straight_trunk_placer', 'giant_trunk_placer', 'mega_jungle_trunk_placer', 'bending_trunk_placer', 'forking_trunk_placer',
+  'dark_oak_trunk_placer', 'fancy_trunk_placer', 'cherry_trunk_placer', 'poplar_trunk_placer']);
+const FOLIAGE_TYPES = new Set(['blob_foliage_placer', 'fancy_foliage_placer', 'bush_foliage_placer', 'acacia_foliage_placer', 'jungle_foliage_placer',
+  'pine_foliage_placer', 'spruce_foliage_placer', 'dark_oak_foliage_placer', 'mega_pine_foliage_placer', 'cherry_foliage_placer', 'poplar_foliage_placer']);
+const LOGS = new Set(['oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'pale_oak_log', 'poplar_log']);
+const LEAVES = new Set(['oak_leaves', 'spruce_leaves', 'birch_leaves', 'jungle_leaves', 'acacia_leaves', 'dark_oak_leaves', 'cherry_leaves', 'pale_oak_leaves', 'red_poplar_leaves', 'orange_poplar_leaves', 'yellow_poplar_leaves']);
+const stripType = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, k === 'type' ? strip(v) : stripType(v)])) : o);
+const resolveTree = (f) => {
+  const trunk = f.trunk_provider?.id && strip(f.trunk_provider.id);
+  const foliage = f.foliage_provider?.id && strip(f.foliage_provider.id);
+  if (!LOGS.has(trunk) || !LEAVES.has(foliage) || f.root_placer) return null;
+  const tp = stripType(f.trunk_placer), fp = stripType(f.foliage_placer);
+  if (!TRUNK_TYPES.has(tp.type) || !FOLIAGE_TYPES.has(fp.type)) return null;
+  const decorators = [];
+  for (const d of f.decorators ?? []) {
+    const t = strip(d.type);
+    if (t === 'beehive') decorators.push({ type: t, probability: d.probability });
+    else if (t === 'alter_ground') decorators.push({ type: t });
+  }
+  return { type: 'tree', trunk, foliage, trunk_placer: tp, foliage_placer: fp, size: stripType(f.minimum_size), ignore_vines: !!f.ignore_vines, decorators };
+};
+const resolvePlaced = (ref) => {
+  const p = typeof ref === 'string' ? placed[strip(ref)] : ref;
+  if (!p) return { feature: { type: 'none' }, placement: [] };
+  const feature = resolveFeature(p.feature) ?? { type: 'none' };
+  return { feature, placement: (p.placement ?? []).map(cleanMod) };
+};
 const resolveFeature = (f) => {
   if (typeof f === 'string') f = features[strip(f)];
-  else if (f.type !== undefined && f.config === undefined && f.to_place === undefined && f.features === undefined) return null;
   if (!f) return null;
   const t = strip(f.type);
   if (t === 'simple_block') {
@@ -90,21 +117,35 @@ const resolveFeature = (f) => {
     if (list.some((x) => !x)) return null;
     return { type: t, features: list, blocks: list.flatMap((x) => x.feature.blocks) };
   }
+  if (t === 'tree') return resolveTree(f);
+  if (t === 'weighted_random_selector') {
+    const list = f.features.map((e) => ({ weight: e.weight, ...resolvePlaced(e.data) }));
+    if (!list.some((x) => x.feature.type !== 'none')) return null;
+    return { type: t, features: list, blocks: [] };
+  }
+  if (t === 'random_selector') {
+    const list = f.features.map((e) => ({ chance: e.chance, ...resolvePlaced(e.feature) }));
+    const def = resolvePlaced(f.default);
+    const live = (x) => x.feature.type !== 'none';
+    if (!live(def) && !list.some(live)) return null;
+    return { type: t, features: list, default: def, blocks: [] };
+  }
   return null;
 };
-const cleanMod = (m) => ({ ...m, type: strip(m.type) });
 
+const hasTree = (f) => f.type === 'tree' || ((f.type === 'random_selector' || f.type === 'weighted_random_selector') && [f.default, ...f.features].filter(Boolean).some((x) => hasTree(x.feature)));
 const out = {};
 for (const name of firstSeen.keys()) {
   const p = placed[name];
   if (!p || firstSeen.get(name).step !== 9) continue;
   const feat = resolveFeature(p.feature);
-  if (!feat || !feat.blocks.every((b) => SUPPORTED.has(b))) continue;
+  if (!feat || !(feat.blocks ?? []).every((b) => SUPPORTED.has(b))) continue;
+  if ((feat.type === 'random_selector' || feat.type === 'weighted_random_selector') && !hasTree(feat)) continue;
   // Only the simple ground-cover placements we implement.
   const mods = p.placement.map(cleanMod);
-  const okMods = new Set(['count', 'in_square', 'heightmap', 'biome', 'rarity_filter', 'noise_threshold_count', 'offset', 'block_predicate_filter']);
+  const okMods = new Set(['count', 'in_square', 'heightmap', 'biome', 'rarity_filter', 'noise_threshold_count', 'offset', 'block_predicate_filter', 'surface_water_depth_filter']);
   if (!mods.every((m) => okMods.has(m.type))) continue;
-  const bad = mods.some((m) => m.type === 'block_predicate_filter' && JSON.stringify(m.predicate).includes('podzol') === false && m.predicate.type !== 'minecraft:matching_block_tag');
+  const bad = mods.some((m) => m.type === 'block_predicate_filter' && JSON.stringify(m.predicate).includes('podzol') === false && m.predicate.type !== 'minecraft:matching_block_tag' && m.predicate.type !== 'minecraft:would_survive');
   if (bad) continue;
   const { blocks, ...featureOut } = feat;
   out[name] = { ...orderOf.get(name), feature: JSON.parse(JSON.stringify(featureOut, (k, v) => (k === 'blocks' ? undefined : v))), placement: mods };
